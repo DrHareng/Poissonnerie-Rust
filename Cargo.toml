@@ -1,0 +1,35 @@
+[package]
+name = "poissonnerie-elo"
+version = "0.1.0"
+edition = "2021"
+description = "Application de classement ELO"
+
+[dependencies]
+anyhow = "1"
+axum = "0.8"
+clap = { version = "4", features = ["derive"] }
+dotenvy = "0.15"
+reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "rustls-tls"] }
+rusqlite = { version = "0.32", features = ["bundled"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+tower-http = { version = "0.6", features = ["cors"] }
+tower-sessions = "0.14"
+urlencoding = "2"
+
+[lib]
+name = "poissonnerie_elo"
+path = "src/lib.rs"
+
+[[bin]]
+name = "poissonnerie-elo"
+path = "src/main.rs"
+
+[[bin]]
+name = "poissonnerie-server"
+path = "src/bin/server.rs"
+
+[[bin]]
+name = "poissonnerie-sync-armies"
+path = "src/bin/sync-armies.rs"
