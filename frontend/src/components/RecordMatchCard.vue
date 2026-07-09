@@ -15,13 +15,7 @@ import {
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import SectorialPicker from '@/components/SectorialPicker.vue'
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select'
+import PlayerPicker from '@/components/PlayerPicker.vue'
 
 const props = defineProps<{
   players: RankedPlayer[]
@@ -257,20 +251,12 @@ async function submit() {
 
             <div class="grid gap-2">
               <Label>Joueur</Label>
-              <Select v-model="player1" :disabled="loading || playerOptions.length < 2">
-                <SelectTrigger class="w-full">
-                  <SelectValue placeholder="Choisir un joueur" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem
-                    v-for="option in player1Options"
-                    :key="option.value"
-                    :value="option.value"
-                  >
-                    {{ option.label }}
-                  </SelectItem>
-                </SelectContent>
-              </Select>
+              <PlayerPicker
+                v-model="player1"
+                :options="player1Options"
+                :disabled="loading || playerOptions.length < 2"
+                placeholder="Tapez pour chercher un joueur"
+              />
             </div>
 
             <div class="grid gap-2">
@@ -320,20 +306,12 @@ async function submit() {
 
             <div class="grid gap-2">
               <Label>Joueur</Label>
-              <Select v-model="player2" :disabled="loading || playerOptions.length < 2">
-                <SelectTrigger class="w-full">
-                  <SelectValue placeholder="Choisir un joueur" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem
-                    v-for="option in player2Options"
-                    :key="option.value"
-                    :value="option.value"
-                  >
-                    {{ option.label }}
-                  </SelectItem>
-                </SelectContent>
-              </Select>
+              <PlayerPicker
+                v-model="player2"
+                :options="player2Options"
+                :disabled="loading || playerOptions.length < 2"
+                placeholder="Tapez pour chercher un joueur"
+              />
             </div>
 
             <div class="grid gap-2">

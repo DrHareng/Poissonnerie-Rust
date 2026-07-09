@@ -2,16 +2,27 @@
 import { computed, nextTick, ref, watch } from 'vue'
 import { onClickOutside, useElementBounding, useEventListener } from '@vueuse/core'
 import { ChevronsUpDown } from '@lucide/vue'
-import type { Army } from '@/types/elo'
 import { Input } from '@/components/ui/input'
 import { useSearchablePickerKeyboard } from '@/composables/useSearchablePickerKeyboard'
 
-const props = defineProps<{
-  modelValue?: string
-  armies: Army[]
-  disabled?: boolean
-  placeholder?: string
-}>()
+export interface PlayerPickerOption {
+  value: string
+  label: string
+}
+
+const props = withDefaults(
+  defineProps<{
+    modelValue?: string
+    options: PlayerPickerOption[]
+    disabled?: boolean
+    placeholder?: string
+    emptyMessage?: string
+  }>(),
+  {
+    placeholder: 'Tapez pour chercher un joueur',
+    emptyMessage: 'Aucun joueur trouvé.',
+  },
+)
 
 const emit = defineEmits<{
   'update:modelValue': [value: string | undefined]
@@ -30,18 +41,20 @@ const dropdownStyle = computed(() => ({
   width: `${width.value}px`,
 }))
 
-const selectedArmy = computed(() =>
-  props.armies.find((army) => String(army.id) === props.modelValue),
+const selectedOption = computed(() =>
+  props.options.find((option) => option.value === props.modelValue),
 )
 
-const filteredArmies = computed(() => {
+const filteredOptions = computed(() => {
   const needle = query.value.trim().toLowerCase()
   if (!needle) {
-    return props.armies
+    return props.options
   }
 
-  return props.armies.filter((army) =>
-    army.name.toLowerCase().includes(needle),
+  return props.options.filter(
+    (option) =>
+      option.label.toLowerCase().includes(needle)
+      || option.value.toLowerCase().includes(needle),
   )
 })
 
@@ -50,7 +63,7 @@ const inputValue = computed({
     if (open.value) {
       return query.value
     }
-    return selectedArmy.value?.name ?? ''
+    return selectedOption.value?.label ?? ''
   },
   set(value: string | number) {
     query.value = String(value)
@@ -60,9 +73,9 @@ const inputValue = computed({
 
 const { handleKeydown, handleBlur, isHighlighted, setOptionRef } = useSearchablePickerKeyboard({
   open,
-  items: filteredArmies,
+  items: filteredOptions,
   disabled: computed(() => !!props.disabled),
-  onSelect: selectArmy,
+  onSelect: selectOption,
   onClose: closePicker,
   onOpen: openPicker,
 })
@@ -90,6 +103,13 @@ watch(
   },
 )
 
+watch(
+  () => props.options,
+  () => {
+    syncQueryWithSelection()
+  },
+)
+
 watch(open, async (isOpen) => {
   if (isOpen) {
     await nextTick()
@@ -98,7 +118,7 @@ watch(open, async (isOpen) => {
 })
 
 function syncQueryWithSelection() {
-  query.value = selectedArmy.value?.name ?? ''
+  query.value = selectedOption.value?.label ?? ''
 }
 
 function openPicker() {
@@ -114,9 +134,9 @@ function closePicker() {
   syncQueryWithSelection()
 }
 
-function selectArmy(army: Army) {
-  emit('update:modelValue', String(army.id))
-  query.value = army.name
+function selectOption(option: PlayerPickerOption) {
+  emit('update:modelValue', option.value)
+  query.value = option.label
   open.value = false
 }
 
@@ -125,7 +145,7 @@ function onInput() {
     open.value = true
   }
 
-  if (selectedArmy.value && query.value !== selectedArmy.value.name) {
+  if (selectedOption.value && query.value !== selectedOption.value.label) {
     emit('update:modelValue', undefined)
   }
 }
@@ -138,13 +158,6 @@ function onInput() {
       class="searchable-picker-trigger"
       :class="{ 'searchable-picker-trigger-disabled': disabled }"
     >
-      <img
-        v-if="selectedArmy && !open"
-        :src="selectedArmy.logo_url"
-        :alt="selectedArmy.name"
-        class="army-logo shrink-0"
-      />
-
       <Input
         v-model="inputValue"
         :placeholder="placeholder"
@@ -175,26 +188,25 @@ function onInput() {
         @mousedown.prevent
       >
         <p
-          v-if="filteredArmies.length === 0"
+          v-if="filteredOptions.length === 0"
           class="px-3 py-2 text-sm text-muted-foreground"
         >
-          Aucune sectorielle trouvée.
+          {{ emptyMessage }}
         </p>
 
         <button
-          v-for="(army, index) in filteredArmies"
-          :key="army.id"
+          v-for="(option, index) in filteredOptions"
+          :key="option.value"
           :ref="(element) => setOptionRef(element as HTMLElement | null, index)"
           type="button"
           class="searchable-picker-option"
           :class="{
-            'searchable-picker-option-active': String(army.id) === modelValue && !isHighlighted(index),
+            'searchable-picker-option-active': option.value === modelValue && !isHighlighted(index),
             'searchable-picker-option-highlighted': isHighlighted(index),
           }"
-          @click="selectArmy(army)"
+          @click="selectOption(option)"
         >
-          <img :src="army.logo_url" :alt="army.name" class="army-logo shrink-0" />
-          <span class="truncate">{{ army.name }}</span>
+          <span class="truncate">{{ option.label }}</span>
         </button>
       </div>
     </Teleport>

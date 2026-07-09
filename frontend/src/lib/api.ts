@@ -12,6 +12,7 @@ import type {
   Scenario,
   Tournament,
   TournamentDetail,
+  TournamentListEntry,
   TournamentMatch,
   TournamentRegistration,
 } from '@/types/elo'
@@ -162,8 +163,8 @@ export function fetchScenarios(q?: string, limit = 20): Promise<Scenario[]> {
   return request<Scenario[]>(`/api/scenarios?${params}`)
 }
 
-export function fetchTournaments(): Promise<Tournament[]> {
-  return request<Tournament[]>('/api/tournaments')
+export function fetchTournaments(): Promise<TournamentListEntry[]> {
+  return request<TournamentListEntry[]>('/api/tournaments')
 }
 
 export function fetchTournament(id: number): Promise<TournamentDetail> {
@@ -244,6 +245,21 @@ export function finalizePools(id: number): Promise<Tournament> {
   return request<Tournament>(`/api/tournaments/${id}/finalize-pools`, { method: 'POST' })
 }
 
+export function setupTournamentBracket(
+  id: number,
+  matches: {
+    bracket_slot: number
+    player1: string
+    player2: string
+    quarter_player1?: string
+  }[],
+): Promise<TournamentMatch[]> {
+  return request<TournamentMatch[]>(`/api/tournaments/${id}/setup-bracket`, {
+    method: 'POST',
+    body: JSON.stringify({ matches }),
+  })
+}
+
 export function generateBracket(id: number): Promise<TournamentMatch[]> {
   return request<TournamentMatch[]>(`/api/tournaments/${id}/generate-bracket`, {
     method: 'POST',
@@ -279,6 +295,27 @@ export function forfeitTournamentMatch(
   return request<TournamentMatch>(`/api/tournament-matches/${matchId}/forfeit`, {
     method: 'POST',
     body: JSON.stringify({ forfeit_player }),
+  })
+}
+
+export function unplayedTournamentMatch(matchId: number): Promise<TournamentMatch> {
+  return request<TournamentMatch>(`/api/tournament-matches/${matchId}/unplayed`, {
+    method: 'POST',
+  })
+}
+
+export function correctTournamentMatch(
+  matchId: number,
+  payload: {
+    player1_objectives: number
+    player2_objectives: number
+    player1_survivors?: number
+    player2_survivors?: number
+  },
+): Promise<TournamentMatch> {
+  return request<TournamentMatch>(`/api/tournament-matches/${matchId}/correct`, {
+    method: 'POST',
+    body: JSON.stringify(payload),
   })
 }
 

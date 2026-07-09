@@ -10,6 +10,12 @@ import { pageTitle } from '@/lib/pageTitle'
 
 export const router = createRouter({
   history: createWebHistory(),
+  scrollBehavior(to) {
+    if (to.hash) {
+      return { el: to.hash, top: 88, behavior: 'smooth' }
+    }
+    return { top: 0 }
+  },
   routes: [
     { path: '/', redirect: '/classement' },
     {

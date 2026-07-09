@@ -4,8 +4,10 @@ import { useRouter } from 'vue-router'
 import { Plus, Medal } from '@lucide/vue'
 import { toast } from 'vue-sonner'
 import { createTournament, fetchTournaments } from '@/lib/api'
-import type { Tournament } from '@/types/elo'
+import { formatRegistrationSummary, topFourDisplayRows } from '@/lib/tournamentDisplay'
+import type { TournamentListEntry } from '@/types/elo'
 import { useAuth } from '@/composables/useAuth'
+import PlayerLink from '@/components/PlayerLink.vue'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import {
@@ -28,20 +30,12 @@ import {
 const router = useRouter()
 const { isAdmin } = useAuth()
 
-const tournaments = ref<Tournament[]>([])
+const tournaments = ref<TournamentListEntry[]>([])
 const loading = ref(true)
 const showCreate = ref(false)
 const newName = ref('')
 const newFormat = ref('quarters_direct')
 const creating = ref(false)
-
-const statusLabels: Record<string, string> = {
-  draft: 'Brouillon',
-  registration_open: 'Inscriptions ouvertes',
-  registration_closed: 'Inscriptions fermées',
-  started: 'En cours',
-  completed: 'Terminé',
-}
 
 async function refresh() {
   loading.value = true
@@ -153,17 +147,48 @@ onMounted(refresh)
             v-for="tournament in tournaments"
             :key="tournament.id"
             type="button"
-            class="flex items-center justify-between rounded-lg border p-4 text-left transition hover:border-primary/50 hover:bg-muted/30"
+            class="flex items-start justify-between gap-4 rounded-lg border p-4 text-left transition hover:border-primary/50 hover:bg-muted/30"
             @click="router.push({ name: 'tournoi', params: { id: tournament.id } })"
           >
-            <div>
+            <div class="min-w-0 space-y-2">
               <p class="font-medium">{{ tournament.name }}</p>
               <p class="text-sm text-muted-foreground">
-                {{ tournament.pool_count }} poules
+                {{ formatRegistrationSummary(tournament.approved_count, tournament.waitlist_count) }}
               </p>
+              <ol
+                v-if="tournament.status === 'completed' && tournament.top_four?.length"
+                class="space-y-1 text-sm"
+              >
+                <li
+                  v-for="row in topFourDisplayRows(tournament.top_four)"
+                  :key="row.label"
+                  class="flex items-center gap-2"
+                >
+                  <span class="w-8 shrink-0 tabular-nums text-muted-foreground">
+                    {{ row.label }}
+                  </span>
+                  <span class="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5">
+                    <template
+                      v-for="(entry, index) in row.entries"
+                      :key="entry.player_name"
+                    >
+                      <span
+                        v-if="index > 0"
+                        class="text-muted-foreground"
+                      >
+                        ·
+                      </span>
+                      <PlayerLink
+                        :name="entry.player_name"
+                        :display-name="entry.player_display_name"
+                      />
+                    </template>
+                  </span>
+                </li>
+              </ol>
             </div>
-            <Badge variant="outline">
-              {{ statusLabels[tournament.status] ?? tournament.status }}
+            <Badge variant="outline" class="shrink-0">
+              {{ tournament.display_status }}
             </Badge>
           </button>
         </div>

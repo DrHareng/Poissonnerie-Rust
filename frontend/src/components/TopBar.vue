@@ -1,9 +1,28 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { useRoute } from 'vue-router'
-import { LogIn, LogOut, Trophy, Shield, Swords, Medal } from '@lucide/vue'
+import {
+  BarChart3,
+  ChevronDown,
+  LogIn,
+  LogOut,
+  Medal,
+  Shield,
+  Swords,
+  Trophy,
+  User,
+} from '@lucide/vue'
+import {
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuPortal,
+  DropdownMenuRoot,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from 'reka-ui'
 import { useAuth } from '@/composables/useAuth'
 import { Button } from '@/components/ui/button'
+import { cn } from '@/lib/utils'
 
 const route = useRoute()
 const { user, player, isAuthenticated, hasPlayer, loading, login, logout } = useAuth()
@@ -16,6 +35,29 @@ const links = [
 ]
 
 const activePath = computed(() => route.path)
+
+const playerPageRoute = computed(() =>
+  hasPlayer.value && player.value
+    ? { name: 'joueur' as const, params: { name: player.value.name } }
+    : null,
+)
+
+const profileRoute = computed(() =>
+  playerPageRoute.value ? { ...playerPageRoute.value, hash: '#profil' } : null,
+)
+
+const statsRoute = computed(() =>
+  playerPageRoute.value ? { ...playerPageRoute.value, hash: '#stats' } : null,
+)
+
+const menuItemClass = cn(
+  'relative flex w-full cursor-default select-none items-center gap-2 rounded-md px-2 py-1.5 text-sm outline-none',
+  'transition-colors hover:bg-primary/10 hover:text-primary focus:bg-primary/10 focus:text-primary',
+)
+
+async function handleLogout() {
+  await logout()
+}
 </script>
 
 <template>
@@ -46,11 +88,10 @@ const activePath = computed(() => route.path)
         <div v-if="loading" class="text-sm text-muted-foreground">
           Connexion...
         </div>
-        <div v-else-if="isAuthenticated && user" class="flex items-center gap-3">
-          <RouterLink
-            v-if="hasPlayer && player"
-            :to="{ name: 'joueur', params: { name: player.name } }"
-            class="flex min-w-0 items-center gap-2 rounded-md transition-opacity hover:opacity-85"
+        <DropdownMenuRoot v-else-if="isAuthenticated && user">
+          <DropdownMenuTrigger
+            class="topbar-user-trigger"
+            aria-label="Menu compte"
           >
             <img
               :src="user.effective_avatar_url"
@@ -58,20 +99,34 @@ const activePath = computed(() => route.path)
               class="size-8 rounded-full border border-primary/30 object-cover"
             />
             <span class="truncate text-sm font-medium">{{ user.effective_display_name }}</span>
-          </RouterLink>
-          <div v-else class="flex min-w-0 items-center gap-2">
-            <img
-              :src="user.effective_avatar_url"
-              :alt="user.effective_display_name"
-              class="size-8 rounded-full border border-primary/30 object-cover"
-            />
-            <span class="truncate text-sm font-medium">{{ user.effective_display_name }}</span>
-          </div>
-          <Button variant="outline" size="sm" @click="logout">
-            <LogOut class="size-4" />
-            Déconnexion
-          </Button>
-        </div>
+            <ChevronDown class="size-4 shrink-0 opacity-60" />
+          </DropdownMenuTrigger>
+          <DropdownMenuPortal>
+            <DropdownMenuContent
+              align="end"
+              :side-offset="8"
+              class="topbar-user-menu"
+            >
+              <DropdownMenuItem v-if="profileRoute" as-child>
+                <RouterLink :to="profileRoute" :class="menuItemClass">
+                  <User class="size-4" />
+                  Mon profil
+                </RouterLink>
+              </DropdownMenuItem>
+              <DropdownMenuItem v-if="statsRoute" as-child>
+                <RouterLink :to="statsRoute" :class="menuItemClass">
+                  <BarChart3 class="size-4" />
+                  Mes stats
+                </RouterLink>
+              </DropdownMenuItem>
+              <DropdownMenuSeparator v-if="hasPlayer" class="topbar-user-menu-separator" />
+              <DropdownMenuItem :class="menuItemClass" @select="handleLogout">
+                <LogOut class="size-4" />
+                Déconnexion
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenuPortal>
+        </DropdownMenuRoot>
         <Button v-else size="sm" @click="login">
           <LogIn class="size-4" />
           Connexion Discord

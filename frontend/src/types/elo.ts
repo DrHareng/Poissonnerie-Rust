@@ -146,6 +146,7 @@ export interface TournamentRegistration {
 export interface PoolPlayer {
   player_name: string
   player_display_name?: string | null
+  army_id?: number | null
   seed: number
   points: number
   objectives: number
@@ -181,11 +182,14 @@ export interface TournamentMatch {
   player2_tournament_points: number
   outcome?: MatchOutcome | null
   is_forfeit: boolean
+  is_unplayed?: boolean
   forfeit_player?: string | null
   forfeit_player_display_name?: string | null
   status: TournamentMatchStatus
   scenario_id?: number | null
   scenario_name?: string | null
+  player1_army_id?: number | null
+  player2_army_id?: number | null
   played_at?: number | null
 }
 
@@ -194,6 +198,23 @@ export interface TournamentDetail extends Tournament {
   players: unknown[]
   pools: Pool[]
   matches: TournamentMatch[]
+  approved_count: number
+  waitlist_count: number
+  display_status: string
+  top_four?: TournamentTopFourEntry[]
+}
+
+export interface TournamentTopFourEntry {
+  rank: number
+  player_name: string
+  player_display_name?: string | null
+}
+
+export interface TournamentListEntry extends Tournament {
+  approved_count: number
+  waitlist_count: number
+  display_status: string
+  top_four?: TournamentTopFourEntry[]
 }
 
 export interface PlayerTournamentResult {

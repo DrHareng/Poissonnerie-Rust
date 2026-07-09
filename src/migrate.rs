@@ -189,6 +189,13 @@ pub fn migrate(conn: &Connection) -> Result<()> {
         conn.execute("ALTER TABLE users ADD COLUMN local_avatar_url TEXT", [])?;
     }
 
+    if !column_exists(conn, "tournament_matches", "is_unplayed")? {
+        conn.execute(
+            "ALTER TABLE tournament_matches ADD COLUMN is_unplayed INTEGER NOT NULL DEFAULT 0",
+            [],
+        )?;
+    }
+
     conn.execute_batch(
         "
         DROP INDEX IF EXISTS idx_players_discord_id;

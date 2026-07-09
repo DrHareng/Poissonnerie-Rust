@@ -38,18 +38,24 @@ onMounted(() => {
   void ensureLoaded()
 })
 
+const rankedActivePlayers = computed(() =>
+  props.players
+    .filter((player) => player.wins + player.draws + player.losses > 0)
+    .map((player, index) => ({ ...player, rank: index + 1 })),
+)
+
 const filteredPlayers = computed(() => {
   const query = props.searchQuery?.trim().toLowerCase()
   if (!query) {
-    return props.players
+    return rankedActivePlayers.value
   }
-  return props.players.filter((player) =>
+  return rankedActivePlayers.value.filter((player) =>
     player.display_name.toLowerCase().includes(query)
     || player.name.toLowerCase().includes(query),
   )
 })
 
-const isEmpty = computed(() => props.players.length === 0)
+const isEmpty = computed(() => rankedActivePlayers.value.length === 0)
 const hasResults = computed(() => filteredPlayers.value.length > 0)
 
 function rankBadgeClass(rank: number) {

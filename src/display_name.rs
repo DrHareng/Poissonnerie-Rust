@@ -74,23 +74,51 @@ impl<'a> PlayerDisplayResolver<'a> {
         for pool in &mut detail.pools {
             for player in &mut pool.players {
                 player.player_display_name = Some(self.resolve(&player.player_name));
+                player.army_id = registration_army_id(&detail.registrations, &player.player_name)
+                    .or(player.army_id);
             }
         }
 
         for tournament_match in &mut detail.matches {
             if let Some(player1) = &tournament_match.player1 {
                 tournament_match.player1_display_name = Some(self.resolve(player1));
+                if tournament_match.player1_army_id.is_none() {
+                    tournament_match.player1_army_id =
+                        registration_army_id(&detail.registrations, player1);
+                }
             }
             if let Some(player2) = &tournament_match.player2 {
                 tournament_match.player2_display_name = Some(self.resolve(player2));
+                if tournament_match.player2_army_id.is_none() {
+                    tournament_match.player2_army_id =
+                        registration_army_id(&detail.registrations, player2);
+                }
             }
             if let Some(forfeit_player) = &tournament_match.forfeit_player {
                 tournament_match.forfeit_player_display_name = Some(self.resolve(forfeit_player));
             }
         }
 
+        for entry in &mut detail.top_four {
+            entry.player_display_name = Some(self.resolve(&entry.player_name));
+        }
+
         detail
     }
+}
+
+fn registration_army_id(
+    registrations: &[crate::tournament::TournamentRegistration],
+    player_name: &str,
+) -> Option<u32> {
+    registrations
+        .iter()
+        .find(|registration| {
+            registration
+                .player_name
+                .eq_ignore_ascii_case(player_name)
+        })
+        .and_then(|registration| registration.army_id)
 }
 
 #[derive(Debug, Clone, serde::Serialize)]

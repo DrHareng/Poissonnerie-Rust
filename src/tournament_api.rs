@@ -1,3 +1,5 @@
+use std::collections::{HashMap, HashSet};
+
 use axum::{
     extract::{Path, Query, State},
     http::StatusCode,
@@ -11,7 +13,7 @@ use crate::{
     api::{ApiError, AppState},
     auth,
     match_record::MatchScores,
-    player::RatingUpdate,
+    player::{MatchOutcome, RatingUpdate},
     store::Leaderboard,
     tournament::TournamentMatchStatus,
     User,
@@ -163,6 +165,7 @@ pub fn tournament_routes() -> axum::Router<AppState> {
             "/api/tournaments/{id}/finalize-pools",
             post(finalize_pools),
         )
+        .route("/api/tournaments/{id}/setup-bracket", post(setup_bracket))
         .route(
             "/api/tournaments/{id}/generate-bracket",
             post(generate_bracket),
@@ -178,6 +181,14 @@ pub fn tournament_routes() -> axum::Router<AppState> {
         .route(
             "/api/tournament-matches/{id}/forfeit",
             post(forfeit_tournament_match),
+        )
+        .route(
+            "/api/tournament-matches/{id}/unplayed",
+            post(unplayed_tournament_match),
+        )
+        .route(
+            "/api/tournament-matches/{id}/correct",
+            post(correct_tournament_match),
         )
         .route(
             "/api/players/{name}/tournaments",
@@ -198,12 +209,26 @@ async fn list_scenarios(
 
 async fn list_tournaments(
     State(state): State<AppState>,
-) -> Result<Json<Vec<crate::tournament::Tournament>>, ApiError> {
-    state
-        .tournaments
-        .list()
-        .map(Json)
-        .map_err(|error| ApiError::bad_request(error.to_string()))
+) -> Result<Json<Vec<crate::tournament::TournamentListEntry>>, ApiError> {
+    let entries = state.tournaments.list_entries().map_err(|error| {
+        ApiError::bad_request(error.to_string())
+    })?;
+
+    let board = state.board.lock().unwrap();
+    let resolver = crate::display_name::PlayerDisplayResolver::new(&board, state.users.as_ref());
+
+    Ok(Json(
+        entries
+            .into_iter()
+            .map(|mut entry| {
+                for top_entry in &mut entry.top_four {
+                    top_entry.player_display_name =
+                        Some(resolver.resolve(&top_entry.player_name));
+                }
+                entry
+            })
+            .collect(),
+    ))
 }
 
 async fn create_tournament(
@@ -424,6 +449,20 @@ async fn finalize_pools(
     Ok(Json(tournament))
 }
 
+async fn setup_bracket(
+    State(state): State<AppState>,
+    session: Session,
+    Path(id): Path<i64>,
+    Json(payload): Json<crate::tournament_store::SetupBracketRequest>,
+) -> Result<Json<Vec<crate::tournament::TournamentMatch>>, ApiError> {
+    require_admin(&state, &session).await?;
+    let matches = state
+        .tournaments
+        .setup_bracket(id, &payload)
+        .map_err(|error| ApiError::bad_request(error.to_string()))?;
+    Ok(Json(matches))
+}
+
 async fn generate_bracket(
     State(state): State<AppState>,
     session: Session,
@@ -531,6 +570,65 @@ async fn forfeit_tournament_match(
     Ok(Json(tm))
 }
 
+async fn unplayed_tournament_match(
+    State(state): State<AppState>,
+    session: Session,
+    Path(id): Path<i64>,
+) -> Result<Json<crate::tournament::TournamentMatch>, ApiError> {
+    let admin = require_admin(&state, &session).await?;
+    let tm = state
+        .tournaments
+        .declare_match_unplayed(id, admin.id, true)
+        .map_err(|error| ApiError::bad_request(error.to_string()))?;
+    Ok(Json(tm))
+}
+
+async fn correct_tournament_match(
+    State(state): State<AppState>,
+    session: Session,
+    Path(id): Path<i64>,
+    Json(payload): Json<SubmitMatchRequest>,
+) -> Result<Json<crate::tournament::TournamentMatch>, ApiError> {
+    require_admin(&state, &session).await?;
+
+    let before = state
+        .tournaments
+        .get_match(id)
+        .map_err(|error| ApiError::bad_request(error.to_string()))?
+        .ok_or_else(|| ApiError::bad_request("match introuvable"))?;
+
+    let old_outcome = before.outcome;
+    let tournament_id = before.tournament_id;
+    let old_bracket_snapshot = state
+        .tournaments
+        .bracket_elo_snapshot(tournament_id)
+        .map_err(|error| ApiError::bad_request(error.to_string()))?;
+
+    let (tm, _winner_changed) = state
+        .tournaments
+        .correct_match_score(id, &payload, state.k_factor)
+        .map_err(|error| ApiError::bad_request(error.to_string()))?;
+
+    let new_bracket_snapshot = state
+        .tournaments
+        .bracket_elo_snapshot(tournament_id)
+        .map_err(|error| ApiError::bad_request(error.to_string()))?;
+
+    sync_board_after_tournament_correction(
+        &state,
+        &old_bracket_snapshot,
+        &new_bracket_snapshot,
+        old_outcome,
+        tm.outcome,
+        tm.player1.as_deref().unwrap_or(""),
+        tm.player2.as_deref().unwrap_or(""),
+        tm.phase != crate::tournament::TournamentPhase::Pool,
+        before.is_forfeit || before.is_unplayed,
+    )?;
+
+    Ok(Json(tm))
+}
+
 async fn get_player_tournaments(
     State(state): State<AppState>,
     Path(name): Path<String>,
@@ -614,6 +712,104 @@ fn maybe_apply_bracket_match(
         .map_err(|error| ApiError::bad_request(error.to_string()))?;
 
     Ok(())
+}
+
+fn sync_board_after_tournament_correction(
+    state: &AppState,
+    old_snapshot: &HashMap<i64, (f64, f64, String, String)>,
+    new_snapshot: &HashMap<i64, (f64, f64, String, String)>,
+    old_outcome: Option<MatchOutcome>,
+    new_outcome: Option<MatchOutcome>,
+    player1: &str,
+    player2: &str,
+    is_bracket_match: bool,
+    skip_old_outcome_removal: bool,
+) -> Result<(), ApiError> {
+    let mut board = state.board.lock().unwrap();
+    let match_ids: HashSet<i64> = old_snapshot
+        .keys()
+        .chain(new_snapshot.keys())
+        .copied()
+        .collect();
+
+    for match_id in match_ids {
+        let (old_d1, old_d2, p1, p2) = old_snapshot
+            .get(&match_id)
+            .cloned()
+            .unwrap_or((0.0, 0.0, String::new(), String::new()));
+        let (new_d1, new_d2, new_p1, new_p2) = new_snapshot
+            .get(&match_id)
+            .cloned()
+            .unwrap_or((0.0, 0.0, String::new(), String::new()));
+
+        let p1 = if p1.is_empty() { new_p1 } else { p1 };
+        let p2 = if p2.is_empty() { new_p2 } else { p2 };
+
+        if let Ok(player) = board.get_player_mut(&p1) {
+            player.rating += new_d1 - old_d1;
+        }
+        if let Ok(player) = board.get_player_mut(&p2) {
+            player.rating += new_d2 - old_d2;
+        }
+    }
+
+    if is_bracket_match && old_outcome != new_outcome {
+        if let (Some(old_outcome), Some(new_outcome)) = (old_outcome, new_outcome) {
+            if !skip_old_outcome_removal {
+                adjust_board_outcome(&mut board, player1, player2, old_outcome, false)
+                    .map_err(|error| ApiError::bad_request(error.to_string()))?;
+            }
+            adjust_board_outcome(&mut board, player1, player2, new_outcome, true)
+                .map_err(|error| ApiError::bad_request(error.to_string()))?;
+        }
+    }
+
+    board
+        .save(&state.db_path)
+        .map_err(|error| ApiError::bad_request(error.to_string()))?;
+    Ok(())
+}
+
+fn adjust_board_outcome(
+    board: &mut Leaderboard,
+    player1: &str,
+    player2: &str,
+    outcome: MatchOutcome,
+    apply: bool,
+) -> anyhow::Result<()> {
+    use crate::elo::MatchScore;
+
+    let delta = if apply { 1i32 } else { -1i32 };
+    let score1 = outcome.score_for_player1();
+    let score2 = match score1 {
+        MatchScore::Win => MatchScore::Loss,
+        MatchScore::Draw => MatchScore::Draw,
+        MatchScore::Loss => MatchScore::Win,
+    };
+
+    adjust_player_match_count(board.get_player_mut(player1)?, score1, delta);
+    adjust_player_match_count(board.get_player_mut(player2)?, score2, delta);
+    Ok(())
+}
+
+fn adjust_player_match_count(
+    player: &mut crate::player::Player,
+    score: crate::elo::MatchScore,
+    delta: i32,
+) {
+    use crate::elo::MatchScore;
+
+    match score {
+        MatchScore::Win => {
+            player.wins = (player.wins as i32 + delta).max(0) as u32;
+        }
+        MatchScore::Draw => {
+            player.draws = (player.draws as i32 + delta).max(0) as u32;
+        }
+        MatchScore::Loss => {
+            player.losses = (player.losses as i32 + delta).max(0) as u32;
+        }
+    }
 }
 
 pub async fn ranking_with_stars(state: &AppState) -> Result<Vec<RankedPlayerWithStars>, ApiError> {

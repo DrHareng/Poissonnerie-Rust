@@ -214,6 +214,8 @@ pub struct PoolPlayer {
     pub player_name: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub player_display_name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub army_id: Option<u32>,
     pub seed: u8,
     pub points: u32,
     pub objectives: u32,
@@ -244,6 +246,8 @@ pub struct TournamentMatch {
     pub player2_tournament_points: u8,
     pub outcome: Option<MatchOutcome>,
     pub is_forfeit: bool,
+    #[serde(default)]
+    pub is_unplayed: bool,
     pub forfeit_player: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub forfeit_player_display_name: Option<String>,
@@ -274,6 +278,25 @@ pub struct PlayerTournamentResult {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct TournamentTopFourEntry {
+    pub rank: u32,
+    pub player_name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub player_display_name: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct TournamentListEntry {
+    #[serde(flatten)]
+    pub tournament: Tournament,
+    pub approved_count: u32,
+    pub waitlist_count: u32,
+    pub display_status: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub top_four: Vec<TournamentTopFourEntry>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct TournamentDetail {
     #[serde(flatten)]
     pub tournament: Tournament,
@@ -281,6 +304,11 @@ pub struct TournamentDetail {
     pub players: Vec<TournamentPlayerSnapshot>,
     pub pools: Vec<Pool>,
     pub matches: Vec<TournamentMatch>,
+    pub approved_count: u32,
+    pub waitlist_count: u32,
+    pub display_status: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub top_four: Vec<TournamentTopFourEntry>,
 }
 
 pub fn tournament_points(
@@ -387,6 +415,165 @@ pub fn pool_round_robin_pairs(player_count: usize) -> Vec<(usize, usize)> {
     pairs
 }
 
+pub fn compute_display_status(
+    tournament: &Tournament,
+    matches: &[TournamentMatch],
+) -> String {
+    match tournament.status {
+        TournamentStatus::Draft => "À venir".into(),
+        TournamentStatus::RegistrationOpen => "Inscription ouvertes".into(),
+        TournamentStatus::RegistrationClosed => "Inscriptions closes".into(),
+        TournamentStatus::Completed => "Terminé".into(),
+        TournamentStatus::Started => compute_started_display_status(tournament, matches),
+    }
+}
+
+fn compute_started_display_status(
+    tournament: &Tournament,
+    matches: &[TournamentMatch],
+) -> String {
+    if tournament.pools_finalized_at.is_none() {
+        return "Phase de poules".into();
+    }
+
+    let phases = [
+        (TournamentPhase::RoundOf16, "Seizièmes de finale"),
+        (TournamentPhase::Quarter, "Quart de finale"),
+        (TournamentPhase::Semi, "Demi-finale"),
+        (TournamentPhase::Final, "Finale"),
+    ];
+
+    for (phase, label) in phases {
+        let phase_matches: Vec<_> = matches
+            .iter()
+            .filter(|m| m.phase == phase)
+            .collect();
+        if phase_matches.is_empty() {
+            continue;
+        }
+        if phase_matches
+            .iter()
+            .any(|m| m.status != TournamentMatchStatus::Confirmed)
+        {
+            return label.into();
+        }
+    }
+
+    "Finale".into()
+}
+
+/// Vainqueur d'un match d'arbre. En cas de nul aux objectifs, le joueur avec le plus
+/// de points de survivants l'emporte.
+pub fn bracket_match_winner(tm: &TournamentMatch) -> Option<String> {
+    let outcome = tm.outcome?;
+    let p1 = tm.player1.clone()?;
+    let p2 = tm.player2.clone()?;
+    match outcome {
+        MatchOutcome::Player1Win => Some(p1),
+        MatchOutcome::Player2Win => Some(p2),
+        MatchOutcome::Draw => {
+            if tm.player1_survivors > tm.player2_survivors {
+                Some(p1)
+            } else if tm.player2_survivors > tm.player1_survivors {
+                Some(p2)
+            } else {
+                None
+            }
+        }
+    }
+}
+
+pub fn bracket_match_loser(tm: &TournamentMatch) -> Option<String> {
+    let winner = bracket_match_winner(tm)?;
+    let p1 = tm.player1.clone()?;
+    let p2 = tm.player2.clone()?;
+    if winner.eq_ignore_ascii_case(&p1) {
+        Some(p2)
+    } else {
+        Some(p1)
+    }
+}
+
+pub fn compute_top_four(matches: &[TournamentMatch]) -> Vec<TournamentTopFourEntry> {
+    let Some(final_match) = matches.iter().find(|m| {
+        m.phase == TournamentPhase::Final
+            && m.status == TournamentMatchStatus::Confirmed
+            && !m.is_forfeit
+    }) else {
+        return Vec::new();
+    };
+
+    let Some(player1) = final_match.player1.clone() else {
+        return Vec::new();
+    };
+    let Some(player2) = final_match.player2.clone() else {
+        return Vec::new();
+    };
+    let Some(outcome) = final_match.outcome else {
+        return Vec::new();
+    };
+
+    let (first, second) = match outcome {
+        MatchOutcome::Player1Win => (player1, player2),
+        MatchOutcome::Player2Win => (player2, player1),
+        MatchOutcome::Draw => {
+            let Some(winner) = bracket_match_winner(final_match) else {
+                return Vec::new();
+            };
+            if winner.eq_ignore_ascii_case(&player1) {
+                (player1, player2)
+            } else {
+                (player2, player1)
+            }
+        }
+    };
+
+    let mut entries = vec![
+        TournamentTopFourEntry {
+            rank: 1,
+            player_name: first,
+            player_display_name: None,
+        },
+        TournamentTopFourEntry {
+            rank: 2,
+            player_name: second,
+            player_display_name: None,
+        },
+    ];
+
+    let semi_losers: Vec<String> = matches
+        .iter()
+        .filter(|m| {
+            m.phase == TournamentPhase::Semi
+                && m.status == TournamentMatchStatus::Confirmed
+                && !m.is_forfeit
+        })
+        .filter_map(|m| bracket_match_loser(m))
+        .collect();
+
+    for (index, player_name) in semi_losers.into_iter().take(2).enumerate() {
+        entries.push(TournamentTopFourEntry {
+            rank: 3 + index as u32,
+            player_name,
+            player_display_name: None,
+        });
+    }
+
+    entries
+}
+
+pub fn registration_counts(registrations: &[TournamentRegistration]) -> (u32, u32) {
+    let approved = registrations
+        .iter()
+        .filter(|r| r.status == RegistrationStatus::Approved)
+        .count() as u32;
+    let waitlist = registrations
+        .iter()
+        .filter(|r| r.status == RegistrationStatus::Waitlisted)
+        .count() as u32;
+    (approved, waitlist)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -442,6 +629,53 @@ mod tests {
                 false
             ),
             3
+        );
+    }
+
+    #[test]
+    fn bracket_match_winner_uses_survivors_on_draw() {
+        let semi_draw = TournamentMatch {
+            id: 1,
+            tournament_id: 1,
+            phase: TournamentPhase::Semi,
+            pool_id: None,
+            bracket_slot: Some(0),
+            player1: Some("Ayadan".into()),
+            player2: Some("Shas'O Kassad".into()),
+            player1_display_name: None,
+            player2_display_name: None,
+            player1_objectives: 3,
+            player2_objectives: 3,
+            player1_survivors: 149,
+            player2_survivors: 45,
+            player1_tournament_points: 3,
+            player2_tournament_points: 3,
+            outcome: Some(MatchOutcome::Draw),
+            is_forfeit: false,
+            is_unplayed: false,
+            forfeit_player: None,
+            forfeit_player_display_name: None,
+            player1_elo_delta: 0.0,
+            player2_elo_delta: 0.0,
+            player1_rating_used: None,
+            player2_rating_used: None,
+            elo_applied_at: None,
+            status: TournamentMatchStatus::Confirmed,
+            submitted_by_user_id: None,
+            submitted_at: None,
+            confirmed_by_user_id: None,
+            confirmed_at: None,
+            scenario_id: None,
+            scenario_name: None,
+            player1_army_id: None,
+            player2_army_id: None,
+            played_at: None,
+        };
+
+        assert_eq!(bracket_match_winner(&semi_draw).as_deref(), Some("Ayadan"));
+        assert_eq!(
+            bracket_match_loser(&semi_draw).as_deref(),
+            Some("Shas'O Kassad")
         );
     }
 }

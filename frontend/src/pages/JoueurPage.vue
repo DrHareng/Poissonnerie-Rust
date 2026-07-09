@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useTitle } from '@vueuse/core'
 import { ArrowLeft } from '@lucide/vue'
@@ -251,8 +251,18 @@ async function resetAvatar() {
 
 async function refresh() {
   await Promise.all([loadPlayer(), loadMatches(), loadTournaments()])
+  scrollToHash()
 }
 
+function scrollToHash() {
+  const hash = route.hash
+  if (!hash || loading.value) return
+  nextTick(() => {
+    document.querySelector(hash)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  })
+}
+
+watch(() => route.hash, scrollToHash)
 watch(playerName, refresh, { immediate: true })
 onMounted(refresh)
 </script>
@@ -272,7 +282,7 @@ onMounted(refresh)
     </div>
 
     <template v-else-if="player">
-      <section class="page-header flex flex-col gap-4 sm:flex-row sm:items-center">
+      <section id="stats" class="page-header flex flex-col gap-4 sm:flex-row sm:items-center">
         <img
           v-if="profile?.avatar_url"
           :src="profile.avatar_url"
@@ -295,7 +305,7 @@ onMounted(refresh)
         </div>
       </section>
 
-      <Card v-if="profile?.is_own_profile" class="neon-panel">
+      <Card v-if="profile?.is_own_profile" id="profil" class="neon-panel">
         <CardHeader>
           <CardTitle>Mon profil</CardTitle>
           <CardDescription>

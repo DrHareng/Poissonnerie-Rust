@@ -1,8 +1,9 @@
+use std::collections::HashMap;
 use std::path::Path;
 use std::sync::Mutex;
 
 use anyhow::{bail, Context, Result};
-use rusqlite::{params, Connection, Transaction};
+use rusqlite::{params, Connection, OptionalExtension, Transaction};
 use serde::Deserialize;
 
 use crate::match_record::now_unix;
@@ -10,11 +11,12 @@ use crate::migrate::migrate;
 use crate::player::MatchOutcome;
 use crate::store::normalize_name;
 use crate::tournament::{
-    compute_elo_deltas, placement_label, pool_round_robin_pairs, tournament_points_for_player,
-    BracketFormat, PlayerTournamentResult, Pool, PoolPlayer, RegistrationStatus,
-    Tournament, TournamentDetail, TournamentMatch, TournamentMatchStatus, TournamentPhase,
-    TournamentPlayerSnapshot, TournamentRegistration, TournamentStatus, POOLS_EIGHT_CAPACITY,
-    POOLS_FOUR_CAPACITY, WAITLIST_THRESHOLD,
+    bracket_match_winner, compute_elo_deltas, placement_label, pool_round_robin_pairs,
+    tournament_points_for_player, BracketFormat, PlayerTournamentResult, Pool, PoolPlayer,
+    RegistrationStatus, Tournament, TournamentDetail, TournamentListEntry, TournamentMatch,
+    TournamentMatchStatus, TournamentPhase, TournamentPlayerSnapshot, TournamentRegistration,
+    TournamentStatus, POOLS_EIGHT_CAPACITY, POOLS_FOUR_CAPACITY, WAITLIST_THRESHOLD,
+    compute_display_status, compute_top_four, registration_counts,
 };
 
 pub struct TournamentStore {
@@ -53,6 +55,20 @@ pub struct PoolSetup {
     pub name: String,
     pub position: u8,
     pub players: Vec<String>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct SetupBracketRequest {
+    pub matches: Vec<BracketSlotSetup>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct BracketSlotSetup {
+    pub bracket_slot: u32,
+    pub player1: String,
+    pub player2: String,
+    #[serde(default)]
+    pub quarter_player1: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -108,6 +124,45 @@ impl TournamentStore {
         rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
     }
 
+    pub fn list_entries(&self) -> Result<Vec<TournamentListEntry>> {
+        let conn = self.conn.lock().unwrap();
+        let tournaments = {
+            let mut stmt = conn.prepare(
+                "
+                SELECT id, name, status, pool_count, bracket_format,
+                       created_at, started_at, pools_finalized_at, completed_at
+                FROM tournaments
+                ORDER BY created_at DESC
+                ",
+            )?;
+            let rows = stmt.query_map([], row_to_tournament)?;
+            rows.collect::<Result<Vec<_>, _>>()?
+        };
+
+        tournaments
+            .into_iter()
+            .map(|tournament| {
+                let registrations = self.list_registrations_in_conn(&conn, tournament.id)?;
+                let matches = self.list_matches_in_conn(&conn, tournament.id)?;
+                let (approved_count, waitlist_count) = registration_counts(&registrations);
+                let display_status = compute_display_status(&tournament, &matches);
+                let top_four = if tournament.status == TournamentStatus::Completed {
+                    compute_top_four(&matches)
+                } else {
+                    Vec::new()
+                };
+
+                Ok(TournamentListEntry {
+                    tournament,
+                    approved_count,
+                    waitlist_count,
+                    display_status,
+                    top_four,
+                })
+            })
+            .collect()
+    }
+
     pub fn create(&self, request: &CreateTournamentRequest) -> Result<Tournament> {
         let name = request.name.trim();
         if name.is_empty() {
@@ -142,12 +197,26 @@ impl TournamentStore {
             return Ok(None);
         };
 
+        let registrations = self.list_registrations_in_conn(&conn, id)?;
+        let matches = self.list_matches_in_conn(&conn, id)?;
+        let (approved_count, waitlist_count) = registration_counts(&registrations);
+        let display_status = compute_display_status(&tournament, &matches);
+        let top_four = if tournament.status == TournamentStatus::Completed {
+            compute_top_four(&matches)
+        } else {
+            Vec::new()
+        };
+
         Ok(Some(TournamentDetail {
-            registrations: self.list_registrations_in_conn(&conn, id)?,
+            registrations,
             players: self.list_snapshots_in_conn(&conn, id)?,
             pools: self.list_pools_in_conn(&conn, id)?,
-            matches: self.list_matches_in_conn(&conn, id)?,
+            matches,
             tournament,
+            approved_count,
+            waitlist_count,
+            display_status,
+            top_four,
         }))
     }
 
@@ -685,6 +754,10 @@ impl TournamentStore {
 
         let now = now_unix();
         let auto_confirm = is_admin;
+        let player1_army_id = registration_army_id_in_conn(&conn, tm.tournament_id, &p1)?
+            .or(request.player1_army_id);
+        let player2_army_id = registration_army_id_in_conn(&conn, tm.tournament_id, &p2)?
+            .or(request.player2_army_id);
 
         conn.execute(
             "
@@ -692,7 +765,7 @@ impl TournamentStore {
                 player1_objectives = ?1, player2_objectives = ?2,
                 player1_survivors = ?3, player2_survivors = ?4,
                 player1_tournament_points = ?5, player2_tournament_points = ?6,
-                outcome = ?7, is_forfeit = 0, forfeit_player = NULL,
+                outcome = ?7, is_forfeit = 0, is_unplayed = 0, forfeit_player = NULL,
                 player1_elo_delta = ?8, player2_elo_delta = ?9,
                 player1_rating_used = ?10, player2_rating_used = ?11,
                 status = ?12, submitted_by_user_id = ?13, submitted_at = ?14,
@@ -725,8 +798,8 @@ impl TournamentStore {
                 if auto_confirm { Some(now) } else { None::<u64> },
                 request.scenario_id,
                 request.scenario_name,
-                request.player1_army_id,
-                request.player2_army_id,
+                player1_army_id,
+                player2_army_id,
                 now,
                 match_id,
             ],
@@ -826,6 +899,9 @@ impl TournamentStore {
         };
 
         let now = now_unix();
+        let player1_army_id = registration_army_id_in_conn(&conn, tm.tournament_id, &p1)?;
+        let player2_army_id = registration_army_id_in_conn(&conn, tm.tournament_id, &p2)?;
+
         conn.execute(
             "
             UPDATE tournament_matches SET
@@ -835,8 +911,9 @@ impl TournamentStore {
                 outcome = ?3, is_forfeit = 1, forfeit_player = ?4,
                 player1_elo_delta = 0, player2_elo_delta = 0,
                 status = ?5, confirmed_by_user_id = ?6, confirmed_at = ?7,
+                player1_army_id = ?8, player2_army_id = ?9,
                 played_at = ?7
-            WHERE id = ?8
+            WHERE id = ?10
             ",
             params![
                 if normalize_name(&p1) == normalize_name(&winner) {
@@ -858,6 +935,8 @@ impl TournamentStore {
                 TournamentMatchStatus::Confirmed.as_str(),
                 user_id,
                 now,
+                player1_army_id,
+                player2_army_id,
                 match_id,
             ],
         )?;
@@ -865,6 +944,457 @@ impl TournamentStore {
 
         self.apply_confirmed_match(match_id, 32.0)?;
         self.get_match(match_id)?.context("match introuvable")
+    }
+
+    pub fn declare_match_unplayed(
+        &self,
+        match_id: i64,
+        user_id: i64,
+        is_admin: bool,
+    ) -> Result<TournamentMatch> {
+        if !is_admin {
+            bail!("seul un admin peut déclarer un match non joué");
+        }
+
+        let conn = self.conn.lock().unwrap();
+        let tm = self
+            .get_match_in_conn(&conn, match_id)?
+            .context("match introuvable")?;
+
+        if tm.phase != TournamentPhase::Pool {
+            bail!("option réservée aux matchs de poule");
+        }
+
+        if tm.status == TournamentMatchStatus::Confirmed {
+            bail!("ce match est déjà confirmé");
+        }
+
+        let p1 = tm.player1.clone().context("joueur 1 manquant")?;
+        let p2 = tm.player2.clone().context("joueur 2 manquant")?;
+        let now = now_unix();
+        let player1_army_id = registration_army_id_in_conn(&conn, tm.tournament_id, &p1)?;
+        let player2_army_id = registration_army_id_in_conn(&conn, tm.tournament_id, &p2)?;
+
+        conn.execute(
+            "
+            UPDATE tournament_matches SET
+                player1_objectives = 0, player2_objectives = 0,
+                player1_survivors = 0, player2_survivors = 0,
+                player1_tournament_points = 0, player2_tournament_points = 0,
+                outcome = NULL, is_forfeit = 0, is_unplayed = 1, forfeit_player = NULL,
+                player1_elo_delta = 0, player2_elo_delta = 0,
+                status = ?1, confirmed_by_user_id = ?2, confirmed_at = ?3,
+                player1_army_id = ?4, player2_army_id = ?5,
+                played_at = ?3
+            WHERE id = ?6
+            ",
+            params![
+                TournamentMatchStatus::Confirmed.as_str(),
+                user_id,
+                now,
+                player1_army_id,
+                player2_army_id,
+                match_id,
+            ],
+        )?;
+        drop(conn);
+
+        self.apply_confirmed_match(match_id, 32.0)?;
+        self.get_match(match_id)?.context("match introuvable")
+    }
+
+    pub fn correct_match_score(
+        &self,
+        match_id: i64,
+        request: &SubmitMatchRequest,
+        k_factor: f64,
+    ) -> Result<(TournamentMatch, bool)> {
+        if request.player1_objectives > 10 || request.player2_objectives > 10 {
+            bail!("objectifs invalides");
+        }
+
+        let conn = self.conn.lock().unwrap();
+        let old = self
+            .get_match_in_conn(&conn, match_id)?
+            .context("match introuvable")?;
+
+        if old.status != TournamentMatchStatus::Confirmed {
+            bail!("seuls les matchs confirmés peuvent être corrigés");
+        }
+
+        let p1 = old.player1.as_ref().context("joueur 1 manquant")?;
+        let p2 = old.player2.as_ref().context("joueur 2 manquant")?;
+        let old_winner = if old.is_unplayed {
+            None
+        } else {
+            bracket_match_winner(&old)
+        };
+        let new_winner = bracket_winner_from_scores(
+            p1,
+            p2,
+            request.player1_objectives,
+            request.player2_objectives,
+            request.player1_survivors,
+            request.player2_survivors,
+        )?;
+        let winner_changed = old.phase != TournamentPhase::Pool
+            && old_winner.as_ref().map(|name| normalize_name(name))
+                != Some(normalize_name(&new_winner));
+
+        if winner_changed {
+            if self.bracket_downstream_confirmed(&conn, &old)? {
+                bail!("impossible de changer le vainqueur : la phase suivante est déjà jouée");
+            }
+        }
+
+        conn.execute(
+            "
+            UPDATE tournament_matches SET
+                player1_objectives = ?1, player2_objectives = ?2,
+                player1_survivors = ?3, player2_survivors = ?4,
+                is_forfeit = 0, is_unplayed = 0, forfeit_player = NULL
+            WHERE id = ?5
+            ",
+            params![
+                request.player1_objectives,
+                request.player2_objectives,
+                request.player1_survivors,
+                request.player2_survivors,
+                match_id,
+            ],
+        )?;
+
+        let tournament_id = old.tournament_id;
+        if winner_changed {
+            self.clear_downstream_bracket(&conn, tournament_id, &old)?;
+        }
+        drop(conn);
+
+        self.recompute_tournament_standings(tournament_id, k_factor)?;
+
+        if winner_changed {
+            let conn = self.conn.lock().unwrap();
+            self.rebuild_bracket_progression(&conn, tournament_id)?;
+        }
+
+        let updated = self
+            .get_match(match_id)?
+            .context("match introuvable")?;
+        Ok((updated, winner_changed))
+    }
+
+    pub fn bracket_elo_snapshot(
+        &self,
+        tournament_id: i64,
+    ) -> Result<HashMap<i64, (f64, f64, String, String)>> {
+        let conn = self.conn.lock().unwrap();
+        Ok(self
+            .list_matches_in_conn(&conn, tournament_id)?
+            .into_iter()
+            .filter(|m| {
+                m.status == TournamentMatchStatus::Confirmed
+                    && m.phase != TournamentPhase::Pool
+                    && !m.is_forfeit
+            })
+            .map(|m| {
+                (
+                    m.id,
+                    (
+                        m.player1_elo_delta,
+                        m.player2_elo_delta,
+                        m.player1.clone().unwrap_or_default(),
+                        m.player2.clone().unwrap_or_default(),
+                    ),
+                )
+            })
+            .collect())
+    }
+
+    fn recompute_tournament_standings(&self, tournament_id: i64, k_factor: f64) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+        let tournament = self
+            .get_in_conn(&conn, tournament_id)?
+            .context("tournoi introuvable")?;
+
+        conn.execute(
+            "
+            UPDATE tournament_players SET
+                pool_points = 0, pool_objectives = 0, pool_survivors = 0, pool_elo_delta = 0
+            WHERE tournament_id = ?1
+            ",
+            params![tournament_id],
+        )?;
+
+        let mut matches: Vec<TournamentMatch> = self
+            .list_matches_in_conn(&conn, tournament_id)?
+            .into_iter()
+            .filter(|m| m.status == TournamentMatchStatus::Confirmed)
+            .collect();
+        matches.sort_by(compare_matches_for_recompute);
+
+        for tm in &matches {
+            if tm.is_unplayed {
+                continue;
+            }
+
+            if tm.is_forfeit {
+                self.update_pool_standings_in_conn(&conn, tm)?;
+                continue;
+            }
+
+            let outcome = outcome_from_objectives(tm.player1_objectives, tm.player2_objectives);
+            let tp1 = tournament_points_for_player(
+                outcome,
+                true,
+                tm.player1_objectives,
+                tm.player2_objectives,
+                false,
+            );
+            let tp2 = tournament_points_for_player(
+                outcome,
+                false,
+                tm.player1_objectives,
+                tm.player2_objectives,
+                false,
+            );
+
+            if tm.phase == TournamentPhase::Pool {
+                let (rating1, rating2) = self.ratings_for_match_in_conn(&conn, tm, k_factor)?;
+                let (delta1, delta2) = compute_elo_deltas(rating1, rating2, outcome, k_factor);
+                conn.execute(
+                    "
+                    UPDATE tournament_matches SET
+                        player1_tournament_points = ?1, player2_tournament_points = ?2,
+                        outcome = ?3,
+                        player1_elo_delta = ?4, player2_elo_delta = ?5,
+                        player1_rating_used = ?6, player2_rating_used = ?7
+                    WHERE id = ?8
+                    ",
+                    params![
+                        tp1,
+                        tp2,
+                        outcome_to_str(outcome),
+                        delta1,
+                        delta2,
+                        rating1,
+                        rating2,
+                        tm.id,
+                    ],
+                )?;
+
+                let p1_key = normalize_name(tm.player1.as_ref().unwrap());
+                let p2_key = normalize_name(tm.player2.as_ref().unwrap());
+                conn.execute(
+                    "
+                    UPDATE tournament_players SET pool_elo_delta = pool_elo_delta + ?1
+                    WHERE tournament_id = ?2 AND player_name_key = ?3
+                    ",
+                    params![delta1, tournament_id, p1_key],
+                )?;
+                conn.execute(
+                    "
+                    UPDATE tournament_players SET pool_elo_delta = pool_elo_delta + ?2
+                    WHERE tournament_id = ?1 AND player_name_key = ?3
+                    ",
+                    params![tournament_id, delta2, p2_key],
+                )?;
+            } else {
+                conn.execute(
+                    "
+                    UPDATE tournament_matches SET
+                        player1_tournament_points = ?1, player2_tournament_points = ?2,
+                        outcome = ?3
+                    WHERE id = ?4
+                    ",
+                    params![tp1, tp2, outcome_to_str(outcome), tm.id],
+                )?;
+            }
+
+            let refreshed = self
+                .get_match_in_conn(&conn, tm.id)?
+                .context("match introuvable")?;
+            self.update_pool_standings_in_conn(&conn, &refreshed)?;
+        }
+
+        if tournament.pools_finalized_at.is_some() {
+            conn.execute(
+                "
+                UPDATE tournament_players SET
+                    bracket_rating = start_rating + pool_elo_delta
+                WHERE tournament_id = ?1
+                ",
+                params![tournament_id],
+            )?;
+
+            let bracket_matches: Vec<TournamentMatch> = matches
+                .into_iter()
+                .filter(|m| m.phase != TournamentPhase::Pool && !m.is_forfeit)
+                .collect();
+
+            for tm in bracket_matches {
+                let (rating1, rating2) = self.ratings_for_match_in_conn(&conn, &tm, k_factor)?;
+                let outcome = outcome_from_objectives(tm.player1_objectives, tm.player2_objectives);
+                let (delta1, delta2) = compute_elo_deltas(rating1, rating2, outcome, k_factor);
+
+                conn.execute(
+                    "
+                    UPDATE tournament_matches SET
+                        player1_elo_delta = ?1, player2_elo_delta = ?2,
+                        player1_rating_used = ?3, player2_rating_used = ?4,
+                        outcome = ?5
+                    WHERE id = ?6
+                    ",
+                    params![
+                        delta1,
+                        delta2,
+                        rating1,
+                        rating2,
+                        outcome_to_str(outcome),
+                        tm.id,
+                    ],
+                )?;
+
+                let p1_key = normalize_name(tm.player1.as_ref().unwrap());
+                let p2_key = normalize_name(tm.player2.as_ref().unwrap());
+                conn.execute(
+                    "
+                    UPDATE tournament_players SET bracket_rating = bracket_rating + ?1
+                    WHERE tournament_id = ?2 AND player_name_key = ?3
+                    ",
+                    params![delta1, tournament_id, p1_key],
+                )?;
+                conn.execute(
+                    "
+                    UPDATE tournament_players SET bracket_rating = bracket_rating + ?2
+                    WHERE tournament_id = ?1 AND player_name_key = ?3
+                    ",
+                    params![tournament_id, delta2, p2_key],
+                )?;
+            }
+        }
+
+        Ok(())
+    }
+
+    fn bracket_downstream_confirmed(
+        &self,
+        conn: &Connection,
+        tm: &TournamentMatch,
+    ) -> Result<bool> {
+        let Some(next_phase) = next_bracket_phase(tm.phase) else {
+            return Ok(false);
+        };
+        let slot = tm.bracket_slot.unwrap_or(0);
+        let next_slot = slot / 2;
+        self.bracket_slot_confirmed(conn, tm.tournament_id, next_phase, next_slot)
+    }
+
+    fn bracket_slot_confirmed(
+        &self,
+        conn: &Connection,
+        tournament_id: i64,
+        phase: TournamentPhase,
+        slot: u32,
+    ) -> Result<bool> {
+        let status: Option<String> = conn.query_row(
+            "
+            SELECT status FROM tournament_matches
+            WHERE tournament_id = ?1 AND phase = ?2 AND bracket_slot = ?3
+            ",
+            params![tournament_id, phase.as_str(), slot],
+            |row| row.get(0),
+        ).optional()?;
+
+        if status.as_deref() == Some(TournamentMatchStatus::Confirmed.as_str()) {
+            return Ok(true);
+        }
+
+        let Some(next_phase) = next_bracket_phase(phase) else {
+            return Ok(false);
+        };
+        self.bracket_slot_confirmed(conn, tournament_id, next_phase, slot / 2)
+    }
+
+    fn clear_downstream_bracket(
+        &self,
+        conn: &Connection,
+        tournament_id: i64,
+        tm: &TournamentMatch,
+    ) -> Result<()> {
+        self.clear_downstream_from(conn, tournament_id, tm.phase, tm.bracket_slot.unwrap_or(0))
+    }
+
+    fn clear_downstream_from(
+        &self,
+        conn: &Connection,
+        tournament_id: i64,
+        phase: TournamentPhase,
+        slot: u32,
+    ) -> Result<()> {
+        let Some(next_phase) = next_bracket_phase(phase) else {
+            return Ok(());
+        };
+
+        let next_slot = slot / 2;
+        let is_player1 = slot % 2 == 0;
+        let column = if is_player1 { "player1" } else { "player2" };
+
+        conn.execute(
+            &format!(
+                "
+                UPDATE tournament_matches SET {column} = NULL
+                WHERE tournament_id = ?1 AND phase = ?2 AND bracket_slot = ?3
+                  AND status != ?4
+                "
+            ),
+            params![
+                tournament_id,
+                next_phase.as_str(),
+                next_slot,
+                TournamentMatchStatus::Confirmed.as_str(),
+            ],
+        )?;
+
+        if phase == TournamentPhase::RoundOf16 {
+            conn.execute(
+                "
+                UPDATE tournament_matches SET player2 = NULL
+                WHERE tournament_id = ?1 AND phase = 'quarter' AND bracket_slot = ?2
+                  AND status != ?3
+                ",
+                params![
+                    tournament_id,
+                    slot,
+                    TournamentMatchStatus::Confirmed.as_str(),
+                ],
+            )?;
+        }
+
+        self.clear_downstream_from(conn, tournament_id, next_phase, next_slot)
+    }
+
+    fn rebuild_bracket_progression(&self, conn: &Connection, tournament_id: i64) -> Result<()> {
+        let mut matches: Vec<TournamentMatch> = self
+            .list_matches_in_conn(conn, tournament_id)?
+            .into_iter()
+            .filter(|m| {
+                m.status == TournamentMatchStatus::Confirmed && m.phase != TournamentPhase::Pool
+            })
+            .collect();
+        matches.sort_by(compare_matches_for_recompute);
+
+        for tm in matches {
+            let fresh = self
+                .get_match_in_conn(conn, tm.id)?
+                .context("match introuvable")?;
+            self.advance_bracket_in_conn(conn, &fresh)?;
+        }
+        Ok(())
+    }
+
+    pub fn sync_bracket_progression(&self, tournament_id: i64) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+        self.rebuild_bracket_progression(&conn, tournament_id)
     }
 
     fn apply_confirmed_match(&self, match_id: i64, _k_factor: f64) -> Result<()> {
@@ -877,12 +1407,22 @@ impl TournamentStore {
             return Ok(());
         }
 
+        if tm.is_unplayed {
+            return Ok(());
+        }
+
         if tm.is_forfeit {
             self.update_pool_standings_in_conn(&conn, &tm)?;
             if tm.phase != TournamentPhase::Pool {
                 self.advance_bracket_in_conn(&conn, &tm)?;
             }
             return Ok(());
+        }
+
+        if tm.phase != TournamentPhase::Pool {
+            bracket_match_winner(&tm).context(
+                "match nul en arbre : les points de survivants doivent départager les joueurs",
+            )?;
         }
 
         if tm.phase == TournamentPhase::Pool {
@@ -959,8 +1499,265 @@ impl TournamentStore {
         )?;
 
         drop(conn);
-        self.generate_bracket(tournament_id)?;
         self.get(tournament_id)?.context("tournoi introuvable")
+    }
+
+    pub fn setup_bracket(
+        &self,
+        tournament_id: i64,
+        request: &SetupBracketRequest,
+    ) -> Result<Vec<TournamentMatch>> {
+        let conn = self.conn.lock().unwrap();
+        let tournament = self
+            .get_in_conn(&conn, tournament_id)?
+            .context("tournoi introuvable")?;
+
+        if tournament.status != TournamentStatus::Started {
+            bail!("tournoi non démarré");
+        }
+        if tournament.pools_finalized_at.is_none() {
+            bail!("clôturez d'abord les poules");
+        }
+
+        let confirmed: i64 = conn.query_row(
+            "
+            SELECT COUNT(*) FROM tournament_matches
+            WHERE tournament_id = ?1 AND phase != 'pool' AND status = 'confirmed'
+            ",
+            params![tournament_id],
+            |row| row.get(0),
+        )?;
+        if confirmed > 0 {
+            bail!("impossible de modifier l'arbre après des matchs confirmés");
+        }
+
+        let expected_count = match tournament.bracket_format {
+            BracketFormat::QuartersDirect | BracketFormat::RoundOf16 => 4,
+            BracketFormat::RoundOf16Full => 8,
+        };
+
+        if request.matches.len() != expected_count {
+            bail!("{expected_count} match(s) requis pour ce format");
+        }
+
+        let mut slots: Vec<u32> = request.matches.iter().map(|m| m.bracket_slot).collect();
+        slots.sort_unstable();
+        slots.dedup();
+        if slots.len() != expected_count {
+            bail!("slots dupliqués ou invalides");
+        }
+        for (index, slot) in slots.iter().enumerate() {
+            if *slot != index as u32 {
+                bail!("slots dupliqués ou invalides");
+            }
+        }
+
+        let qualified = self.qualified_players_in_conn(&conn, tournament_id)?;
+        let mut used = std::collections::HashSet::new();
+        for setup in &request.matches {
+            for player in [&setup.player1, &setup.player2] {
+                let key = normalize_name(player);
+                if !qualified.contains(&key) {
+                    bail!("joueur non qualifié: {player}");
+                }
+                if !used.insert(key) {
+                    bail!("joueur utilisé plusieurs fois: {player}");
+                }
+            }
+
+            if matches!(tournament.bracket_format, BracketFormat::RoundOf16) {
+                let first = setup
+                    .quarter_player1
+                    .as_ref()
+                    .context("1er de poule requis pour les quarts")?;
+                let key = normalize_name(first);
+                if !qualified.contains(&key) {
+                    bail!("joueur non qualifié: {first}");
+                }
+                if !used.insert(key) {
+                    bail!("joueur utilisé plusieurs fois: {first}");
+                }
+            }
+        }
+
+        let tx = conn.unchecked_transaction()?;
+        tx.execute(
+            "DELETE FROM tournament_matches WHERE tournament_id = ?1 AND phase != 'pool'",
+            params![tournament_id],
+        )?;
+
+        match tournament.bracket_format {
+            BracketFormat::QuartersDirect => {
+                for setup in &request.matches {
+                    tx.execute(
+                        "
+                        INSERT INTO tournament_matches
+                            (tournament_id, phase, bracket_slot, player1, player2, status)
+                        VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+                        ",
+                        params![
+                            tournament_id,
+                            TournamentPhase::Quarter.as_str(),
+                            setup.bracket_slot,
+                            setup.player1,
+                            setup.player2,
+                            TournamentMatchStatus::Scheduled.as_str(),
+                        ],
+                    )?;
+                }
+                for slot in 0..2 {
+                    tx.execute(
+                        "
+                        INSERT INTO tournament_matches
+                            (tournament_id, phase, bracket_slot, status)
+                        VALUES (?1, ?2, ?3, ?4)
+                        ",
+                        params![
+                            tournament_id,
+                            TournamentPhase::Semi.as_str(),
+                            slot,
+                            TournamentMatchStatus::Scheduled.as_str(),
+                        ],
+                    )?;
+                }
+                tx.execute(
+                    "
+                    INSERT INTO tournament_matches
+                        (tournament_id, phase, bracket_slot, status)
+                    VALUES (?1, ?2, 0, ?3)
+                    ",
+                    params![
+                        tournament_id,
+                        TournamentPhase::Final.as_str(),
+                        TournamentMatchStatus::Scheduled.as_str(),
+                    ],
+                )?;
+            }
+            BracketFormat::RoundOf16 => {
+                for setup in &request.matches {
+                    tx.execute(
+                        "
+                        INSERT INTO tournament_matches
+                            (tournament_id, phase, bracket_slot, player1, player2, status)
+                        VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+                        ",
+                        params![
+                            tournament_id,
+                            TournamentPhase::RoundOf16.as_str(),
+                            setup.bracket_slot,
+                            setup.player1,
+                            setup.player2,
+                            TournamentMatchStatus::Scheduled.as_str(),
+                        ],
+                    )?;
+                    tx.execute(
+                        "
+                        INSERT INTO tournament_matches
+                            (tournament_id, phase, bracket_slot, player1, status)
+                        VALUES (?1, ?2, ?3, ?4, ?5)
+                        ",
+                        params![
+                            tournament_id,
+                            TournamentPhase::Quarter.as_str(),
+                            setup.bracket_slot,
+                            setup.quarter_player1,
+                            TournamentMatchStatus::Scheduled.as_str(),
+                        ],
+                    )?;
+                }
+                for slot in 0..2 {
+                    tx.execute(
+                        "
+                        INSERT INTO tournament_matches
+                            (tournament_id, phase, bracket_slot, status)
+                        VALUES (?1, ?2, ?3, ?4)
+                        ",
+                        params![
+                            tournament_id,
+                            TournamentPhase::Semi.as_str(),
+                            slot,
+                            TournamentMatchStatus::Scheduled.as_str(),
+                        ],
+                    )?;
+                }
+                tx.execute(
+                    "
+                    INSERT INTO tournament_matches
+                        (tournament_id, phase, bracket_slot, status)
+                    VALUES (?1, ?2, 0, ?3)
+                    ",
+                    params![
+                        tournament_id,
+                        TournamentPhase::Final.as_str(),
+                        TournamentMatchStatus::Scheduled.as_str(),
+                    ],
+                )?;
+            }
+            BracketFormat::RoundOf16Full => {
+                for setup in &request.matches {
+                    tx.execute(
+                        "
+                        INSERT INTO tournament_matches
+                            (tournament_id, phase, bracket_slot, player1, player2, status)
+                        VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+                        ",
+                        params![
+                            tournament_id,
+                            TournamentPhase::RoundOf16.as_str(),
+                            setup.bracket_slot,
+                            setup.player1,
+                            setup.player2,
+                            TournamentMatchStatus::Scheduled.as_str(),
+                        ],
+                    )?;
+                }
+                for slot in 0..4 {
+                    tx.execute(
+                        "
+                        INSERT INTO tournament_matches
+                            (tournament_id, phase, bracket_slot, status)
+                        VALUES (?1, ?2, ?3, ?4)
+                        ",
+                        params![
+                            tournament_id,
+                            TournamentPhase::Quarter.as_str(),
+                            slot,
+                            TournamentMatchStatus::Scheduled.as_str(),
+                        ],
+                    )?;
+                }
+                for slot in 0..2 {
+                    tx.execute(
+                        "
+                        INSERT INTO tournament_matches
+                            (tournament_id, phase, bracket_slot, status)
+                        VALUES (?1, ?2, ?3, ?4)
+                        ",
+                        params![
+                            tournament_id,
+                            TournamentPhase::Semi.as_str(),
+                            slot,
+                            TournamentMatchStatus::Scheduled.as_str(),
+                        ],
+                    )?;
+                }
+                tx.execute(
+                    "
+                    INSERT INTO tournament_matches
+                        (tournament_id, phase, bracket_slot, status)
+                    VALUES (?1, ?2, 0, ?3)
+                    ",
+                    params![
+                        tournament_id,
+                        TournamentPhase::Final.as_str(),
+                        TournamentMatchStatus::Scheduled.as_str(),
+                    ],
+                )?;
+            }
+        }
+
+        tx.commit()?;
+        self.list_matches_in_conn(&conn, tournament_id)
     }
 
     pub fn generate_bracket(&self, tournament_id: i64) -> Result<Vec<TournamentMatch>> {
@@ -1263,12 +2060,9 @@ impl TournamentStore {
     }
 
     fn advance_bracket_in_conn(&self, conn: &Connection, tm: &TournamentMatch) -> Result<()> {
-        let outcome = tm.outcome.context("résultat manquant")?;
-        let winner = match outcome {
-            MatchOutcome::Player1Win => tm.player1.clone().unwrap(),
-            MatchOutcome::Player2Win => tm.player2.clone().unwrap(),
-            MatchOutcome::Draw => bail!("match nul impossible en arbre"),
-        };
+        let winner = bracket_match_winner(tm).context(
+            "impossible de déterminer le vainqueur (égalité aux points de survivants sur un nul)",
+        )?;
 
         let next = next_bracket_phase(tm.phase);
         let Some(next_phase) = next else {
@@ -1321,34 +2115,48 @@ impl TournamentStore {
 
     fn fill_quarters_after_r16(&self, conn: &Connection, tm: &TournamentMatch) -> Result<()> {
         let slot = tm.bracket_slot.unwrap_or(0);
-        let pools = self.list_pools_in_conn(conn, tm.tournament_id)?;
-        if slot as usize >= pools.len() {
-            return Ok(());
-        }
-        let mut sorted = pools[slot as usize].players.clone();
-        sorted.sort_by(|a, b| {
-            b.points
-                .cmp(&a.points)
-                .then_with(|| b.objectives.cmp(&a.objectives))
-                .then_with(|| b.survivors.cmp(&a.survivors))
-        });
-        let first = sorted.first().context("poule vide")?.player_name.clone();
-
-        let outcome = tm.outcome.unwrap();
-        let r16_winner = match outcome {
-            MatchOutcome::Player1Win => tm.player1.clone().unwrap(),
-            MatchOutcome::Player2Win => tm.player2.clone().unwrap(),
-            MatchOutcome::Draw => bail!("nul interdit"),
-        };
+        let r16_winner = bracket_match_winner(tm).context(
+            "impossible de déterminer le vainqueur (égalité aux points de survivants sur un nul)",
+        )?;
 
         conn.execute(
             "
-            UPDATE tournament_matches SET player1 = ?1, player2 = ?2
-            WHERE tournament_id = ?3 AND phase = 'quarter' AND bracket_slot = ?4
+            UPDATE tournament_matches SET player2 = ?1
+            WHERE tournament_id = ?2 AND phase = 'quarter' AND bracket_slot = ?3
             ",
-            params![first, r16_winner, tm.tournament_id, slot],
+            params![r16_winner, tm.tournament_id, slot],
         )?;
         Ok(())
+    }
+
+    fn qualified_players_in_conn(
+        &self,
+        conn: &Connection,
+        tournament_id: i64,
+    ) -> Result<std::collections::HashSet<String>> {
+        let tournament = self
+            .get_in_conn(conn, tournament_id)?
+            .context("tournoi introuvable")?;
+        let pools = self.list_pools_in_conn(conn, tournament_id)?;
+        let top_n = match tournament.bracket_format {
+            BracketFormat::QuartersDirect | BracketFormat::RoundOf16Full => 2,
+            BracketFormat::RoundOf16 => 3,
+        };
+
+        let mut qualified = std::collections::HashSet::new();
+        for pool in pools {
+            let mut sorted = pool.players.clone();
+            sorted.sort_by(|a, b| {
+                b.points
+                    .cmp(&a.points)
+                    .then_with(|| b.objectives.cmp(&a.objectives))
+                    .then_with(|| b.survivors.cmp(&a.survivors))
+            });
+            for player in sorted.into_iter().take(top_n) {
+                qualified.insert(normalize_name(&player.player_name));
+            }
+        }
+        Ok(qualified)
     }
 
     fn complete_tournament_in_conn(
@@ -1506,7 +2314,7 @@ impl TournamentStore {
             "
             SELECT id FROM tournament_matches
             WHERE tournament_id = ?1 AND phase = 'pool'
-              AND status = 'confirmed' AND is_forfeit = 0 AND elo_applied_at IS NULL
+              AND status = 'confirmed' AND is_forfeit = 0 AND is_unplayed = 0 AND elo_applied_at IS NULL
             ",
         )?;
         let ids: Vec<i64> = stmt
@@ -1643,10 +2451,13 @@ impl TournamentStore {
             SELECT pp.player_name, pp.seed,
                    COALESCE(tp.pool_points, 0),
                    COALESCE(tp.pool_objectives, 0),
-                   COALESCE(tp.pool_survivors, 0)
+                   COALESCE(tp.pool_survivors, 0),
+                   tr.army_id
             FROM pool_players pp
             LEFT JOIN tournament_players tp
                 ON tp.tournament_id = ?2 AND tp.player_name_key = pp.player_name_key
+            LEFT JOIN tournament_registrations tr
+                ON tr.tournament_id = ?2 AND tr.player_name_key = pp.player_name_key
             WHERE pp.pool_id = ?1
             ORDER BY pp.seed
             ",
@@ -1655,6 +2466,7 @@ impl TournamentStore {
             Ok(PoolPlayer {
                 player_name: row.get(0)?,
                 player_display_name: None,
+                army_id: row.get(5)?,
                 seed: row.get(1)?,
                 points: row.get(2)?,
                 objectives: row.get(3)?,
@@ -1700,7 +2512,7 @@ impl TournamentStore {
                    submitted_by_user_id, submitted_at,
                    confirmed_by_user_id, confirmed_at,
                    scenario_id, scenario_name,
-                   player1_army_id, player2_army_id, played_at
+                   player1_army_id, player2_army_id, played_at, is_unplayed
             FROM tournament_matches WHERE id = ?1
             ",
         )?;
@@ -1758,6 +2570,56 @@ fn next_bracket_phase(phase: TournamentPhase) -> Option<TournamentPhase> {
         TournamentPhase::Semi => Some(TournamentPhase::Final),
         TournamentPhase::Final => None,
         TournamentPhase::Pool => None,
+    }
+}
+
+fn phase_order(phase: TournamentPhase) -> u8 {
+    match phase {
+        TournamentPhase::Pool => 0,
+        TournamentPhase::RoundOf16 => 1,
+        TournamentPhase::Quarter => 2,
+        TournamentPhase::Semi => 3,
+        TournamentPhase::Final => 4,
+    }
+}
+
+fn compare_matches_for_recompute(a: &TournamentMatch, b: &TournamentMatch) -> std::cmp::Ordering {
+    phase_order(a.phase)
+        .cmp(&phase_order(b.phase))
+        .then(a.bracket_slot.unwrap_or(0).cmp(&b.bracket_slot.unwrap_or(0)))
+        .then(a.id.cmp(&b.id))
+}
+
+fn outcome_from_objectives(player1_objectives: u8, player2_objectives: u8) -> MatchOutcome {
+    if player1_objectives > player2_objectives {
+        MatchOutcome::Player1Win
+    } else if player2_objectives > player1_objectives {
+        MatchOutcome::Player2Win
+    } else {
+        MatchOutcome::Draw
+    }
+}
+
+fn bracket_winner_from_scores(
+    player1: &str,
+    player2: &str,
+    p1_obj: u8,
+    p2_obj: u8,
+    p1_surv: u16,
+    p2_surv: u16,
+) -> Result<String> {
+    match outcome_from_objectives(p1_obj, p2_obj) {
+        MatchOutcome::Player1Win => Ok(player1.to_string()),
+        MatchOutcome::Player2Win => Ok(player2.to_string()),
+        MatchOutcome::Draw => {
+            if p1_surv > p2_surv {
+                Ok(player1.to_string())
+            } else if p2_surv > p1_surv {
+                Ok(player2.to_string())
+            } else {
+                bail!("match nul : égalité aux points de survivants")
+            }
+        }
     }
 }
 
@@ -1852,5 +2714,169 @@ fn row_to_tournament_match(row: &rusqlite::Row<'_>) -> rusqlite::Result<Tourname
         player1_army_id: row.get(28)?,
         player2_army_id: row.get(29)?,
         played_at: row.get(30)?,
+        is_unplayed: row.get::<_, i64>(31)? != 0,
     })
+}
+
+fn registration_army_id_in_conn(
+    conn: &Connection,
+    tournament_id: i64,
+    player_name: &str,
+) -> Result<Option<u32>> {
+    let mut stmt = conn.prepare(
+        "
+        SELECT army_id FROM tournament_registrations
+        WHERE tournament_id = ?1 AND player_name_key = ?2
+        ",
+    )?;
+    let mut rows = stmt.query(params![tournament_id, normalize_name(player_name)])?;
+    if let Some(row) = rows.next()? {
+        let army_id: Option<u32> = row.get(0)?;
+        return Ok(army_id);
+    }
+    Ok(None)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn temp_copy_of_db() -> (std::path::PathBuf, TournamentStore) {
+        let src = Path::new("data/poissonnerie.db");
+        if !src.exists() {
+            panic!("data/poissonnerie.db introuvable pour les tests");
+        }
+        let suffix = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let dst = std::env::temp_dir().join(format!("poissonnerie-test-{suffix}.db"));
+        fs::copy(src, &dst).unwrap();
+        let store = TournamentStore::open(&dst).unwrap();
+        (dst, store)
+    }
+
+    #[test]
+    fn correct_match_score_persists_objectives() {
+        let (db_path, store) = temp_copy_of_db();
+        let before = store.get_match(1).unwrap().unwrap();
+        assert_eq!(before.status, TournamentMatchStatus::Confirmed);
+
+        let request = SubmitMatchRequest {
+            player1_objectives: 3,
+            player2_objectives: 7,
+            player1_survivors: 42,
+            player2_survivors: 84,
+            player1_army_id: None,
+            player2_army_id: None,
+            scenario_id: None,
+            scenario_name: None,
+        };
+
+        let (updated, _) = store.correct_match_score(1, &request, 32.0).unwrap();
+        assert_eq!(updated.player1_objectives, 3);
+        assert_eq!(updated.player2_objectives, 7);
+        assert_eq!(updated.player1_survivors, 42);
+        assert_eq!(updated.player2_survivors, 84);
+
+        let reloaded = store.get_match(1).unwrap().unwrap();
+        assert_eq!(reloaded.player1_objectives, 3);
+        assert_eq!(reloaded.player2_objectives, 7);
+
+        let _ = fs::remove_file(db_path);
+    }
+
+    #[test]
+    fn correct_match_score_clears_forfeit_and_unplayed() {
+        let (db_path, store) = temp_copy_of_db();
+        let conn = store.conn.lock().unwrap();
+        conn.execute(
+            "
+            UPDATE tournament_matches SET
+                player1_objectives = 0, player2_objectives = 0,
+                player1_survivors = 0, player2_survivors = 0,
+                player1_tournament_points = 5, player2_tournament_points = 0,
+                outcome = 'player1_win', is_forfeit = 1, is_unplayed = 0,
+                forfeit_player = 'player2', status = 'confirmed'
+            WHERE id = 1
+            ",
+            [],
+        )
+        .unwrap();
+        drop(conn);
+
+        let request = SubmitMatchRequest {
+            player1_objectives: 6,
+            player2_objectives: 2,
+            player1_survivors: 100,
+            player2_survivors: 40,
+            player1_army_id: None,
+            player2_army_id: None,
+            scenario_id: None,
+            scenario_name: None,
+        };
+
+        let (updated, _) = store.correct_match_score(1, &request, 32.0).unwrap();
+        assert!(!updated.is_forfeit);
+        assert!(!updated.is_unplayed);
+        assert!(updated.forfeit_player.is_none());
+        assert_eq!(updated.player1_objectives, 6);
+        assert_eq!(updated.player2_objectives, 2);
+        assert_eq!(updated.outcome, Some(MatchOutcome::Player1Win));
+        assert_eq!(updated.player1_tournament_points, 5);
+        assert_eq!(updated.player2_tournament_points, 0);
+
+        let conn = store.conn.lock().unwrap();
+        conn.execute(
+            "
+            UPDATE tournament_matches SET
+                player1_objectives = 0, player2_objectives = 0,
+                player1_survivors = 0, player2_survivors = 0,
+                player1_tournament_points = 0, player2_tournament_points = 0,
+                outcome = NULL, is_forfeit = 0, is_unplayed = 1,
+                forfeit_player = NULL, status = 'confirmed'
+            WHERE id = 1
+            ",
+            [],
+        )
+        .unwrap();
+        drop(conn);
+
+        let request = SubmitMatchRequest {
+            player1_objectives: 4,
+            player2_objectives: 4,
+            player1_survivors: 80,
+            player2_survivors: 60,
+            player1_army_id: None,
+            player2_army_id: None,
+            scenario_id: None,
+            scenario_name: None,
+        };
+
+        let (updated, _) = store.correct_match_score(1, &request, 32.0).unwrap();
+        assert!(!updated.is_forfeit);
+        assert!(!updated.is_unplayed);
+        assert_eq!(updated.outcome, Some(MatchOutcome::Draw));
+        assert_eq!(updated.player1_tournament_points, 2);
+        assert_eq!(updated.player2_tournament_points, 2);
+
+        let _ = fs::remove_file(db_path);
+    }
+
+    #[test]
+    fn sync_coupe_2_bracket_after_draw_semi() {
+        let path = Path::new("data/poissonnerie.db");
+        if !path.exists() {
+            return;
+        }
+
+        let store = TournamentStore::open(path).unwrap();
+        store.sync_bracket_progression(2).unwrap();
+
+        let final_match = store.get_match(98).unwrap().expect("finale coupe 2");
+        assert_eq!(final_match.player1.as_deref(), Some("Ayadan"));
+        assert_eq!(final_match.player2.as_deref(), Some("Kantain"));
+    }
 }
