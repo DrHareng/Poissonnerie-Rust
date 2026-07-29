@@ -1,4 +1,5 @@
 pub mod display_name;
+pub mod import_coupe;
 pub mod api;
 pub mod army;
 pub mod auth;
@@ -19,8 +20,11 @@ pub use auth::AuthConfig;
 pub use elo::{expected_score, update_ratings, MatchScore, DEFAULT_K_FACTOR};
 pub use match_record::{MatchRecord, MatchScores};
 pub use player::{apply_match, MatchOutcome, Player, RatingUpdate, DEFAULT_RATING};
-pub use scenario::{Scenario, ScenarioStore};
-pub use store::{ArmyMatchStats, Leaderboard, PlayerArmyUsage};
+pub use scenario::{strip_scenario_prefix, Scenario, ScenarioStore};
+pub use store::{
+    merge_players, normalize_name, recompute_elo_from_matches, ArmyMatchStats, Leaderboard,
+    MergePlayersReport, PlayerArmyUsage,
+};
 pub use tournament::{
     BracketFormat, PlayerTournamentResult, Pool, Tournament, TournamentDetail,
     TournamentMatch, TournamentRegistration, TournamentStatus,

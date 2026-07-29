@@ -174,6 +174,104 @@ pub fn migrate(conn: &Connection) -> Result<()> {
         conn.execute("ALTER TABLE matches ADD COLUMN scenario_name TEXT", [])?;
     }
 
+    if !column_exists(conn, "matches", "tournament_id")? {
+        conn.execute("ALTER TABLE matches ADD COLUMN tournament_id INTEGER", [])?;
+    }
+
+    if !column_exists(conn, "matches", "tournament_phase")? {
+        conn.execute("ALTER TABLE matches ADD COLUMN tournament_phase TEXT", [])?;
+    }
+
+    if column_exists(conn, "matches", "tournament_id")?
+        && column_exists(conn, "matches", "tournament_phase")?
+    {
+        conn.execute_batch(
+            "
+            UPDATE matches SET
+                tournament_id = (
+                    SELECT tm.tournament_id FROM tournament_matches tm
+                    WHERE tm.status = 'confirmed'
+                      AND tm.is_forfeit = 0
+                      AND tm.is_unplayed = 0
+                      AND lower(trim(matches.player1)) = lower(trim(tm.player1))
+                      AND lower(trim(matches.player2)) = lower(trim(tm.player2))
+                      AND matches.player1_objectives = tm.player1_objectives
+                      AND matches.player2_objectives = tm.player2_objectives
+                      AND matches.player1_survivors = tm.player1_survivors
+                      AND matches.player2_survivors = tm.player2_survivors
+                    LIMIT 1
+                ),
+                tournament_phase = (
+                    SELECT tm.phase FROM tournament_matches tm
+                    WHERE tm.status = 'confirmed'
+                      AND tm.is_forfeit = 0
+                      AND tm.is_unplayed = 0
+                      AND lower(trim(matches.player1)) = lower(trim(tm.player1))
+                      AND lower(trim(matches.player2)) = lower(trim(tm.player2))
+                      AND matches.player1_objectives = tm.player1_objectives
+                      AND matches.player2_objectives = tm.player2_objectives
+                      AND matches.player1_survivors = tm.player1_survivors
+                      AND matches.player2_survivors = tm.player2_survivors
+                    LIMIT 1
+                )
+            WHERE tournament_id IS NULL
+              AND EXISTS (
+                SELECT 1 FROM tournament_matches tm
+                WHERE tm.status = 'confirmed'
+                  AND tm.is_forfeit = 0
+                  AND tm.is_unplayed = 0
+                  AND lower(trim(matches.player1)) = lower(trim(tm.player1))
+                  AND lower(trim(matches.player2)) = lower(trim(tm.player2))
+                  AND matches.player1_objectives = tm.player1_objectives
+                  AND matches.player2_objectives = tm.player2_objectives
+                  AND matches.player1_survivors = tm.player1_survivors
+                  AND matches.player2_survivors = tm.player2_survivors
+              );
+
+            UPDATE matches SET
+                tournament_id = (
+                    SELECT tm.tournament_id FROM tournament_matches tm
+                    WHERE tm.status = 'confirmed'
+                      AND tm.is_forfeit = 0
+                      AND tm.is_unplayed = 0
+                      AND lower(trim(matches.player1)) = lower(trim(tm.player2))
+                      AND lower(trim(matches.player2)) = lower(trim(tm.player1))
+                      AND matches.player1_objectives = tm.player2_objectives
+                      AND matches.player2_objectives = tm.player1_objectives
+                      AND matches.player1_survivors = tm.player2_survivors
+                      AND matches.player2_survivors = tm.player1_survivors
+                    LIMIT 1
+                ),
+                tournament_phase = (
+                    SELECT tm.phase FROM tournament_matches tm
+                    WHERE tm.status = 'confirmed'
+                      AND tm.is_forfeit = 0
+                      AND tm.is_unplayed = 0
+                      AND lower(trim(matches.player1)) = lower(trim(tm.player2))
+                      AND lower(trim(matches.player2)) = lower(trim(tm.player1))
+                      AND matches.player1_objectives = tm.player2_objectives
+                      AND matches.player2_objectives = tm.player1_objectives
+                      AND matches.player1_survivors = tm.player2_survivors
+                      AND matches.player2_survivors = tm.player1_survivors
+                    LIMIT 1
+                )
+            WHERE tournament_id IS NULL
+              AND EXISTS (
+                SELECT 1 FROM tournament_matches tm
+                WHERE tm.status = 'confirmed'
+                  AND tm.is_forfeit = 0
+                  AND tm.is_unplayed = 0
+                  AND lower(trim(matches.player1)) = lower(trim(tm.player2))
+                  AND lower(trim(matches.player2)) = lower(trim(tm.player1))
+                  AND matches.player1_objectives = tm.player2_objectives
+                  AND matches.player2_objectives = tm.player1_objectives
+                  AND matches.player1_survivors = tm.player2_survivors
+                  AND matches.player2_survivors = tm.player1_survivors
+              );
+            ",
+        )?;
+    }
+
     if !column_exists(conn, "tournament_registrations", "army_id")? {
         conn.execute(
             "ALTER TABLE tournament_registrations ADD COLUMN army_id INTEGER",
@@ -198,6 +296,31 @@ pub fn migrate(conn: &Connection) -> Result<()> {
 
     conn.execute_batch(
         "
+        UPDATE matches
+        SET scenario_name = TRIM(SUBSTR(scenario_name, 5))
+        WHERE scenario_name IS NOT NULL
+          AND LENGTH(scenario_name) > 4
+          AND SUBSTR(scenario_name, 2, 3) = ' : ';
+
+        UPDATE tournament_matches
+        SET scenario_name = TRIM(SUBSTR(scenario_name, 5))
+        WHERE scenario_name IS NOT NULL
+          AND LENGTH(scenario_name) > 4
+          AND SUBSTR(scenario_name, 2, 3) = ' : ';
+
+        UPDATE scenarios
+        SET name = TRIM(SUBSTR(name, 5)),
+            name_key = lower(trim(TRIM(SUBSTR(name, 5))))
+        WHERE name IS NOT NULL
+          AND LENGTH(name) > 4
+          AND SUBSTR(name, 2, 3) = ' : ';
+        ",
+    )?;
+
+    backfill_matches_from_tournaments(conn)?;
+
+    conn.execute_batch(
+        "
         DROP INDEX IF EXISTS idx_players_discord_id;
 
         CREATE UNIQUE INDEX IF NOT EXISTS idx_players_discord_username
@@ -208,6 +331,101 @@ pub fn migrate(conn: &Connection) -> Result<()> {
         ",
     )?;
 
+    Ok(())
+}
+
+fn backfill_matches_from_tournaments(conn: &Connection) -> Result<()> {
+    conn.execute_batch(
+        "
+        UPDATE matches
+        SET recorded_at = COALESCE((
+            SELECT COALESCE(tm.played_at, tm.confirmed_at, tm.submitted_at)
+            FROM tournament_matches tm
+            WHERE tm.status = 'confirmed'
+              AND tm.is_forfeit = 0
+              AND tm.is_unplayed = 0
+              AND (
+                (
+                  lower(trim(matches.player1)) = lower(trim(tm.player1))
+                  AND lower(trim(matches.player2)) = lower(trim(tm.player2))
+                  AND matches.player1_objectives = tm.player1_objectives
+                  AND matches.player2_objectives = tm.player2_objectives
+                  AND matches.player1_survivors = tm.player1_survivors
+                  AND matches.player2_survivors = tm.player2_survivors
+                )
+                OR (
+                  lower(trim(matches.player1)) = lower(trim(tm.player2))
+                  AND lower(trim(matches.player2)) = lower(trim(tm.player1))
+                  AND matches.player1_objectives = tm.player2_objectives
+                  AND matches.player2_objectives = tm.player1_objectives
+                  AND matches.player1_survivors = tm.player2_survivors
+                  AND matches.player2_survivors = tm.player1_survivors
+                )
+              )
+            ORDER BY tm.confirmed_at DESC
+            LIMIT 1
+        ), recorded_at)
+        WHERE recorded_at < 31536000;
+
+        INSERT INTO matches (
+            player1, player2, outcome,
+            player1_old, player1_new, player2_old, player2_new,
+            player1_objectives, player1_survivors,
+            player2_objectives, player2_survivors,
+            player1_army_id, player2_army_id,
+            scenario_id, scenario_name,
+            tournament_id, tournament_phase,
+            recorded_at
+        )
+        SELECT
+            tm.player1,
+            tm.player2,
+            tm.outcome,
+            COALESCE(tm.player1_rating_used, 1200.0),
+            COALESCE(tm.player1_rating_used, 1200.0) + tm.player1_elo_delta,
+            COALESCE(tm.player2_rating_used, 1200.0),
+            COALESCE(tm.player2_rating_used, 1200.0) + tm.player2_elo_delta,
+            tm.player1_objectives,
+            tm.player1_survivors,
+            tm.player2_objectives,
+            tm.player2_survivors,
+            tm.player1_army_id,
+            tm.player2_army_id,
+            tm.scenario_id,
+            tm.scenario_name,
+            tm.tournament_id,
+            tm.phase,
+            COALESCE(tm.played_at, tm.confirmed_at, tm.submitted_at, t.completed_at, t.started_at, 0)
+        FROM tournament_matches tm
+        JOIN tournaments t ON t.id = tm.tournament_id
+        WHERE tm.status = 'confirmed'
+          AND tm.is_forfeit = 0
+          AND tm.is_unplayed = 0
+          AND tm.player1 IS NOT NULL
+          AND tm.player2 IS NOT NULL
+          AND tm.outcome IS NOT NULL
+          AND NOT EXISTS (
+            SELECT 1
+            FROM matches m
+            WHERE (
+              lower(trim(m.player1)) = lower(trim(tm.player1))
+              AND lower(trim(m.player2)) = lower(trim(tm.player2))
+              AND m.player1_objectives = tm.player1_objectives
+              AND m.player2_objectives = tm.player2_objectives
+              AND m.player1_survivors = tm.player1_survivors
+              AND m.player2_survivors = tm.player2_survivors
+            )
+            OR (
+              lower(trim(m.player1)) = lower(trim(tm.player2))
+              AND lower(trim(m.player2)) = lower(trim(tm.player1))
+              AND m.player1_objectives = tm.player2_objectives
+              AND m.player2_objectives = tm.player1_objectives
+              AND m.player1_survivors = tm.player2_survivors
+              AND m.player2_survivors = tm.player1_survivors
+            )
+          );
+        ",
+    )?;
     Ok(())
 }
 

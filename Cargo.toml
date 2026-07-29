@@ -13,6 +13,7 @@ reqwest = { version = "0.12", default-features = false, features = ["blocking", 
 rusqlite = { version = "0.32", features = ["bundled"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+csv = "1"
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 tower-http = { version = "0.6", features = ["cors"] }
 tower-sessions = "0.14"
@@ -33,3 +34,15 @@ path = "src/bin/server.rs"
 [[bin]]
 name = "poissonnerie-sync-armies"
 path = "src/bin/sync-armies.rs"
+
+[[bin]]
+name = "poissonnerie-import-coupe4"
+path = "src/bin/import-coupe4.rs"
+
+[[bin]]
+name = "poissonnerie-import-coupe"
+path = "src/bin/import-coupe.rs"
+
+[[bin]]
+name = "poissonnerie-merge-players"
+path = "src/bin/merge-players.rs"

@@ -8,19 +8,35 @@ SERVER_PID_FILE="$RUN_DIR/server.pid"
 FRONTEND_PID_FILE="$RUN_DIR/frontend.pid"
 SERVER_LOG="$LOG_DIR/server.log"
 FRONTEND_LOG="$LOG_DIR/frontend.log"
-SERVER_BIN="$ROOT_DIR/target/debug/poissonnerie-server"
-SYNC_BIN="$ROOT_DIR/target/debug/poissonnerie-sync-armies"
+
+case "$(uname -s)" in
+    MINGW* | MSYS* | CYGWIN*)
+        EXE_EXT=".exe"
+        HAS_SETSID=0
+        ;;
+    *)
+        EXE_EXT=""
+        HAS_SETSID=1
+        command -v setsid >/dev/null 2>&1 || HAS_SETSID=0
+        ;;
+esac
+
+SERVER_BIN="$ROOT_DIR/target/debug/poissonnerie-server${EXE_EXT}"
+SYNC_BIN="$ROOT_DIR/target/debug/poissonnerie-sync-armies${EXE_EXT}"
+IMPORT_BIN="$ROOT_DIR/target/debug/poissonnerie-import-coupe${EXE_EXT}"
 SERVER_ADDR="127.0.0.1:3000"
 FRONTEND_ADDR="127.0.0.1:5173"
 
 usage() {
     cat <<EOF
-Usage: $(basename "$0") {start|stop|restart|status}
+Usage: $(basename "$0") {start|stop|restart|status|import-coupe|import-coupes}
 
-  start    Synchronise les armées, lance l'API Rust et le frontend Vite
-  stop     Arrête l'API et le frontend
-  restart  stop puis start
-  status   Affiche l'état des services
+  start          Synchronise les armées, lance l'API Rust et le frontend Vite
+  stop           Arrête l'API et le frontend
+  restart        stop puis start
+  status         Affiche l'état des services
+  import-coupe   Importe une coupe (5-10) : import-coupe 5 [--dry-run] [--force]
+  import-coupes  Importe les coupes 5 à 10 dans l'ordre (options cargo passées après --)
 EOF
 }
 
@@ -88,6 +104,22 @@ build_rust_bins() {
     fi
 }
 
+ensure_frontend_deps() {
+    local frontend_dir="$ROOT_DIR/frontend"
+    local needs_install=0
+
+    if [[ ! -d "$frontend_dir/node_modules" ]]; then
+        needs_install=1
+    elif [[ "$EXE_EXT" == ".exe" ]] && [[ ! -f "$frontend_dir/node_modules/.bin/vite.cmd" ]]; then
+        needs_install=1
+    fi
+
+    if [[ "$needs_install" == 1 ]]; then
+        log "Installation des dépendances npm..."
+        npm --prefix "$frontend_dir" install
+    fi
+}
+
 sync_armies() {
     log "Synchronisation des armées..."
     "$SYNC_BIN"
@@ -109,11 +141,15 @@ start_server() {
     : >"$SERVER_LOG"
     (
         cd "$ROOT_DIR"
-        exec setsid "$SERVER_BIN" --listen "$SERVER_ADDR"
+        if [[ "$HAS_SETSID" == 1 ]]; then
+            exec setsid "$SERVER_BIN" --listen "$SERVER_ADDR"
+        else
+            exec "$SERVER_BIN" --listen "$SERVER_ADDR"
+        fi
     ) >>"$SERVER_LOG" 2>&1 &
     echo $! >"$SERVER_PID_FILE"
 
-    wait_for_port "$SERVER_ADDR" "API"
+    wait_for_port "$SERVER_ADDR" "API" || return 1
     log "API démarrée (PID $(read_pid "$SERVER_PID_FILE"), http://$SERVER_ADDR)"
 }
 
@@ -130,20 +166,21 @@ start_frontend() {
         return 1
     fi
 
-    if [[ ! -d "$ROOT_DIR/frontend/node_modules" ]]; then
-        log "Installation des dépendances npm..."
-        npm --prefix "$ROOT_DIR/frontend" install
-    fi
+    ensure_frontend_deps
 
     : >"$FRONTEND_LOG"
     load_node
     (
         cd "$ROOT_DIR/frontend"
-        exec setsid npm run dev -- --host 127.0.0.1 --port 5173 --strictPort
+        if [[ "$HAS_SETSID" == 1 ]]; then
+            exec setsid npm run dev -- --host 127.0.0.1 --port 5173 --strictPort
+        else
+            exec npm run dev -- --host 127.0.0.1 --port 5173 --strictPort
+        fi
     ) >>"$FRONTEND_LOG" 2>&1 &
     echo $! >"$FRONTEND_PID_FILE"
 
-    wait_for_port "$FRONTEND_ADDR" "Frontend" 60
+    wait_for_port "$FRONTEND_ADDR" "Frontend" 60 || return 1
     log "Frontend démarré (PID $(read_pid "$FRONTEND_PID_FILE"), http://$FRONTEND_ADDR)"
 }
 
@@ -160,7 +197,11 @@ stop_process() {
     fi
 
     log "Arrêt de $label (PID $pid)..."
-    kill -TERM -- "-$pid" 2>/dev/null || kill -TERM "$pid" 2>/dev/null || true
+    if [[ "$HAS_SETSID" == 1 ]]; then
+        kill -TERM -- "-$pid" 2>/dev/null || kill -TERM "$pid" 2>/dev/null || true
+    else
+        kill -TERM "$pid" 2>/dev/null || true
+    fi
 
     for _ in {1..10}; do
         if ! pid_is_running "$pid"; then
@@ -171,7 +212,11 @@ stop_process() {
         sleep 1
     done
 
-    kill -KILL -- "-$pid" 2>/dev/null || kill -KILL "$pid" 2>/dev/null || true
+    if [[ "$HAS_SETSID" == 1 ]]; then
+        kill -KILL -- "-$pid" 2>/dev/null || kill -KILL "$pid" 2>/dev/null || true
+    else
+        kill -KILL "$pid" 2>/dev/null || true
+    fi
     rm -f "$pid_file"
     log "$label arrêté (SIGKILL)"
 }
@@ -180,7 +225,9 @@ stop_frontend() {
     stop_process "$FRONTEND_PID_FILE" "Frontend"
     if port_is_open "$FRONTEND_ADDR"; then
         log "Libération du port ${FRONTEND_ADDR##*:}..."
-        fuser -k "${FRONTEND_ADDR##*:}/tcp" 2>/dev/null || true
+        if command -v fuser >/dev/null 2>&1; then
+            fuser -k "${FRONTEND_ADDR##*:}/tcp" 2>/dev/null || true
+        fi
         sleep 1
     fi
 }
@@ -239,6 +286,22 @@ cmd_status() {
     fi
 }
 
+cmd_import_coupe() {
+    local coupe="${1:?numéro de coupe requis (5-10)}"
+    shift
+    cargo build --bin poissonnerie-import-coupe --quiet
+    "$IMPORT_BIN" --coupe "$coupe" "$@"
+}
+
+cmd_import_coupes() {
+    cargo build --bin poissonnerie-import-coupe --quiet
+    local c
+    for c in 5 6 7 8 9 10; do
+        log "Import coupe $c…"
+        "$IMPORT_BIN" --coupe "$c" "$@"
+    done
+}
+
 main() {
     local command="${1:-}"
 
@@ -254,6 +317,14 @@ main() {
             ;;
         status)
             cmd_status
+            ;;
+        import-coupe)
+            shift
+            cmd_import_coupe "$@"
+            ;;
+        import-coupes)
+            shift
+            cmd_import_coupes "$@"
             ;;
         -h | --help | help | '')
             usage

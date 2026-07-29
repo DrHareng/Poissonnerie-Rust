@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { toast } from 'vue-sonner'
 import { Plus } from '@lucide/vue'
 import { fetchRanking, fetchRecentMatches } from '@/lib/api'
@@ -10,14 +10,20 @@ import { useAuth } from '@/composables/useAuth'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 
+const PAGE_SIZE = 5
+
 const { isAuthenticated, login } = useAuth()
 
 const players = ref<RankedPlayer[]>([])
 const matches = ref<MatchRecord[]>([])
+const totalMatches = ref(0)
+const page = ref(1)
 const loadingPlayers = ref(true)
 const loadingMatches = ref(true)
 const apiOnline = ref(true)
 const showForm = ref(false)
+
+const totalPages = computed(() => Math.max(1, Math.ceil(totalMatches.value / PAGE_SIZE)))
 
 async function refreshPlayers() {
   loadingPlayers.value = true
@@ -35,7 +41,9 @@ async function refreshPlayers() {
 async function refreshMatches() {
   loadingMatches.value = true
   try {
-    matches.value = await fetchRecentMatches()
+    const response = await fetchRecentMatches(PAGE_SIZE, (page.value - 1) * PAGE_SIZE)
+    matches.value = response.items
+    totalMatches.value = response.total
     apiOnline.value = true
   } catch (error) {
     apiOnline.value = false
@@ -49,8 +57,13 @@ async function refreshAll() {
   await Promise.all([refreshPlayers(), refreshMatches()])
 }
 
+function onPageChange(nextPage: number) {
+  page.value = nextPage
+}
+
 function onRecorded() {
   showForm.value = false
+  page.value = 1
   refreshAll()
 }
 
@@ -67,6 +80,8 @@ function openForm() {
   showForm.value = true
 }
 
+watch(page, refreshMatches)
+
 onMounted(refreshAll)
 </script>
 
@@ -77,7 +92,7 @@ onMounted(refreshAll)
         <div class="space-y-2">
           <h1 class="page-title">Matchs</h1>
           <p class="page-description">
-            Consultez les derniers résultats enregistrés.
+            Consultez les résultats enregistrés.
           </p>
         </div>
         <Button v-if="!showForm" @click="openForm">
@@ -104,6 +119,14 @@ onMounted(refreshAll)
       @cancel="onCancel"
     />
 
-    <RecentMatchesList :matches="matches" :loading="loadingMatches" />
+    <RecentMatchesList
+      :matches="matches"
+      :loading="loadingMatches"
+      :page="page"
+      :page-size="PAGE_SIZE"
+      :total="totalMatches"
+      :total-pages="totalPages"
+      @page-change="onPageChange"
+    />
   </div>
 </template>

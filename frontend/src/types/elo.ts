@@ -93,6 +93,9 @@ export interface MatchRecord extends RatingUpdate, MatchScores {
   player2_army_id?: number | null
   scenario_id?: number | null
   scenario_name?: string | null
+  tournament_id?: number | null
+  tournament_phase?: string | null
+  tournament_name?: string | null
   recorded_at: number
 }
 
@@ -208,6 +211,7 @@ export interface TournamentTopFourEntry {
   rank: number
   player_name: string
   player_display_name?: string | null
+  army_id?: number | null
 }
 
 export interface TournamentListEntry extends Tournament {
@@ -215,6 +219,7 @@ export interface TournamentListEntry extends Tournament {
   waitlist_count: number
   display_status: string
   top_four?: TournamentTopFourEntry[]
+  bracket_matches?: TournamentMatch[]
 }
 
 export interface PlayerTournamentResult {
@@ -223,6 +228,14 @@ export interface PlayerTournamentResult {
   placement_label: string
   final_placement?: number | null
   completed_at?: number | null
+  army_id?: number | null
+}
+
+export interface PaginatedMatches {
+  items: MatchRecord[]
+  total: number
+  limit: number
+  offset: number
 }
 
 export interface ApiError {

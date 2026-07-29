@@ -30,16 +30,20 @@ import type {
   RankedPlayer,
   TournamentDetail,
   TournamentMatch,
+  TournamentPhase,
   TournamentRegistration,
 } from '@/types/elo'
 import { useAuth } from '@/composables/useAuth'
 import ArmyLogo from '@/components/ArmyLogo.vue'
+import BracketTree from '@/components/BracketTree.vue'
 import PlayerLink from '@/components/PlayerLink.vue'
 import PlayerPicker from '@/components/PlayerPicker.vue'
 import SectorialPicker from '@/components/SectorialPicker.vue'
+import PoolMatchesTable from '@/components/PoolMatchesTable.vue'
 import TournamentMatchCard from '@/components/TournamentMatchCard.vue'
 import type { TournamentMatchForm } from '@/components/TournamentMatchCard.vue'
 import { formatRegistrationSummary, topFourDisplayRows } from '@/lib/tournamentDisplay'
+import { phaseLabels } from '@/lib/tournamentPhase'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import {
@@ -99,26 +103,59 @@ const poolMatches = computed(() =>
 
 const selectedPoolId = ref<number | null>(null)
 
-const myPoolMatches = computed(() => {
-  if (!player.value) return []
+const myTournamentMatches = computed(() => {
+  if (!player.value || !detail.value) return []
   const name = player.value.name.toLowerCase()
-  return poolMatches.value.filter(
+  return detail.value.matches.filter(
     (match) =>
       match.player1?.toLowerCase() === name
       || match.player2?.toLowerCase() === name,
   )
 })
 
+type TournamentTabId = 'resume' | 'arbre' | 'poules' | 'inscriptions' | 'admin'
+
+const activeTab = ref<TournamentTabId>('resume')
+
+const showArbreTab = computed(
+  () => bracketMatches.value.length > 0 || canEditBracket.value,
+)
+
+const showPoulesTab = computed(
+  () => (detail.value?.pools.length ?? 0) > 0 || canEditPools.value,
+)
+
+const tournamentTabs = computed(() => {
+  const tabs: { id: TournamentTabId; label: string }[] = [
+    { id: 'resume', label: 'Résumé' },
+  ]
+  if (showArbreTab.value) {
+    tabs.push({ id: 'arbre', label: "L'arbre" })
+  }
+  if (showPoulesTab.value) {
+    tabs.push({ id: 'poules', label: 'Phase de poules' })
+  }
+  tabs.push({ id: 'inscriptions', label: 'Inscriptions' })
+  if (isAdmin.value) {
+    tabs.push({ id: 'admin', label: 'Administration' })
+  }
+  return tabs
+})
+
+function setActiveTab(tab: TournamentTabId) {
+  activeTab.value = tab
+}
+
 function poolMatchesForPool(poolId: number) {
   return poolMatches.value.filter((match) => match.pool_id === poolId)
 }
 
-function togglePoolDetail(poolId: number) {
-  selectedPoolId.value = selectedPoolId.value === poolId ? null : poolId
+function selectPool(poolId: number) {
+  selectedPoolId.value = poolId
 }
 
-function isPoolSelected(poolId: number) {
-  return selectedPoolId.value === poolId
+function clearPoolSelection() {
+  selectedPoolId.value = null
 }
 
 function selectedPool() {
@@ -127,6 +164,25 @@ function selectedPool() {
 
 const bracketMatches = computed(() =>
   detail.value?.matches.filter((m) => m.phase !== 'pool') ?? [],
+)
+
+const bracketPhaseOrder: TournamentPhase[] = [
+  'round_of_16',
+  'quarter',
+  'semi',
+  'final',
+]
+
+const bracketPhases = computed(() =>
+  bracketPhaseOrder
+    .map((phase) => ({
+      phase,
+      label: phaseLabels[phase],
+      matches: bracketMatches.value
+        .filter((match) => match.phase === phase)
+        .sort((a, b) => (a.bracket_slot ?? 0) - (b.bracket_slot ?? 0)),
+    }))
+    .filter((section) => section.matches.length > 0),
 )
 
 const pendingRegistrations = computed(
@@ -190,11 +246,19 @@ const sortedPools = computed(() =>
 )
 
 const isRoundOf16Format = computed(
-  () => detail.value?.bracket_format === 'round_of_16',
+  () =>
+    sortedPools.value.length === 4
+    && detail.value?.bracket_format !== 'quarters_direct',
 )
 
 const isQuartersDirectFormat = computed(
   () => detail.value?.bracket_format === 'quarters_direct',
+)
+
+const isFullRoundOf16Format = computed(
+  () =>
+    detail.value?.bracket_format === 'round_of_16_full'
+    && (detail.value?.pool_count ?? 0) >= 8,
 )
 
 const approvedRegistrations = computed(
@@ -238,14 +302,6 @@ const statusLabels: Record<string, string> = {
   scheduled: 'À jouer',
   submitted: 'En attente de confirmation',
   confirmed: 'Confirmé',
-}
-
-const phaseLabels: Record<string, string> = {
-  pool: 'Poule',
-  round_of_16: 'Huitièmes de finale',
-  quarter: 'Quart de finale',
-  semi: 'Demi-finale',
-  final: 'Finale',
 }
 
 async function refresh() {
@@ -458,7 +514,7 @@ function playerOptionLabel(poolIndex: number, rank: number, player: PoolPlayer) 
 
 const qualifiedPlayerOptions = computed(() => {
   if (!detail.value) return []
-  const topN = detail.value.bracket_format === 'round_of_16' ? 3 : 2
+  const topN = isRoundOf16Format.value ? 3 : 2
   const options: { value: string; label: string }[] = []
   sortedPools.value.forEach((pool, poolIndex) => {
     sortedPoolPlayers(pool).slice(0, topN).forEach((pp, rankIndex) => {
@@ -478,7 +534,7 @@ function defaultBracketSlots(): ManualBracketSlot[] {
   const second = (index: number) => ranked[index]?.[1]?.player_name
   const third = (index: number) => ranked[index]?.[2]?.player_name
 
-  if (detail.value.bracket_format === 'round_of_16') {
+  if (isRoundOf16Format.value) {
     return [
       { bracket_slot: 0, player1: second(3), player2: third(1), quarter_player1: first(0) },
       { bracket_slot: 1, player1: second(2), player2: third(0), quarter_player1: first(1) },
@@ -487,7 +543,7 @@ function defaultBracketSlots(): ManualBracketSlot[] {
     ]
   }
 
-  if (detail.value.bracket_format === 'quarters_direct') {
+  if (isQuartersDirectFormat.value) {
     return [
       { bracket_slot: 0, player1: second(3), player2: first(0) },
       { bracket_slot: 1, player1: second(2), player2: first(1) },
@@ -496,7 +552,20 @@ function defaultBracketSlots(): ManualBracketSlot[] {
     ]
   }
 
-  return Array.from({ length: 8 }, (_, index) => ({ bracket_slot: index }))
+  if (isFullRoundOf16Format.value) {
+    const firsts = ranked.map((pool) => pool[0]?.player_name)
+    const seconds = ranked.map((pool) => pool[1]?.player_name)
+    const pairings = [
+      [0, 1], [1, 0], [2, 3], [3, 2], [4, 5], [5, 4], [6, 7], [7, 6],
+    ] as const
+    return pairings.map(([firstIndex, secondIndex], bracket_slot) => ({
+      bracket_slot,
+      player1: firsts[firstIndex],
+      player2: seconds[secondIndex],
+    }))
+  }
+
+  return []
 }
 
 function initManualBracket() {
@@ -517,7 +586,7 @@ function initManualBracket() {
       .map((match) => {
         const slot = match.bracket_slot ?? 0
         let quarter_player1: string | undefined
-        if (format === 'round_of_16') {
+        if (isRoundOf16Format.value) {
           const quarterMatch = detail.value!.matches.find(
             (candidate) => candidate.phase === 'quarter' && candidate.bracket_slot === slot,
           )
@@ -544,6 +613,11 @@ function bracketSlotTitle(slot: number) {
     return `Barrage ${slot + 1}`
   }
   return `Huitième ${slot + 1}`
+}
+
+async function saveDefaultBracket() {
+  manualBracket.value = defaultBracketSlots()
+  await saveManualBracket()
 }
 
 async function saveManualBracket() {
@@ -665,6 +739,11 @@ function matchStatusLabel(match: TournamentMatch) {
 }
 
 watch(() => tournamentId.value, refresh, { immediate: true })
+watch(tournamentTabs, (tabs) => {
+  if (!tabs.some((tab) => tab.id === activeTab.value)) {
+    activeTab.value = 'resume'
+  }
+})
 watch(detail, () => {
   initManualPools()
   initManualBracket()
@@ -696,560 +775,598 @@ onMounted(refresh)
         </p>
       </section>
 
-      <!-- Podium -->
-      <Card
-        v-if="detail.status === 'completed' && detail.top_four?.length"
-        class="neon-panel"
-      >
-        <CardHeader>
-          <CardTitle>Top 4</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <ol class="space-y-2">
-            <li
-              v-for="row in topFourDisplayRows(detail.top_four ?? [])"
-              :key="row.label"
-              class="flex items-center gap-3 rounded border px-3 py-2"
-            >
-              <span class="w-10 shrink-0 font-display text-sm font-semibold text-primary">
-                {{ row.label }}
-              </span>
-              <div class="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1">
-                <template
-                  v-for="(entry, index) in row.entries"
-                  :key="entry.player_name"
-                >
-                  <span
-                    v-if="index > 0"
-                    class="text-muted-foreground"
-                  >
-                    ·
-                  </span>
-                  <PlayerLink
-                    :name="entry.player_name"
-                    :display-name="entry.player_display_name"
-                    class="font-medium"
-                  />
-                  <ArmyLogo
-                    v-if="armyIdForPlayer(entry.player_name)"
-                    :army-id="armyIdForPlayer(entry.player_name)!"
-                    class="shrink-0"
-                  />
-                </template>
-              </div>
-            </li>
-          </ol>
-        </CardContent>
-      </Card>
+      <nav class="tournament-tabs" aria-label="Sections du tournoi">
+        <button
+          v-for="tab in tournamentTabs"
+          :key="tab.id"
+          type="button"
+          class="tournament-tab"
+          :class="{ 'tournament-tab--active': activeTab === tab.id }"
+          @click="setActiveTab(tab.id)"
+        >
+          {{ tab.label }}
+        </button>
+      </nav>
 
-      <!-- Inscriptions -->
-      <Card
-        v-if="detail.status === 'registration_open' || detail.status === 'registration_closed'"
-        class="neon-panel"
-      >
-        <CardHeader>
-          <CardTitle>Inscriptions</CardTitle>
-          <CardDescription>
-            Choisissez votre sectorielle à l'inscription. Elle sera révélée au démarrage du tournoi.
-          </CardDescription>
-        </CardHeader>
-        <CardContent class="grid gap-4">
-          <div
-            v-if="hasPlayer && !myRegistration && detail.status === 'registration_open'"
-            class="flex flex-wrap items-end gap-3"
+      <div class="tournament-tab-panels page-panel-scroll">
+        <template v-if="activeTab === 'resume'">
+          <Card
+            v-if="detail.status === 'completed' && detail.top_four?.length"
+            class="neon-panel"
           >
-            <div class="grid min-w-[14rem] flex-1 gap-2">
-              <Label>Sectorielle</Label>
-              <SectorialPicker
-                v-model="registerArmyId"
-                :armies="armies"
-                placeholder="Choisir une sectorielle"
-              />
-            </div>
-            <Button :disabled="registering" @click="register">
-              {{ registering ? 'Envoi...' : "S'inscrire" }}
-            </Button>
-          </div>
-          <div v-else-if="myRegistration" class="flex flex-wrap items-center gap-3">
-            <Badge variant="outline">
-              {{ statusLabels[myRegistration.status] }}
-              <span v-if="myRegistration.waitlist_position">
-                (#{{ myRegistration.waitlist_position }})
-              </span>
-            </Badge>
-            <ArmyLogo
-              v-if="showArmyForRegistration(myRegistration)"
-              :army-id="myRegistration.army_id!"
-              :title="'Votre sectorielle'"
-            />
-            <span
-              v-else-if="myRegistration.army_id || !armiesRevealed"
-              class="text-sm text-muted-foreground"
-            >
-              Sectorielle secrète jusqu'au démarrage
-            </span>
-          </div>
-          <p v-else-if="!isAuthenticated" class="text-sm text-muted-foreground">
-            Connectez-vous pour vous inscrire.
-          </p>
-        </CardContent>
-      </Card>
-
-      <!-- Admin: ajout manuel -->
-      <Card v-if="canAdminAddPlayer" class="neon-panel">
-        <CardHeader>
-          <CardTitle>Ajouter un joueur</CardTitle>
-          <CardDescription>
-            Inscription manuelle avec sectorielle (validée automatiquement).
-          </CardDescription>
-        </CardHeader>
-        <CardContent class="flex flex-wrap items-end gap-3">
-          <div class="grid min-w-[14rem] flex-1 gap-2">
-            <Label>Joueur</Label>
-            <PlayerPicker
-              v-model="adminPlayerName"
-              :options="availablePlayersForAdmin"
-              placeholder="Tapez pour chercher un joueur"
-            />
-          </div>
-          <div class="grid min-w-[14rem] flex-1 gap-2">
-            <Label>Sectorielle</Label>
-            <SectorialPicker
-              v-model="adminArmyId"
-              :armies="armies"
-              placeholder="Choisir une sectorielle"
-            />
-          </div>
-          <Button :disabled="adminAdding" @click="adminAddPlayer">
-            {{ adminAdding ? 'Ajout...' : 'Ajouter au tournoi' }}
-          </Button>
-        </CardContent>
-      </Card>
-
-      <!-- Pending registrations (admin) -->
-      <Card v-if="isAdmin && pendingRegistrations.length > 0" class="neon-panel">
-        <CardHeader>
-          <CardTitle>Inscriptions en attente</CardTitle>
-        </CardHeader>
-        <CardContent class="grid gap-2">
-          <div
-            v-for="reg in pendingRegistrations"
-            :key="reg.id"
-            class="flex items-center justify-between rounded border p-3"
-          >
-            <div class="flex items-center gap-2">
-              <PlayerLink
-                :name="reg.player_name"
-                :display-name="reg.player_display_name"
-              />
-              <ArmyLogo v-if="reg.army_id" :army-id="reg.army_id" />
-            </div>
-            <div class="flex gap-2">
-              <Button size="sm" @click="review(reg, 'approved')">
-                <Check class="size-4" />
-              </Button>
-              <Button size="sm" variant="outline" @click="review(reg, 'rejected')">
-                <X class="size-4" />
-              </Button>
-            </div>
-          </div>
-        </CardContent>
-      </Card>
-
-      <!-- Configuration manuelle des poules -->
-      <Card v-if="canEditPools" class="neon-panel">
-        <CardHeader>
-          <CardTitle>Configurer les poules</CardTitle>
-          <CardDescription>
-            Répartissez manuellement les joueurs validés dans chaque poule (6 max.).
-          </CardDescription>
-        </CardHeader>
-        <CardContent class="grid gap-4 md:grid-cols-2">
-          <div
-            v-for="(pool, poolIndex) in manualPools"
-            :key="pool.position"
-            class="rounded-lg border p-4"
-          >
-            <div class="mb-3 flex items-center justify-between gap-2">
-              <h3 class="font-semibold">{{ pool.name }}</h3>
-              <span class="text-xs text-muted-foreground">{{ pool.players.length }}/6</span>
-            </div>
-
-            <ul class="mb-3 space-y-2">
-              <li
-                v-for="playerName in pool.players"
-                :key="playerName"
-                class="flex items-center justify-between gap-2 rounded border px-2 py-1.5 text-sm"
-              >
-                <div class="flex min-w-0 items-center gap-2">
-                  <PlayerLink
-                    :name="playerName"
-                    :display-name="registrationForPlayer(playerName)?.player_display_name"
-                  />
-                  <ArmyLogo
-                    v-if="registrationForPlayer(playerName)?.army_id"
-                    :army-id="registrationForPlayer(playerName)!.army_id!"
-                  />
-                </div>
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  @click="removePlayerFromPool(poolIndex, playerName)"
-                >
-                  <X class="size-4" />
-                </Button>
-              </li>
-              <li v-if="pool.players.length === 0" class="text-sm text-muted-foreground">
-                Aucun joueur
-              </li>
-            </ul>
-
-            <div
-              v-if="pool.players.length < 6 && unassignedPlayerOptions.length > 0"
-              class="flex items-end gap-2"
-            >
-              <div class="grid min-w-0 flex-1 gap-1">
-                <Label class="text-xs">Ajouter un joueur</Label>
-                <PlayerPicker
-                  v-model="poolPickerValues[poolIndex]"
-                  :options="unassignedPlayerOptions"
-                  placeholder="Chercher un joueur"
-                />
-              </div>
-              <Button size="sm" @click="addPlayerToPool(poolIndex)">
-                Ajouter
-              </Button>
-            </div>
-          </div>
-
-          <div class="flex flex-wrap items-center justify-between gap-3 border-t pt-4 md:col-span-2">
-            <p class="text-sm text-muted-foreground">
-              {{ assignedPlayerNames.size }}/{{ approvedRegistrations.length }} joueurs répartis
-              <span v-if="unassignedPlayerOptions.length > 0">
-                — {{ unassignedPlayerOptions.length }} non assigné(s)
-              </span>
-            </p>
-            <Button :disabled="savingPools" @click="saveManualPools">
-              {{ savingPools ? 'Enregistrement...' : 'Enregistrer les poules' }}
-            </Button>
-          </div>
-        </CardContent>
-      </Card>
-
-      <!-- Admin controls -->
-      <Card v-if="isAdmin" class="neon-panel-accent">
-        <CardHeader>
-          <CardTitle>Administration</CardTitle>
-        </CardHeader>
-        <CardContent class="flex flex-wrap gap-2">
-          <Button
-            v-if="detail.status === 'draft'"
-            size="sm"
-            @click="act(() => openTournamentRegistration(tournamentId), 'Inscriptions ouvertes')"
-          >
-            Ouvrir inscriptions
-          </Button>
-          <Button
-            v-if="detail.status === 'registration_open'"
-            size="sm"
-            variant="outline"
-            @click="act(() => closeTournamentRegistration(tournamentId), 'Inscriptions fermées')"
-          >
-            Fermer inscriptions
-          </Button>
-          <Button
-            v-if="detail.status === 'registration_open' || detail.status === 'registration_closed'"
-            size="sm"
-            @click="act(() => startTournament(tournamentId), 'Tournoi démarré')"
-          >
-            Démarrer le tournoi
-          </Button>
-          <Button
-            v-if="detail.status === 'started' && detail.pools.length > 0 && poolMatches.length === 0"
-            size="sm"
-            variant="outline"
-            @click="act(() => generatePoolMatches(tournamentId), 'Matchs de poule générés')"
-          >
-            Générer matchs de poule
-          </Button>
-          <Button
-            v-if="detail.status === 'started' && poolMatches.length > 0 && !detail.pools_finalized_at"
-            size="sm"
-            @click="act(() => finalizePools(tournamentId), 'Poules clôturées')"
-          >
-            Clôturer les poules
-          </Button>
-        </CardContent>
-      </Card>
-
-      <!-- Configuration manuelle de l'arbre -->
-      <Card v-if="canEditBracket" class="neon-panel">
-        <CardHeader>
-          <CardTitle>Configurer l'arbre</CardTitle>
-          <CardDescription>
-            Définissez manuellement les affrontements du premier tour de l'arbre.
-          </CardDescription>
-        </CardHeader>
-        <CardContent class="grid gap-4 md:grid-cols-2">
-          <div
-            v-for="slot in manualBracket"
-            :key="slot.bracket_slot"
-            class="rounded-lg border p-4"
-          >
-            <h3 class="mb-3 font-semibold">{{ bracketSlotTitle(slot.bracket_slot) }}</h3>
-            <div class="grid gap-3">
-              <div class="grid gap-1">
-                <Label>Joueur 1</Label>
-                <PlayerPicker
-                  v-model="slot.player1"
-                  :options="qualifiedPlayerOptions"
-                  placeholder="Choisir un joueur"
-                />
-              </div>
-              <div class="grid gap-1">
-                <Label>Joueur 2</Label>
-                <PlayerPicker
-                  v-model="slot.player2"
-                  :options="qualifiedPlayerOptions"
-                  placeholder="Choisir un joueur"
-                />
-              </div>
-              <div v-if="isRoundOf16Format" class="grid gap-1">
-                <Label>1er de poule en attente (quart de finale)</Label>
-                <PlayerPicker
-                  v-model="slot.quarter_player1"
-                  :options="qualifiedPlayerOptions"
-                  placeholder="Choisir le 1er de poule"
-                />
-              </div>
-            </div>
-          </div>
-
-          <div class="flex flex-wrap items-center justify-between gap-3 border-t pt-4 md:col-span-2">
-            <Button
-              size="sm"
-              variant="outline"
-              @click="manualBracket = defaultBracketSlots()"
-            >
-              Réinitialiser les appariements
-            </Button>
-            <Button :disabled="savingBracket" @click="saveManualBracket">
-              {{ savingBracket ? 'Enregistrement...' : 'Enregistrer l\'arbre' }}
-            </Button>
-          </div>
-        </CardContent>
-      </Card>
-
-      <!-- Arbre -->
-      <Card v-if="bracketMatches.length > 0" class="neon-panel">
-        <CardHeader>
-          <CardTitle>Arbre</CardTitle>
-        </CardHeader>
-        <CardContent class="grid gap-3">
-          <TournamentMatchCard
-            v-for="match in bracketMatches"
-            :key="match.id"
-            :match="match"
-            :form="getForm(match)"
-            :can-interact="canInteractWithMatch(match)"
-            :is-admin="isAdmin"
-            :player1-army-id="matchPlayerArmyId(match, 'player1')"
-            :player2-army-id="matchPlayerArmyId(match, 'player2')"
-            :status-label="matchStatusLabel(match)"
-            :phase-label="phaseLabels[match.phase] ?? match.phase"
-            @submit="submitMatch(match)"
-            @confirm="confirmMatch(match)"
-            @correct="correctMatch(match, $event)"
-            @forfeit="forfeitMatch(match, $event)"
-            @unplayed="markMatchUnplayed(match)"
-          />
-        </CardContent>
-      </Card>
-
-      <!-- Poules (classement + détail matchs au clic) -->
-      <Card
-        v-if="detail.pools.length > 0 && !canEditPools"
-        class="neon-panel"
-      >
-        <CardHeader>
-          <CardTitle>Poules</CardTitle>
-          <CardDescription>
-            Cliquez sur une poule pour afficher ses matchs.
-          </CardDescription>
-        </CardHeader>
-        <CardContent class="grid gap-4">
-          <div class="grid gap-4 md:grid-cols-2">
-            <div
-              v-for="pool in sortedPools"
-              :key="pool.id"
-              class="pool-summary"
-              :class="{ 'pool-summary--active': isPoolSelected(pool.id) }"
-            >
-              <button
-                type="button"
-                class="pool-summary-header"
-                @click="togglePoolDetail(pool.id)"
-              >
-                <h3 class="font-semibold">{{ pool.name }}</h3>
-                <span class="text-xs tabular-nums text-muted-foreground">PT / PO / PS</span>
-              </button>
-              <ol class="space-y-1 text-sm">
+            <CardHeader>
+              <CardTitle>Top 4</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <ol class="space-y-2">
                 <li
-                  v-for="(pp, idx) in sortedPoolPlayers(pool)"
-                  :key="pp.player_name"
-                  class="flex items-center justify-between gap-2"
+                  v-for="row in topFourDisplayRows(detail.top_four ?? [])"
+                  :key="row.label"
+                  class="flex items-center gap-3 rounded border px-3 py-2"
                 >
-                  <span class="flex min-w-0 items-center gap-2">
-                    <span class="shrink-0 tabular-nums text-muted-foreground">{{ idx + 1 }}.</span>
-                    <PlayerLink
-                      :name="pp.player_name"
-                      :display-name="pp.player_display_name"
-                    />
-                    <ArmyLogo
-                      v-if="poolPlayerArmyId(pp)"
-                      :army-id="poolPlayerArmyId(pp)!"
-                      class="shrink-0"
-                    />
+                  <span class="w-10 shrink-0 font-display text-sm font-semibold text-primary">
+                    {{ row.label }}
                   </span>
-                  <span
-                    class="shrink-0 tabular-nums text-muted-foreground"
-                    title="Points tournoi / objectifs / survivants"
-                  >
-                    {{ pp.points }}/{{ pp.objectives }}/{{ pp.survivors }}
-                  </span>
+                  <div class="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1">
+                    <template
+                      v-for="(entry, index) in row.entries"
+                      :key="entry.player_name"
+                    >
+                      <span
+                        v-if="index > 0"
+                        class="text-muted-foreground"
+                      >
+                        ·
+                      </span>
+                      <PlayerLink
+                        :name="entry.player_name"
+                        :display-name="entry.player_display_name"
+                        class="font-medium"
+                      />
+                      <ArmyLogo
+                        v-if="armyIdForPlayer(entry.player_name)"
+                        :army-id="armyIdForPlayer(entry.player_name)!"
+                        class="shrink-0"
+                      />
+                    </template>
+                  </div>
                 </li>
               </ol>
-            </div>
-          </div>
+            </CardContent>
+          </Card>
 
-          <section
-            v-if="selectedPoolId && selectedPool()"
-            class="pool-detail"
-          >
-            <div class="pool-detail-header">
-              <h3 class="font-semibold">
-                {{ selectedPool()!.name }} — matchs
-              </h3>
-              <Button
-                size="sm"
-                variant="ghost"
-                @click="selectedPoolId = null"
-              >
-                Fermer
-              </Button>
-            </div>
-            <div class="grid gap-3">
-              <TournamentMatchCard
-                v-for="match in poolMatchesForPool(selectedPoolId)"
-                :key="match.id"
-                :match="match"
-                :form="getForm(match)"
-                :can-interact="canInteractWithMatch(match)"
-                :is-admin="isAdmin"
-                :player1-army-id="matchPlayerArmyId(match, 'player1')"
-                :player2-army-id="matchPlayerArmyId(match, 'player2')"
-                :status-label="matchStatusLabel(match)"
-                @submit="submitMatch(match)"
-                @confirm="confirmMatch(match)"
-                @correct="correctMatch(match, $event)"
-                @forfeit="forfeitMatch(match, $event)"
-                @unplayed="markMatchUnplayed(match)"
-              />
+          <Card class="neon-panel">
+            <CardHeader>
+              <CardTitle>Mes matchs</CardTitle>
+              <CardDescription>
+                Vos parties dans ce tournoi.
+              </CardDescription>
+            </CardHeader>
+            <CardContent class="grid gap-3">
               <p
-                v-if="poolMatchesForPool(selectedPoolId).length === 0"
-                class="rounded-lg border border-dashed p-6 text-center text-sm text-muted-foreground"
+                v-if="!isAuthenticated"
+                class="rounded-lg border border-dashed p-4 text-center text-sm text-muted-foreground"
               >
-                Aucun match pour cette poule.
+                Connectez-vous pour consulter et renseigner vos matchs.
               </p>
-            </div>
-          </section>
-        </CardContent>
-      </Card>
+              <p
+                v-else-if="!hasPlayer"
+                class="rounded-lg border border-dashed p-4 text-center text-sm text-muted-foreground"
+              >
+                Votre compte n'est pas lié à un joueur du classement.
+              </p>
+              <template v-else>
+                <TournamentMatchCard
+                  v-for="match in myTournamentMatches"
+                  :key="match.id"
+                  :match="match"
+                  :form="getForm(match)"
+                  :can-interact="canInteractWithMatch(match)"
+                  :is-admin="isAdmin"
+                  :player1-army-id="matchPlayerArmyId(match, 'player1')"
+                  :player2-army-id="matchPlayerArmyId(match, 'player2')"
+                  :status-label="matchStatusLabel(match)"
+                  :phase-label="phaseLabels[match.phase] ?? match.phase"
+                  @submit="submitMatch(match)"
+                  @confirm="confirmMatch(match)"
+                  @correct="correctMatch(match, $event)"
+                  @forfeit="forfeitMatch(match, $event)"
+                  @unplayed="markMatchUnplayed(match)"
+                />
+                <p
+                  v-if="myTournamentMatches.length === 0"
+                  class="rounded-lg border border-dashed p-4 text-center text-sm text-muted-foreground"
+                >
+                  Vous n'avez pas de match dans ce tournoi.
+                </p>
+              </template>
+            </CardContent>
+          </Card>
+        </template>
 
-      <!-- Mes matchs de poule -->
-      <Card
-        v-if="poolMatches.length > 0"
-        class="neon-panel page-panel-scroll"
-      >
-        <CardHeader>
-          <CardTitle>Mes matchs</CardTitle>
-          <CardDescription>
-            Historique et saisie de vos résultats en phase de poules.
-          </CardDescription>
-        </CardHeader>
-        <CardContent class="grid gap-3">
-          <p
-            v-if="!isAuthenticated"
-            class="rounded-lg border border-dashed p-6 text-center text-sm text-muted-foreground"
-          >
-            Connectez-vous pour consulter et renseigner vos matchs.
-          </p>
-          <p
-            v-else-if="!hasPlayer"
-            class="rounded-lg border border-dashed p-6 text-center text-sm text-muted-foreground"
-          >
-            Votre compte n'est pas lié à un joueur du classement.
-          </p>
-          <template v-else>
-            <TournamentMatchCard
-              v-for="match in myPoolMatches"
-              :key="match.id"
-              :match="match"
-              :form="getForm(match)"
-              :can-interact="canInteractWithMatch(match)"
-              :is-admin="isAdmin"
-              :player1-army-id="matchPlayerArmyId(match, 'player1')"
-              :player2-army-id="matchPlayerArmyId(match, 'player2')"
-              :status-label="matchStatusLabel(match)"
-              @submit="submitMatch(match)"
-              @confirm="confirmMatch(match)"
-              @correct="correctMatch(match, $event)"
-              @forfeit="forfeitMatch(match, $event)"
-              @unplayed="markMatchUnplayed(match)"
-            />
-            <p
-              v-if="myPoolMatches.length === 0"
-              class="rounded-lg border border-dashed p-6 text-center text-sm text-muted-foreground"
-            >
-              Vous n'avez pas de match de poule dans ce tournoi.
-            </p>
-          </template>
-        </CardContent>
-      </Card>
+        <template v-else-if="activeTab === 'arbre'">
+          <Card v-if="canEditBracket" class="neon-panel">
+            <CardHeader>
+              <CardTitle>Configurer l'arbre</CardTitle>
+              <CardDescription v-if="isRoundOf16Format">
+                4 barrages : 2e vs 3e de poules croisées. Les 1ers de poule attendent en quart de finale.
+              </CardDescription>
+              <CardDescription v-else-if="isQuartersDirectFormat">
+                Quarts directs : 1er d'une poule vs 2e d'une autre poule.
+              </CardDescription>
+              <CardDescription v-else>
+                Définissez manuellement les affrontements du premier tour de l'arbre.
+              </CardDescription>
+            </CardHeader>
+            <CardContent class="grid gap-3 md:grid-cols-2">
+              <div
+                v-for="slot in manualBracket"
+                :key="slot.bracket_slot"
+                class="rounded-lg border p-3"
+              >
+                <h3 class="mb-3 font-semibold">{{ bracketSlotTitle(slot.bracket_slot) }}</h3>
+                <div class="grid gap-3">
+                  <div class="grid gap-1">
+                    <Label>Joueur 1</Label>
+                    <PlayerPicker
+                      v-model="slot.player1"
+                      :options="qualifiedPlayerOptions"
+                      placeholder="Choisir un joueur"
+                    />
+                  </div>
+                  <div class="grid gap-1">
+                    <Label>Joueur 2</Label>
+                    <PlayerPicker
+                      v-model="slot.player2"
+                      :options="qualifiedPlayerOptions"
+                      placeholder="Choisir un joueur"
+                    />
+                  </div>
+                  <div v-if="isRoundOf16Format" class="grid gap-1">
+                    <Label>1er de poule en attente (quart de finale)</Label>
+                    <PlayerPicker
+                      v-model="slot.quarter_player1"
+                      :options="qualifiedPlayerOptions"
+                      placeholder="Choisir le 1er de poule"
+                    />
+                  </div>
+                </div>
+              </div>
 
-      <!-- Liste des inscrits -->
-      <Card
-        v-if="activeRegistrations.length > 0 && (armiesRevealed || isAdmin)"
-        class="neon-panel"
-      >
-        <CardHeader>
-          <CardTitle>Inscrits</CardTitle>
-          <CardDescription v-if="!armiesRevealed && isAdmin">
-            Sectorielles visibles uniquement pour l'orga avant le démarrage.
-          </CardDescription>
-        </CardHeader>
-        <CardContent class="grid gap-2 sm:grid-cols-2">
-          <div
-            v-for="reg in activeRegistrations"
-            :key="reg.id"
-            class="flex items-center justify-between rounded border px-3 py-2 text-sm"
+              <div class="flex flex-wrap items-center justify-between gap-3 border-t pt-3 md:col-span-2">
+                <Button
+                  size="sm"
+                  variant="outline"
+                  @click="manualBracket = defaultBracketSlots()"
+                >
+                  Réinitialiser les appariements
+                </Button>
+                <div class="flex flex-wrap gap-2">
+                  <Button
+                    v-if="isRoundOf16Format || isQuartersDirectFormat"
+                    size="sm"
+                    variant="outline"
+                    :disabled="savingBracket"
+                    @click="saveDefaultBracket"
+                  >
+                    Arbre par défaut
+                  </Button>
+                  <Button :disabled="savingBracket" @click="saveManualBracket">
+                    {{ savingBracket ? 'Enregistrement...' : 'Enregistrer l\'arbre' }}
+                  </Button>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card v-if="bracketMatches.length > 0" class="neon-panel">
+            <CardHeader>
+              <CardTitle>Arbre</CardTitle>
+            </CardHeader>
+            <CardContent class="grid gap-6">
+              <BracketTree :matches="bracketMatches" />
+              <section
+                v-for="section in bracketPhases"
+                :key="section.phase"
+                class="bracket-phase-section"
+              >
+                <h3 class="bracket-phase-title">{{ section.label }}</h3>
+                <PoolMatchesTable
+                  :matches="section.matches"
+                  :is-admin="isAdmin"
+                  :get-form="getForm"
+                  :can-interact="canInteractWithMatch"
+                  :player-army-id="matchPlayerArmyId"
+                  :status-label="matchStatusLabel"
+                  :allow-unplayed="false"
+                  @submit="submitMatch"
+                  @confirm="confirmMatch"
+                  @correct="correctMatch"
+                  @forfeit="forfeitMatch"
+                  @unplayed="markMatchUnplayed"
+                />
+              </section>
+            </CardContent>
+          </Card>
+        </template>
+
+        <template v-else-if="activeTab === 'poules'">
+          <Card v-if="canEditPools" class="neon-panel">
+            <CardHeader>
+              <CardTitle>Configurer les poules</CardTitle>
+              <CardDescription>
+                Répartissez manuellement les joueurs validés dans chaque poule (6 max.).
+              </CardDescription>
+            </CardHeader>
+            <CardContent class="grid gap-3 md:grid-cols-2">
+              <div
+                v-for="(pool, poolIndex) in manualPools"
+                :key="pool.position"
+                class="rounded-lg border p-3"
+              >
+                <div class="mb-3 flex items-center justify-between gap-2">
+                  <h3 class="font-semibold">{{ pool.name }}</h3>
+                  <span class="text-xs text-muted-foreground">{{ pool.players.length }}/6</span>
+                </div>
+
+                <ul class="mb-3 space-y-2">
+                  <li
+                    v-for="playerName in pool.players"
+                    :key="playerName"
+                    class="flex items-center justify-between gap-2 rounded border px-2 py-1.5 text-sm"
+                  >
+                    <div class="flex min-w-0 items-center gap-2">
+                      <PlayerLink
+                        :name="playerName"
+                        :display-name="registrationForPlayer(playerName)?.player_display_name"
+                      />
+                      <ArmyLogo
+                        v-if="registrationForPlayer(playerName)?.army_id"
+                        :army-id="registrationForPlayer(playerName)!.army_id!"
+                      />
+                    </div>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      @click="removePlayerFromPool(poolIndex, playerName)"
+                    >
+                      <X class="size-4" />
+                    </Button>
+                  </li>
+                  <li v-if="pool.players.length === 0" class="text-sm text-muted-foreground">
+                    Aucun joueur
+                  </li>
+                </ul>
+
+                <div
+                  v-if="pool.players.length < 6 && unassignedPlayerOptions.length > 0"
+                  class="flex items-end gap-2"
+                >
+                  <div class="grid min-w-0 flex-1 gap-1">
+                    <Label class="text-xs">Ajouter un joueur</Label>
+                    <PlayerPicker
+                      v-model="poolPickerValues[poolIndex]"
+                      :options="unassignedPlayerOptions"
+                      placeholder="Chercher un joueur"
+                    />
+                  </div>
+                  <Button size="sm" @click="addPlayerToPool(poolIndex)">
+                    Ajouter
+                  </Button>
+                </div>
+              </div>
+
+              <div class="flex flex-wrap items-center justify-between gap-3 border-t pt-3 md:col-span-2">
+                <p class="text-sm text-muted-foreground">
+                  {{ assignedPlayerNames.size }}/{{ approvedRegistrations.length }} joueurs répartis
+                  <span v-if="unassignedPlayerOptions.length > 0">
+                    — {{ unassignedPlayerOptions.length }} non assigné(s)
+                  </span>
+                </p>
+                <Button :disabled="savingPools" @click="saveManualPools">
+                  {{ savingPools ? 'Enregistrement...' : 'Enregistrer les poules' }}
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card
+            v-if="detail.pools.length > 0 && !canEditPools"
+            class="neon-panel"
           >
-            <div class="flex items-center gap-2">
-              <PlayerLink
-                :name="reg.player_name"
-                :display-name="reg.player_display_name"
-              />
-              <ArmyLogo
-                v-if="showArmyForRegistration(reg)"
-                :army-id="reg.army_id!"
-              />
-            </div>
-            <Badge variant="outline" class="text-xs">
-              {{ statusLabels[reg.status] }}
-            </Badge>
-          </div>
-        </CardContent>
-      </Card>
+            <CardHeader>
+              <nav
+                v-if="selectedPoolId && selectedPool()"
+                class="pool-breadcrumb"
+                aria-label="Navigation des poules"
+              >
+                <button type="button" class="pool-breadcrumb-link" @click="clearPoolSelection">
+                  Poules
+                </button>
+                <span class="pool-breadcrumb-sep" aria-hidden="true">›</span>
+                <span class="pool-breadcrumb-current">{{ selectedPool()!.name }}</span>
+              </nav>
+              <CardTitle v-else>
+                Poules
+              </CardTitle>
+              <CardDescription v-if="!selectedPoolId">
+                Cliquez sur une poule pour afficher ses matchs.
+              </CardDescription>
+            </CardHeader>
+            <CardContent class="grid gap-3">
+              <div v-if="!selectedPoolId" class="grid gap-3 md:grid-cols-2">
+                <div
+                  v-for="pool in sortedPools"
+                  :key="pool.id"
+                  class="pool-summary"
+                >
+                  <button
+                    type="button"
+                    class="pool-summary-header"
+                    @click="selectPool(pool.id)"
+                  >
+                    <h3 class="font-semibold">{{ pool.name }}</h3>
+                  </button>
+                  <table class="pool-standings-table">
+                    <thead>
+                      <tr>
+                        <th class="pool-col-rank">#</th>
+                        <th class="pool-col-player">Joueur</th>
+                        <th class="pool-col-stat">PT</th>
+                        <th class="pool-col-stat">PO</th>
+                        <th class="pool-col-stat">PS</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <tr
+                        v-for="(pp, idx) in sortedPoolPlayers(pool)"
+                        :key="pp.player_name"
+                      >
+                        <td class="pool-col-rank text-muted-foreground">{{ idx + 1 }}</td>
+                        <td class="pool-col-player">
+                          <span class="flex min-w-0 items-center gap-2">
+                            <PlayerLink
+                              :name="pp.player_name"
+                              :display-name="pp.player_display_name"
+                            />
+                            <ArmyLogo
+                              v-if="poolPlayerArmyId(pp)"
+                              :army-id="poolPlayerArmyId(pp)!"
+                              class="shrink-0"
+                            />
+                          </span>
+                        </td>
+                        <td class="pool-col-stat">{{ pp.points }}</td>
+                        <td class="pool-col-stat">{{ pp.objectives }}</td>
+                        <td class="pool-col-stat">{{ pp.survivors }}</td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              <section
+                v-else-if="selectedPool()"
+                class="pool-detail"
+              >
+                <PoolMatchesTable
+                  v-if="poolMatchesForPool(selectedPoolId!).length > 0"
+                  :matches="poolMatchesForPool(selectedPoolId!)"
+                  :is-admin="isAdmin"
+                  :get-form="getForm"
+                  :can-interact="canInteractWithMatch"
+                  :player-army-id="matchPlayerArmyId"
+                  :status-label="matchStatusLabel"
+                  @submit="submitMatch"
+                  @confirm="confirmMatch"
+                  @correct="correctMatch"
+                  @forfeit="forfeitMatch"
+                  @unplayed="markMatchUnplayed"
+                />
+                <p
+                  v-else
+                  class="rounded-lg border border-dashed p-4 text-center text-sm text-muted-foreground"
+                >
+                  Aucun match pour cette poule.
+                </p>
+              </section>
+            </CardContent>
+          </Card>
+        </template>
+
+        <template v-else-if="activeTab === 'inscriptions'">
+          <Card
+            v-if="detail.status === 'registration_open' || detail.status === 'registration_closed'"
+            class="neon-panel"
+          >
+            <CardHeader>
+              <CardTitle>Inscriptions</CardTitle>
+              <CardDescription>
+                Choisissez votre sectorielle à l'inscription. Elle sera révélée au démarrage du tournoi.
+              </CardDescription>
+            </CardHeader>
+            <CardContent class="grid gap-3">
+              <div
+                v-if="hasPlayer && !myRegistration && detail.status === 'registration_open'"
+                class="flex flex-wrap items-end gap-3"
+              >
+                <div class="grid min-w-[14rem] flex-1 gap-2">
+                  <Label>Sectorielle</Label>
+                  <SectorialPicker
+                    v-model="registerArmyId"
+                    :armies="armies"
+                    placeholder="Choisir une sectorielle"
+                  />
+                </div>
+                <Button :disabled="registering" @click="register">
+                  {{ registering ? 'Envoi...' : "S'inscrire" }}
+                </Button>
+              </div>
+              <div v-else-if="myRegistration" class="flex flex-wrap items-center gap-3">
+                <Badge variant="outline">
+                  {{ statusLabels[myRegistration.status] }}
+                  <span v-if="myRegistration.waitlist_position">
+                    (#{{ myRegistration.waitlist_position }})
+                  </span>
+                </Badge>
+                <ArmyLogo
+                  v-if="showArmyForRegistration(myRegistration)"
+                  :army-id="myRegistration.army_id!"
+                  :title="'Votre sectorielle'"
+                />
+                <span
+                  v-else-if="myRegistration.army_id || !armiesRevealed"
+                  class="text-sm text-muted-foreground"
+                >
+                  Sectorielle secrète jusqu'au démarrage
+                </span>
+              </div>
+              <p v-else-if="!isAuthenticated" class="text-sm text-muted-foreground">
+                Connectez-vous pour vous inscrire.
+              </p>
+            </CardContent>
+          </Card>
+
+          <Card
+            v-if="activeRegistrations.length > 0 && (armiesRevealed || isAdmin)"
+            class="neon-panel"
+          >
+            <CardHeader>
+              <CardTitle>Inscrits</CardTitle>
+              <CardDescription v-if="!armiesRevealed && isAdmin">
+                Sectorielles visibles uniquement pour l'orga avant le démarrage.
+              </CardDescription>
+            </CardHeader>
+            <CardContent class="grid gap-2 sm:grid-cols-2">
+              <div
+                v-for="reg in activeRegistrations"
+                :key="reg.id"
+                class="flex items-center justify-between rounded border px-3 py-2 text-sm"
+              >
+                <div class="flex items-center gap-2">
+                  <PlayerLink
+                    :name="reg.player_name"
+                    :display-name="reg.player_display_name"
+                  />
+                  <ArmyLogo
+                    v-if="showArmyForRegistration(reg)"
+                    :army-id="reg.army_id!"
+                  />
+                </div>
+                <Badge variant="outline" class="text-xs">
+                  {{ statusLabels[reg.status] }}
+                </Badge>
+              </div>
+            </CardContent>
+          </Card>
+        </template>
+
+        <template v-else-if="activeTab === 'admin'">
+          <Card class="neon-panel-accent">
+            <CardHeader>
+              <CardTitle>Administration</CardTitle>
+            </CardHeader>
+            <CardContent class="flex flex-wrap gap-2">
+              <Button
+                v-if="detail.status === 'draft'"
+                size="sm"
+                @click="act(() => openTournamentRegistration(tournamentId), 'Inscriptions ouvertes')"
+              >
+                Ouvrir inscriptions
+              </Button>
+              <Button
+                v-if="detail.status === 'registration_open'"
+                size="sm"
+                variant="outline"
+                @click="act(() => closeTournamentRegistration(tournamentId), 'Inscriptions fermées')"
+              >
+                Fermer inscriptions
+              </Button>
+              <Button
+                v-if="detail.status === 'registration_open' || detail.status === 'registration_closed'"
+                size="sm"
+                @click="act(() => startTournament(tournamentId), 'Tournoi démarré')"
+              >
+                Démarrer le tournoi
+              </Button>
+              <Button
+                v-if="detail.status === 'started' && detail.pools.length > 0 && poolMatches.length === 0"
+                size="sm"
+                variant="outline"
+                @click="act(() => generatePoolMatches(tournamentId), 'Matchs de poule générés')"
+              >
+                Générer matchs de poule
+              </Button>
+              <Button
+                v-if="detail.status === 'started' && poolMatches.length > 0 && !detail.pools_finalized_at"
+                size="sm"
+                @click="act(() => finalizePools(tournamentId), 'Poules clôturées')"
+              >
+                Clôturer les poules
+              </Button>
+            </CardContent>
+          </Card>
+
+          <Card v-if="canAdminAddPlayer" class="neon-panel">
+            <CardHeader>
+              <CardTitle>Ajouter un joueur</CardTitle>
+              <CardDescription>
+                Inscription manuelle avec sectorielle (validée automatiquement).
+              </CardDescription>
+            </CardHeader>
+            <CardContent class="flex flex-wrap items-end gap-3">
+              <div class="grid min-w-[14rem] flex-1 gap-2">
+                <Label>Joueur</Label>
+                <PlayerPicker
+                  v-model="adminPlayerName"
+                  :options="availablePlayersForAdmin"
+                  placeholder="Tapez pour chercher un joueur"
+                />
+              </div>
+              <div class="grid min-w-[14rem] flex-1 gap-2">
+                <Label>Sectorielle</Label>
+                <SectorialPicker
+                  v-model="adminArmyId"
+                  :armies="armies"
+                  placeholder="Choisir une sectorielle"
+                />
+              </div>
+              <Button :disabled="adminAdding" @click="adminAddPlayer">
+                {{ adminAdding ? 'Ajout...' : 'Ajouter au tournoi' }}
+              </Button>
+            </CardContent>
+          </Card>
+
+          <Card v-if="pendingRegistrations.length > 0" class="neon-panel">
+            <CardHeader>
+              <CardTitle>Inscriptions en attente</CardTitle>
+            </CardHeader>
+            <CardContent class="grid gap-2">
+              <div
+                v-for="reg in pendingRegistrations"
+                :key="reg.id"
+                class="flex items-center justify-between rounded border p-3"
+              >
+                <div class="flex items-center gap-2">
+                  <PlayerLink
+                    :name="reg.player_name"
+                    :display-name="reg.player_display_name"
+                  />
+                  <ArmyLogo v-if="reg.army_id" :army-id="reg.army_id" />
+                </div>
+                <div class="flex gap-2">
+                  <Button size="sm" @click="review(reg, 'approved')">
+                    <Check class="size-4" />
+                  </Button>
+                  <Button size="sm" variant="outline" @click="review(reg, 'rejected')">
+                    <X class="size-4" />
+                  </Button>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        </template>
+      </div>
     </template>
   </div>
 </template>

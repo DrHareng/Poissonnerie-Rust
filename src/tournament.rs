@@ -129,6 +129,22 @@ impl TournamentPhase {
             _ => None,
         }
     }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Pool => "Poule",
+            Self::RoundOf16 => "1/8 de finale",
+            Self::Quarter => "1/4 de final",
+            Self::Semi => "Demi-finale",
+            Self::Final => "Finale",
+        }
+    }
+}
+
+pub fn phase_label(phase: &str) -> &str {
+    TournamentPhase::parse(phase)
+        .map(TournamentPhase::label)
+        .unwrap_or(phase)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -225,6 +241,59 @@ pub struct PoolPlayer {
     pub losses: u32,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RoundOf16BarrageSlot {
+    pub bracket_slot: u32,
+    pub player1: String,
+    pub player2: String,
+    pub quarter_player1: String,
+}
+
+pub fn sort_pool_standings(players: &mut [PoolPlayer]) {
+    players.sort_by(|left, right| {
+        right
+            .points
+            .cmp(&left.points)
+            .then_with(|| right.objectives.cmp(&left.objectives))
+            .then_with(|| right.survivors.cmp(&left.survivors))
+    });
+}
+
+/// Barrages 2e vs 3e entre poules (4 poules) ; les 1ers attendent en quart.
+pub fn round_of_16_barrage_pairings(
+    pool_standings: &[Vec<PoolPlayer>],
+) -> Option<Vec<RoundOf16BarrageSlot>> {
+    if pool_standings.len() != 4 {
+        return None;
+    }
+
+    let first = |index: usize| -> Option<&str> {
+        pool_standings[index].first().map(|player| player.player_name.as_str())
+    };
+    let second = |index: usize| -> Option<&str> {
+        pool_standings[index]
+            .get(1)
+            .map(|player| player.player_name.as_str())
+    };
+    let third = |index: usize| -> Option<&str> {
+        pool_standings[index]
+            .get(2)
+            .map(|player| player.player_name.as_str())
+    };
+
+    let configs = [(3, 1, 0), (2, 0, 1), (0, 3, 2), (1, 2, 3)];
+    let mut slots = Vec::with_capacity(configs.len());
+    for (slot, (second_pool, third_pool, first_pool)) in configs.iter().enumerate() {
+        slots.push(RoundOf16BarrageSlot {
+            bracket_slot: slot as u32,
+            player1: second(*second_pool)?.to_string(),
+            player2: third(*third_pool)?.to_string(),
+            quarter_player1: first(*first_pool)?.to_string(),
+        });
+    }
+    Some(slots)
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct TournamentMatch {
     pub id: i64,
@@ -275,6 +344,8 @@ pub struct PlayerTournamentResult {
     pub placement_label: String,
     pub final_placement: Option<u32>,
     pub completed_at: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub army_id: Option<u32>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -283,6 +354,8 @@ pub struct TournamentTopFourEntry {
     pub player_name: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub player_display_name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub army_id: Option<u32>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -294,6 +367,9 @@ pub struct TournamentListEntry {
     pub display_status: String,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub top_four: Vec<TournamentTopFourEntry>,
+    /// Matchs d'arbre (hors poules), pour le mini-rendu dans la liste.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub bracket_matches: Vec<TournamentMatch>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -401,8 +477,85 @@ pub fn placement_label(placement: u32) -> String {
         2 => "2ème".into(),
         3 | 4 => "Top 4".into(),
         5..=8 => "Top 8".into(),
+        9..=12 => "Top 12".into(),
         n => format!("Top {n}"),
     }
+}
+
+fn phase_losers(matches: &[TournamentMatch], phase: TournamentPhase) -> Vec<String> {
+    let mut losers: Vec<(u32, String)> = matches
+        .iter()
+        .filter(|m| {
+            m.phase == phase && m.status == TournamentMatchStatus::Confirmed
+        })
+        .filter_map(|m| {
+            let loser = bracket_match_loser(m)?;
+            Some((m.bracket_slot.unwrap_or(0), loser))
+        })
+        .collect();
+    losers.sort_by_key(|(slot, _)| *slot);
+    losers.into_iter().map(|(_, name)| name).collect()
+}
+
+pub fn compute_bracket_placements(
+    matches: &[TournamentMatch],
+    bracket_format: BracketFormat,
+) -> std::collections::HashMap<String, u32> {
+    use std::collections::HashMap;
+
+    let mut placements = HashMap::new();
+
+    // Du tour le plus avancé au plus précoce : ne jamais écraser un meilleur classement
+    // (ex. vainqueur de finale déjà placé 1er qui apparaît aussi comme perdant d'un tour antérieur
+    // à cause de données d'arbre incohérentes).
+    let insert_best = |placements: &mut HashMap<String, u32>, name: String, placement: u32| {
+        placements.entry(name).or_insert(placement);
+    };
+
+    if let Some(final_match) = matches.iter().find(|m| {
+        m.phase == TournamentPhase::Final && m.status == TournamentMatchStatus::Confirmed
+    }) {
+        if let (Some(winner), Some(loser)) = (
+            bracket_match_winner(final_match),
+            bracket_match_loser(final_match),
+        ) {
+            insert_best(&mut placements, winner, 1);
+            insert_best(&mut placements, loser, 2);
+        }
+    }
+
+    for (index, loser) in phase_losers(matches, TournamentPhase::Semi)
+        .into_iter()
+        .take(2)
+        .enumerate()
+    {
+        insert_best(&mut placements, loser, 3 + index as u32);
+    }
+
+    for (index, loser) in phase_losers(matches, TournamentPhase::Quarter)
+        .into_iter()
+        .take(4)
+        .enumerate()
+    {
+        insert_best(&mut placements, loser, 5 + index as u32);
+    }
+
+    let r16_slots = match bracket_format {
+        BracketFormat::RoundOf16 => 4,
+        BracketFormat::RoundOf16Full => 8,
+        BracketFormat::QuartersDirect => 0,
+    };
+    if r16_slots > 0 {
+        for (index, loser) in phase_losers(matches, TournamentPhase::RoundOf16)
+            .into_iter()
+            .take(r16_slots)
+            .enumerate()
+        {
+            insert_best(&mut placements, loser, 9 + index as u32);
+        }
+    }
+
+    placements
 }
 
 pub fn pool_round_robin_pairs(player_count: usize) -> Vec<(usize, usize)> {
@@ -437,8 +590,8 @@ fn compute_started_display_status(
     }
 
     let phases = [
-        (TournamentPhase::RoundOf16, "Seizièmes de finale"),
-        (TournamentPhase::Quarter, "Quart de finale"),
+        (TournamentPhase::RoundOf16, "1/8 de finale"),
+        (TournamentPhase::Quarter, "1/4 de final"),
         (TournamentPhase::Semi, "Demi-finale"),
         (TournamentPhase::Final, "Finale"),
     ];
@@ -533,11 +686,13 @@ pub fn compute_top_four(matches: &[TournamentMatch]) -> Vec<TournamentTopFourEnt
             rank: 1,
             player_name: first,
             player_display_name: None,
+            army_id: None,
         },
         TournamentTopFourEntry {
             rank: 2,
             player_name: second,
             player_display_name: None,
+            army_id: None,
         },
     ];
 
@@ -556,10 +711,27 @@ pub fn compute_top_four(matches: &[TournamentMatch]) -> Vec<TournamentTopFourEnt
             rank: 3 + index as u32,
             player_name,
             player_display_name: None,
+            army_id: None,
         });
     }
 
     entries
+}
+
+pub fn enrich_top_four_armies(
+    top_four: &mut [TournamentTopFourEntry],
+    registrations: &[TournamentRegistration],
+) {
+    for entry in top_four {
+        entry.army_id = registrations
+            .iter()
+            .find(|registration| {
+                registration
+                    .player_name
+                    .eq_ignore_ascii_case(&entry.player_name)
+            })
+            .and_then(|registration| registration.army_id);
+    }
 }
 
 pub fn registration_counts(registrations: &[TournamentRegistration]) -> (u32, u32) {
@@ -677,5 +849,178 @@ mod tests {
             bracket_match_loser(&semi_draw).as_deref(),
             Some("Shas'O Kassad")
         );
+    }
+
+    #[test]
+    fn round_of_16_barrage_pairings_cross_pools() {
+        fn player(name: &str, points: u32) -> PoolPlayer {
+            PoolPlayer {
+                player_name: name.into(),
+                player_display_name: None,
+                army_id: None,
+                seed: 0,
+                points,
+                objectives: 0,
+                survivors: 0,
+                wins: 0,
+                draws: 0,
+                losses: 0,
+            }
+        }
+
+        let standings = vec![
+            vec![player("1A", 30), player("2A", 20), player("3A", 10)],
+            vec![player("1B", 30), player("2B", 20), player("3B", 10)],
+            vec![player("1C", 30), player("2C", 20), player("3C", 10)],
+            vec![player("1D", 30), player("2D", 20), player("3D", 10)],
+        ];
+
+        let slots = round_of_16_barrage_pairings(&standings).unwrap();
+        assert_eq!(slots.len(), 4);
+        assert_eq!(slots[0].player1, "2D");
+        assert_eq!(slots[0].player2, "3B");
+        assert_eq!(slots[0].quarter_player1, "1A");
+        assert_eq!(slots[3].player1, "2B");
+        assert_eq!(slots[3].player2, "3C");
+        assert_eq!(slots[3].quarter_player1, "1D");
+    }
+
+    #[test]
+    fn placement_label_covers_top_buckets() {
+        assert_eq!(placement_label(8), "Top 8");
+        assert_eq!(placement_label(9), "Top 12");
+        assert_eq!(placement_label(12), "Top 12");
+    }
+
+    #[test]
+    fn compute_bracket_placements_includes_forfeit_r16_losers() {
+        let matches = vec![
+            TournamentMatch {
+                id: 1,
+                tournament_id: 1,
+                phase: TournamentPhase::RoundOf16,
+                pool_id: None,
+                bracket_slot: Some(2),
+                player1: Some("Ayadan".into()),
+                player2: Some("Gui Zou".into()),
+                player1_display_name: None,
+                player2_display_name: None,
+                player1_objectives: 0,
+                player2_objectives: 0,
+                player1_survivors: 0,
+                player2_survivors: 0,
+                player1_tournament_points: 0,
+                player2_tournament_points: 0,
+                outcome: Some(MatchOutcome::Player1Win),
+                is_forfeit: true,
+                is_unplayed: false,
+                forfeit_player: Some("Gui Zou".into()),
+                forfeit_player_display_name: None,
+                player1_elo_delta: 0.0,
+                player2_elo_delta: 0.0,
+                player1_rating_used: None,
+                player2_rating_used: None,
+                elo_applied_at: None,
+                status: TournamentMatchStatus::Confirmed,
+                submitted_by_user_id: None,
+                submitted_at: None,
+                confirmed_by_user_id: None,
+                confirmed_at: None,
+                scenario_id: None,
+                scenario_name: None,
+                player1_army_id: None,
+                player2_army_id: None,
+                played_at: None,
+            },
+        ];
+
+        let placements = compute_bracket_placements(&matches, BracketFormat::RoundOf16);
+        assert_eq!(placements.get("Gui Zou"), Some(&9));
+    }
+
+    #[test]
+    fn compute_bracket_placements_keeps_final_winner_over_earlier_loss() {
+        let matches = vec![
+            TournamentMatch {
+                id: 1,
+                tournament_id: 1,
+                phase: TournamentPhase::Quarter,
+                pool_id: None,
+                bracket_slot: Some(0),
+                player1: Some("Arkille".into()),
+                player2: Some("Azazel".into()),
+                player1_display_name: None,
+                player2_display_name: None,
+                player1_objectives: 10,
+                player2_objectives: 3,
+                player1_survivors: 191,
+                player2_survivors: 105,
+                player1_tournament_points: 4,
+                player2_tournament_points: 0,
+                outcome: Some(MatchOutcome::Player1Win),
+                is_forfeit: false,
+                is_unplayed: false,
+                forfeit_player: None,
+                forfeit_player_display_name: None,
+                player1_elo_delta: 0.0,
+                player2_elo_delta: 0.0,
+                player1_rating_used: None,
+                player2_rating_used: None,
+                elo_applied_at: None,
+                status: TournamentMatchStatus::Confirmed,
+                submitted_by_user_id: None,
+                submitted_at: None,
+                confirmed_by_user_id: None,
+                confirmed_at: None,
+                scenario_id: None,
+                scenario_name: None,
+                player1_army_id: None,
+                player2_army_id: None,
+                played_at: None,
+            },
+            TournamentMatch {
+                id: 2,
+                tournament_id: 1,
+                phase: TournamentPhase::Final,
+                pool_id: None,
+                bracket_slot: Some(0),
+                player1: Some("Azazel".into()),
+                player2: Some("Shas'O Kassad".into()),
+                player1_display_name: None,
+                player2_display_name: None,
+                player1_objectives: 7,
+                player2_objectives: 4,
+                player1_survivors: 102,
+                player2_survivors: 104,
+                player1_tournament_points: 4,
+                player2_tournament_points: 0,
+                outcome: Some(MatchOutcome::Player1Win),
+                is_forfeit: false,
+                is_unplayed: false,
+                forfeit_player: None,
+                forfeit_player_display_name: None,
+                player1_elo_delta: 0.0,
+                player2_elo_delta: 0.0,
+                player1_rating_used: None,
+                player2_rating_used: None,
+                elo_applied_at: None,
+                status: TournamentMatchStatus::Confirmed,
+                submitted_by_user_id: None,
+                submitted_at: None,
+                confirmed_by_user_id: None,
+                confirmed_at: None,
+                scenario_id: None,
+                scenario_name: None,
+                player1_army_id: None,
+                player2_army_id: None,
+                played_at: None,
+            },
+        ];
+
+        let placements = compute_bracket_placements(&matches, BracketFormat::RoundOf16);
+        assert_eq!(placements.get("Azazel"), Some(&1));
+        assert_eq!(placements.get("Shas'O Kassad"), Some(&2));
+        // Perdant du quart = Azazel, déjà classé 1er via la finale → pas d'écrasement en Top 8
+        assert_eq!(placements.get("Arkille"), None);
     }
 }

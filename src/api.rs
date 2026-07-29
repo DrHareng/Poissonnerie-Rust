@@ -14,7 +14,7 @@ use tower_sessions::{MemoryStore, Session, SessionManagerLayer};
 
 use crate::{
     auth::{self, AuthConfig, CallbackQuery},
-    default_db_path, scenario::ScenarioStore, tournament_api, ArmyStore, Leaderboard,
+    default_db_path, scenario::{strip_scenario_prefix, ScenarioStore}, tournament_api, ArmyStore, Leaderboard,
     MatchOutcome, MatchRecord, MatchScores, Player, TournamentStore, User,
     UserStore, DEFAULT_K_FACTOR,
 };
@@ -88,6 +88,16 @@ struct RecordMatchRequest {
 struct MatchListQuery {
     #[serde(default = "default_match_limit")]
     limit: usize,
+    #[serde(default)]
+    offset: usize,
+}
+
+#[derive(Debug, Serialize)]
+struct MatchListResponse {
+    items: Vec<crate::display_name::EnrichedMatchRecord>,
+    total: usize,
+    limit: usize,
+    offset: usize,
 }
 
 #[derive(Debug, Deserialize)]
@@ -388,17 +398,24 @@ async fn get_army_matches(
 async fn list_matches(
     State(state): State<AppState>,
     Query(query): Query<MatchListQuery>,
-) -> Json<Vec<crate::display_name::EnrichedMatchRecord>> {
+) -> Json<MatchListResponse> {
     let board = state.board.lock().unwrap();
     let resolver = crate::display_name::PlayerDisplayResolver::new(&board, state.users.as_ref());
     let limit = query.limit.clamp(1, 100);
+    let offset = query.offset;
+    let total = board.match_count();
     let matches = board
-        .recent_matches(limit)
+        .recent_matches_page(limit, offset)
         .into_iter()
         .cloned()
         .map(|record| resolver.enrich_match(record))
         .collect();
-    Json(matches)
+    Json(MatchListResponse {
+        items: matches,
+        total,
+        limit,
+        offset,
+    })
 }
 
 async fn get_player(
@@ -481,7 +498,7 @@ async fn get_player_matches(
 ) -> Result<Json<Vec<crate::display_name::EnrichedMatchRecord>>, ApiError> {
     let board = state.board.lock().unwrap();
     let resolver = crate::display_name::PlayerDisplayResolver::new(&board, state.users.as_ref());
-    let limit = query.limit.clamp(1, 100);
+    let limit = query.limit.clamp(1, 500);
     let matches = board
         .player_matches(&name, limit)
         .map_err(|error| ApiError::bad_request(error.to_string()))?
@@ -542,7 +559,13 @@ async fn record_match(
             .map_err(|error| ApiError::bad_request(error.to_string()))?;
     }
 
-    let scenario_id = if let Some(name) = payload.scenario_name.as_deref() {
+    let scenario_name = payload
+        .scenario_name
+        .as_deref()
+        .map(strip_scenario_prefix)
+        .filter(|name| !name.is_empty());
+
+    let scenario_id = if let Some(ref name) = scenario_name {
         Some(state.scenarios.get_or_create(name).map(|s| s.id).map_err(
             |error| ApiError::bad_request(error.to_string()),
         )?)
@@ -573,7 +596,7 @@ async fn record_match(
             payload.player1_army_id,
             payload.player2_army_id,
             scenario_id,
-            payload.scenario_name,
+            scenario_name,
         )
         .map_err(|error| ApiError::bad_request(error.to_string()))?;
 

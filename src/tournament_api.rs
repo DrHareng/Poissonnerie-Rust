@@ -428,10 +428,17 @@ async fn finalize_pools(
         .pool_matches_pending_elo(id)
         .map_err(|error| ApiError::bad_request(error.to_string()))?;
 
+    let tournament_name = state
+        .tournaments
+        .get(id)
+        .ok()
+        .flatten()
+        .map(|tournament| tournament.name);
+
     {
         let mut board = state.board.lock().unwrap();
         for tm in &pool_matches {
-            apply_tournament_match_to_board(&mut board, tm)?;
+            apply_tournament_match_to_board(&mut board, tm, tournament_name.clone())?;
             state
                 .tournaments
                 .mark_pool_elo_applied(tm.id)
@@ -643,6 +650,7 @@ async fn get_player_tournaments(
 fn apply_tournament_match_to_board(
     board: &mut Leaderboard,
     tm: &crate::tournament::TournamentMatch,
+    tournament_name: Option<String>,
 ) -> Result<(), ApiError> {
     if tm.is_forfeit {
         return Ok(());
@@ -677,6 +685,9 @@ fn apply_tournament_match_to_board(
             tm.player2_army_id,
             tm.scenario_id,
             tm.scenario_name.clone(),
+            Some(tm.tournament_id),
+            Some(tm.phase.as_str().to_string()),
+            tournament_name,
         )
         .map_err(|error| ApiError::bad_request(error.to_string()))?;
     Ok(())
@@ -686,9 +697,16 @@ fn maybe_apply_bracket_match(
     state: &AppState,
     tm: &crate::tournament::TournamentMatch,
 ) -> Result<(), ApiError> {
+    let tournament_name = state
+        .tournaments
+        .get(tm.tournament_id)
+        .ok()
+        .flatten()
+        .map(|tournament| tournament.name);
+
     {
         let mut board = state.board.lock().unwrap();
-        apply_tournament_match_to_board(&mut board, tm)?;
+        apply_tournament_match_to_board(&mut board, tm, tournament_name)?;
         board
             .save(&state.db_path)
             .map_err(|error| ApiError::bad_request(error.to_string()))?;

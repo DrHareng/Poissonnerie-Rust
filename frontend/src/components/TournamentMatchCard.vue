@@ -2,7 +2,7 @@
 import { computed, ref, watch } from 'vue'
 import TournamentMatchScoreboard from '@/components/TournamentMatchScoreboard.vue'
 import { Button } from '@/components/ui/button'
-import { formatMatchDate } from '@/lib/tournamentMatchDisplay'
+import { formatMatchRecordedDate } from '@/lib/tournamentMatchDisplay'
 import type { TournamentMatch } from '@/types/elo'
 
 export interface TournamentMatchForm {
@@ -120,7 +120,7 @@ function matchPlayerLabel(slot: 'player1' | 'player2') {
         class="tournament-match-meta-date"
         :class="{ 'tournament-match-meta-empty': !match.played_at }"
       >
-        {{ match.played_at ? formatMatchDate(match.played_at) : '—' }}
+        {{ match.played_at ? (formatMatchRecordedDate(match.played_at) ?? '—') : '—' }}
       </span>
       <div class="tournament-match-meta-status-group">
         <span class="tournament-match-meta-status">

@@ -11,12 +11,15 @@ use crate::migrate::migrate;
 use crate::player::MatchOutcome;
 use crate::store::normalize_name;
 use crate::tournament::{
-    bracket_match_winner, compute_elo_deltas, placement_label, pool_round_robin_pairs,
-    tournament_points_for_player, BracketFormat, PlayerTournamentResult, Pool, PoolPlayer,
-    RegistrationStatus, Tournament, TournamentDetail, TournamentListEntry, TournamentMatch,
-    TournamentMatchStatus, TournamentPhase, TournamentPlayerSnapshot, TournamentRegistration,
-    TournamentStatus, POOLS_EIGHT_CAPACITY, POOLS_FOUR_CAPACITY, WAITLIST_THRESHOLD,
-    compute_display_status, compute_top_four, registration_counts,
+    bracket_match_winner, compute_elo_deltas, compute_bracket_placements, enrich_top_four_armies,
+    placement_label,
+    pool_round_robin_pairs,
+    round_of_16_barrage_pairings, sort_pool_standings, tournament_points_for_player,
+    BracketFormat, PlayerTournamentResult, Pool, PoolPlayer, RegistrationStatus, Tournament,
+    TournamentDetail, TournamentListEntry, TournamentMatch, TournamentMatchStatus,
+    TournamentPhase, TournamentPlayerSnapshot, TournamentRegistration, TournamentStatus,
+    POOLS_EIGHT_CAPACITY, POOLS_FOUR_CAPACITY, WAITLIST_THRESHOLD, compute_display_status,
+    compute_top_four, registration_counts,
 };
 
 pub struct TournamentStore {
@@ -117,7 +120,7 @@ impl TournamentStore {
             SELECT id, name, status, pool_count, bracket_format,
                    created_at, started_at, pools_finalized_at, completed_at
             FROM tournaments
-            ORDER BY created_at DESC
+            ORDER BY id DESC
             ",
         )?;
         let rows = stmt.query_map([], row_to_tournament)?;
@@ -132,7 +135,7 @@ impl TournamentStore {
                 SELECT id, name, status, pool_count, bracket_format,
                        created_at, started_at, pools_finalized_at, completed_at
                 FROM tournaments
-                ORDER BY created_at DESC
+                ORDER BY id DESC
                 ",
             )?;
             let rows = stmt.query_map([], row_to_tournament)?;
@@ -146,11 +149,16 @@ impl TournamentStore {
                 let matches = self.list_matches_in_conn(&conn, tournament.id)?;
                 let (approved_count, waitlist_count) = registration_counts(&registrations);
                 let display_status = compute_display_status(&tournament, &matches);
-                let top_four = if tournament.status == TournamentStatus::Completed {
+                let mut top_four = if tournament.status == TournamentStatus::Completed {
                     compute_top_four(&matches)
                 } else {
                     Vec::new()
                 };
+                enrich_top_four_armies(&mut top_four, &registrations);
+                let bracket_matches: Vec<_> = matches
+                    .into_iter()
+                    .filter(|m| m.phase != TournamentPhase::Pool)
+                    .collect();
 
                 Ok(TournamentListEntry {
                     tournament,
@@ -158,6 +166,7 @@ impl TournamentStore {
                     waitlist_count,
                     display_status,
                     top_four,
+                    bracket_matches,
                 })
             })
             .collect()
@@ -201,11 +210,12 @@ impl TournamentStore {
         let matches = self.list_matches_in_conn(&conn, id)?;
         let (approved_count, waitlist_count) = registration_counts(&registrations);
         let display_status = compute_display_status(&tournament, &matches);
-        let top_four = if tournament.status == TournamentStatus::Completed {
+        let mut top_four = if tournament.status == TournamentStatus::Completed {
             compute_top_four(&matches)
         } else {
             Vec::new()
         };
+        enrich_top_four_armies(&mut top_four, &registrations);
 
         Ok(Some(TournamentDetail {
             registrations,
@@ -758,6 +768,11 @@ impl TournamentStore {
             .or(request.player1_army_id);
         let player2_army_id = registration_army_id_in_conn(&conn, tm.tournament_id, &p2)?
             .or(request.player2_army_id);
+        let scenario_name = request
+            .scenario_name
+            .as_deref()
+            .map(crate::scenario::strip_scenario_prefix)
+            .filter(|name| !name.is_empty());
 
         conn.execute(
             "
@@ -797,7 +812,7 @@ impl TournamentStore {
                 if auto_confirm { Some(user_id) } else { None::<i64> },
                 if auto_confirm { Some(now) } else { None::<u64> },
                 request.scenario_id,
-                request.scenario_name,
+                scenario_name,
                 player1_army_id,
                 player2_army_id,
                 now,
@@ -1887,9 +1902,19 @@ impl TournamentStore {
             bail!("4 poules requises");
         }
 
-        for (slot, (_, players)) in standings.iter().enumerate() {
-            let second = players.get(1).context("2e manquant")?;
-            let third = players.get(2).context("3e manquant")?;
+        let ranked: Vec<Vec<PoolPlayer>> = standings
+            .iter()
+            .map(|(_, players)| {
+                let mut sorted = players.clone();
+                sort_pool_standings(&mut sorted);
+                sorted
+            })
+            .collect();
+
+        let barrages = round_of_16_barrage_pairings(&ranked)
+            .context("impossible de générer les barrages (2e ou 3e manquant)")?;
+
+        for barrage in &barrages {
             tx.execute(
                 "
                 INSERT INTO tournament_matches
@@ -1899,25 +1924,23 @@ impl TournamentStore {
                 params![
                     tournament_id,
                     TournamentPhase::RoundOf16.as_str(),
-                    slot as u32,
-                    second.player_name,
-                    third.player_name,
+                    barrage.bracket_slot,
+                    barrage.player1,
+                    barrage.player2,
                     TournamentMatchStatus::Scheduled.as_str(),
                 ],
             )?;
-        }
-
-        for slot in 0..4 {
             tx.execute(
                 "
                 INSERT INTO tournament_matches
-                    (tournament_id, phase, bracket_slot, status)
-                VALUES (?1, ?2, ?3, ?4)
+                    (tournament_id, phase, bracket_slot, player1, status)
+                VALUES (?1, ?2, ?3, ?4, ?5)
                 ",
                 params![
                     tournament_id,
                     TournamentPhase::Quarter.as_str(),
-                    slot,
+                    barrage.bracket_slot,
+                    barrage.quarter_player1,
                     TournamentMatchStatus::Scheduled.as_str(),
                 ],
             )?;
@@ -2064,6 +2087,17 @@ impl TournamentStore {
             "impossible de déterminer le vainqueur (égalité aux points de survivants sur un nul)",
         )?;
 
+        if tm.phase == TournamentPhase::RoundOf16
+            && matches!(
+                self.get_in_conn(conn, tm.tournament_id)?.unwrap().bracket_format,
+                BracketFormat::RoundOf16
+            )
+        {
+            // Barrage : le 1er de poule est déjà en player1 du quart, le vainqueur va en player2.
+            self.fill_quarters_after_r16(conn, tm)?;
+            return Ok(());
+        }
+
         let next = next_bracket_phase(tm.phase);
         let Some(next_phase) = next else {
             self.complete_tournament_in_conn(conn, tm.tournament_id, &winner)?;
@@ -2098,16 +2132,6 @@ impl TournamentStore {
                     params![winner, id],
                 )?;
             }
-        }
-
-        if tm.phase == TournamentPhase::RoundOf16
-            && matches!(
-                self.get_in_conn(conn, tm.tournament_id)?.unwrap().bracket_format,
-                BracketFormat::RoundOf16
-            )
-        {
-            // Fill QF with pool winners waiting
-            self.fill_quarters_after_r16(conn, tm)?;
         }
 
         Ok(())
@@ -2159,11 +2183,42 @@ impl TournamentStore {
         Ok(qualified)
     }
 
+    fn assign_final_placements_in_conn(
+        &self,
+        conn: &Connection,
+        tournament_id: i64,
+    ) -> Result<()> {
+        let tournament = self
+            .get_in_conn(conn, tournament_id)?
+            .context("tournoi introuvable")?;
+
+        if tournament.status != TournamentStatus::Completed {
+            return Ok(());
+        }
+
+        let bracket_format = BracketFormat::parse(tournament.bracket_format.as_str())
+            .unwrap_or(BracketFormat::QuartersDirect);
+        let matches = self.list_matches_in_conn(conn, tournament_id)?;
+        let placements = compute_bracket_placements(&matches, bracket_format);
+
+        for (player_name, placement) in placements {
+            conn.execute(
+                "
+                UPDATE tournament_players SET final_placement = ?1
+                WHERE tournament_id = ?2 AND player_name_key = ?3
+                ",
+                params![placement, tournament_id, normalize_name(&player_name)],
+            )?;
+        }
+
+        Ok(())
+    }
+
     fn complete_tournament_in_conn(
         &self,
         conn: &Connection,
         tournament_id: i64,
-        winner: &str,
+        _winner: &str,
     ) -> Result<()> {
         let now = now_unix();
         conn.execute(
@@ -2173,13 +2228,7 @@ impl TournamentStore {
             params![TournamentStatus::Completed.as_str(), now, tournament_id],
         )?;
 
-        conn.execute(
-            "
-            UPDATE tournament_players SET final_placement = 1
-            WHERE tournament_id = ?1 AND player_name_key = ?2
-            ",
-            params![tournament_id, normalize_name(winner)],
-        )?;
+        self.assign_final_placements_in_conn(conn, tournament_id)?;
 
         Ok(())
     }
@@ -2269,11 +2318,32 @@ impl TournamentStore {
     pub fn player_tournament_results(&self, player_name: &str) -> Result<Vec<PlayerTournamentResult>> {
         let conn = self.conn.lock().unwrap();
         let key = normalize_name(player_name);
-        let mut stmt = conn.prepare(
+
+        let mut tournament_ids = conn.prepare(
             "
-            SELECT t.id, t.name, tp.final_placement, t.completed_at
+            SELECT DISTINCT tp.tournament_id
             FROM tournament_players tp
             JOIN tournaments t ON t.id = tp.tournament_id
+            WHERE tp.player_name_key = ?1 AND t.status = 'completed'
+            ",
+        )?;
+        let ids: Vec<i64> = tournament_ids
+            .query_map(params![key], |row| row.get(0))?
+            .collect::<Result<Vec<_>, _>>()?;
+
+        for tournament_id in ids {
+            self.assign_final_placements_in_conn(&conn, tournament_id)?;
+        }
+
+        let mut stmt = conn.prepare(
+            "
+            SELECT t.id, t.name, tp.final_placement, t.completed_at, tr.army_id
+            FROM tournament_players tp
+            JOIN tournaments t ON t.id = tp.tournament_id
+            LEFT JOIN tournament_registrations tr
+                ON tr.tournament_id = tp.tournament_id
+               AND tr.player_name_key = tp.player_name_key
+               AND tr.status = 'approved'
             WHERE tp.player_name_key = ?1 AND t.status = 'completed'
             ORDER BY t.completed_at DESC
             ",
@@ -2287,6 +2357,7 @@ impl TournamentStore {
                 final_placement: placement,
                 placement_label: label,
                 completed_at: row.get(3)?,
+                army_id: row.get(4)?,
             })
         })?;
         rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
@@ -2294,6 +2365,20 @@ impl TournamentStore {
 
     pub fn star_counts(&self) -> Result<std::collections::HashMap<String, u32>> {
         let conn = self.conn.lock().unwrap();
+
+        let completed_ids: Vec<i64> = {
+            let mut stmt = conn.prepare(
+                "SELECT id FROM tournaments WHERE status = 'completed'",
+            )?;
+            let ids = stmt
+                .query_map([], |row| row.get(0))?
+                .collect::<Result<Vec<_>, _>>()?;
+            ids
+        };
+        for tournament_id in completed_ids {
+            self.assign_final_placements_in_conn(&conn, tournament_id)?;
+        }
+
         let mut stmt = conn.prepare(
             "
             SELECT player_name, COUNT(*) FROM tournament_players

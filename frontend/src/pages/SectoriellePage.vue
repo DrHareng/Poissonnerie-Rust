@@ -6,8 +6,10 @@ import { ArrowLeft } from '@lucide/vue'
 import { toast } from 'vue-sonner'
 import { fetchArmyMatches, fetchArmyStats } from '@/lib/api'
 import { pageTitle } from '@/lib/pageTitle'
+import { formatMatchRecordedDate } from '@/lib/tournamentMatchDisplay'
 import type { MatchOutcome, MatchRecord, RankedArmy } from '@/types/elo'
 import MatchResultBadges from '@/components/MatchResultBadges.vue'
+import MatchContextCell from '@/components/MatchContextCell.vue'
 import WinDrawLossBar from '@/components/WinDrawLossBar.vue'
 import ArmyLogo from '@/components/ArmyLogo.vue'
 import PlayerLink from '@/components/PlayerLink.vue'
@@ -76,7 +78,7 @@ const matchRows = computed(() => {
 
   return matches.value.map((match) => ({
     id: match.id,
-    date: formatDate(match.recorded_at),
+    date: formatMatchRecordedDate(match.recorded_at) ?? '—',
     normalized: normalizeMatchForArmy(match, army.value!.army_id),
   }))
 })
@@ -94,13 +96,6 @@ watch(
   },
   { immediate: true },
 )
-
-function formatDate(timestamp: number) {
-  return new Intl.DateTimeFormat('fr-FR', {
-    dateStyle: 'short',
-    timeStyle: 'short',
-  }).format(new Date(timestamp * 1000))
-}
 
 function formatWinRate(winRate: number) {
   return `${winRate.toLocaleString('fr-FR', {
@@ -215,7 +210,7 @@ onMounted(refresh)
                 <TableHead>Date</TableHead>
                 <TableHead class="text-right">Joueur</TableHead>
                 <TableHead class="w-10" aria-hidden="true" />
-                <TableHead>Scénario</TableHead>
+                <TableHead>Contexte</TableHead>
                 <TableHead class="text-center">Résultat</TableHead>
                 <TableHead class="w-10" aria-hidden="true" />
                 <TableHead>Adversaire</TableHead>
@@ -236,7 +231,9 @@ onMounted(refresh)
                 <TableCell class="w-10 px-2">
                   <ArmyLogo :army-id="row.normalized.player1_army_id" />
                 </TableCell>
-                <TableCell />
+                <TableCell>
+                  <MatchContextCell :match="row.normalized" />
+                </TableCell>
                 <TableCell>
                   <MatchResultBadges :match="row.normalized" />
                 </TableCell>

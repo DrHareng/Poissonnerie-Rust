@@ -52,6 +52,12 @@ pub struct MatchRecord {
     pub scenario_id: Option<i64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub scenario_name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tournament_id: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tournament_phase: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tournament_name: Option<String>,
     pub recorded_at: u64,
 }
 
@@ -67,6 +73,9 @@ impl MatchRecord {
         player2_army_id: Option<u32>,
         scenario_id: Option<i64>,
         scenario_name: Option<String>,
+        tournament_id: Option<i64>,
+        tournament_phase: Option<String>,
+        tournament_name: Option<String>,
         recorded_at: u64,
     ) -> Self {
         Self {
@@ -86,12 +95,13 @@ impl MatchRecord {
             player2_army_id,
             scenario_id,
             scenario_name,
+            tournament_id,
+            tournament_phase,
+            tournament_name,
             recorded_at,
         }
     }
 }
-
-pub const MAX_MATCH_HISTORY: usize = 100;
 
 pub fn now_unix() -> u64 {
     use std::time::{SystemTime, UNIX_EPOCH};

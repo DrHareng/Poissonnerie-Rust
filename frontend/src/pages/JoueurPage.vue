@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, ref, watch } from 'vue'
-import { useRoute, useRouter } from 'vue-router'
+import { useRoute, useRouter, RouterLink } from 'vue-router'
 import { useTitle } from '@vueuse/core'
 import { ArrowLeft } from '@lucide/vue'
 import { toast } from 'vue-sonner'
@@ -12,11 +12,14 @@ import {
   updateProfile,
 } from '@/lib/api'
 import { pageTitle } from '@/lib/pageTitle'
+import { formatMatchRecordedDate } from '@/lib/tournamentMatchDisplay'
 import { useAuth } from '@/composables/useAuth'
 import type { MatchOutcome, MatchRecord, PlayerProfile, PlayerTournamentResult, RankedPlayer } from '@/types/elo'
 import MatchResultBadges from '@/components/MatchResultBadges.vue'
+import MatchContextCell from '@/components/MatchContextCell.vue'
 import WinDrawLossBar from '@/components/WinDrawLossBar.vue'
 import ArmyLogo from '@/components/ArmyLogo.vue'
+import { useArmies } from '@/composables/useArmies'
 import PlayerLink from '@/components/PlayerLink.vue'
 import { Button } from '@/components/ui/button'
 import {
@@ -40,6 +43,7 @@ import {
 const route = useRoute()
 const router = useRouter()
 const { user, refresh: refreshAuth } = useAuth()
+const { ensureLoaded: ensureArmiesLoaded, getArmy } = useArmies()
 
 const player = ref<RankedPlayer | null>(null)
 const profile = ref<PlayerProfile | null>(null)
@@ -112,18 +116,11 @@ const matchRows = computed(() => {
     const normalized = normalizeMatchForPlayer(match, player.value!.name)
     return {
       id: match.id,
-      date: formatDate(match.recorded_at),
+      date: formatMatchRecordedDate(match.recorded_at) ?? '—',
       normalized,
     }
   })
 })
-
-function formatDate(timestamp: number) {
-  return new Intl.DateTimeFormat('fr-FR', {
-    dateStyle: 'short',
-    timeStyle: 'short',
-  }).format(new Date(timestamp * 1000))
-}
 
 function syncProfileForm() {
   localDisplayName.value = user.value?.local_display_name ?? ''
@@ -250,6 +247,7 @@ async function resetAvatar() {
 }
 
 async function refresh() {
+  void ensureArmiesLoaded()
   await Promise.all([loadPlayer(), loadMatches(), loadTournaments()])
   scrollToHash()
 }
@@ -282,30 +280,101 @@ onMounted(refresh)
     </div>
 
     <template v-else-if="player">
-      <section id="stats" class="page-header flex flex-col gap-4 sm:flex-row sm:items-center">
-        <img
-          v-if="profile?.avatar_url"
-          :src="profile.avatar_url"
-          :alt="headerTitle"
-          class="size-20 rounded-full border border-primary/30 object-cover"
-        />
-        <div class="min-w-0">
-          <h1 class="page-title flex flex-wrap items-baseline gap-x-2">
-            <span>{{ headerTitle }}</span>
-            <span
-              v-if="profile?.discord_display_name"
-              class="text-lg font-normal text-muted-foreground"
-            >
-              ({{ profile.discord_display_name }})
-            </span>
-          </h1>
-          <p class="page-description">
-            {{ player.name }} — Rang #{{ player.rank }} — {{ Math.round(player.rating) }} ELO
-          </p>
-        </div>
-      </section>
+      <div class="grid gap-3 lg:max-h-52 lg:shrink-0 lg:grid-cols-2">
+        <Card id="stats" size="sm" class="neon-panel min-h-0">
+          <CardContent class="flex h-full flex-col justify-center gap-3 py-2">
+            <div class="flex items-center gap-3">
+              <img
+                v-if="profile?.avatar_url"
+                :src="profile.avatar_url"
+                :alt="headerTitle"
+                class="size-12 shrink-0 rounded-full border border-primary/30 object-cover"
+              />
+              <div class="min-w-0">
+                <h1 class="truncate text-lg font-semibold leading-tight">
+                  {{ headerTitle }}
+                </h1>
+                <p
+                  v-if="profile?.discord_display_name"
+                  class="truncate text-xs text-muted-foreground"
+                >
+                  {{ profile.discord_display_name }}
+                </p>
+                <p class="truncate text-xs text-muted-foreground">
+                  {{ player.name }}
+                </p>
+              </div>
+            </div>
 
-      <Card v-if="profile?.is_own_profile" id="profil" class="neon-panel">
+            <dl class="grid grid-cols-2 gap-2">
+              <div class="rounded border px-2.5 py-1.5">
+                <dt class="text-[11px] text-muted-foreground">Rang</dt>
+                <dd class="font-display text-base font-semibold text-primary">
+                  #{{ player.rank }}
+                </dd>
+              </div>
+              <div class="rounded border px-2.5 py-1.5">
+                <dt class="text-[11px] text-muted-foreground">ELO</dt>
+                <dd class="elo-score font-display text-base font-semibold">
+                  {{ Math.round(player.rating) }}
+                </dd>
+              </div>
+            </dl>
+
+            <WinDrawLossBar
+              :wins="player.wins"
+              :draws="player.draws"
+              :losses="player.losses"
+              compact
+            />
+          </CardContent>
+        </Card>
+
+        <Card size="sm" class="neon-panel flex min-h-0 flex-col">
+          <CardContent class="flex min-h-0 flex-1 flex-col gap-1.5 py-2">
+            <p class="shrink-0 text-sm font-semibold leading-none">
+              Tournois
+            </p>
+            <ul
+              v-if="tournamentResults.length > 0"
+              class="min-h-0 max-h-[9.5rem] space-y-1 overflow-y-auto pr-0.5"
+            >
+              <li
+                v-for="result in tournamentResults"
+                :key="result.tournament_id"
+                class="flex items-center justify-between gap-2 rounded border px-2 py-1.5 text-xs"
+              >
+                <div class="flex min-w-0 items-center gap-1.5">
+                  <ArmyLogo :army-id="result.army_id ?? undefined" />
+                  <div class="min-w-0">
+                    <RouterLink
+                      :to="{ name: 'tournoi', params: { id: result.tournament_id } }"
+                      class="block truncate font-medium text-primary hover:underline"
+                    >
+                      {{ result.tournament_name }}
+                    </RouterLink>
+                    <p
+                      v-if="result.army_id"
+                      class="truncate text-[11px] text-muted-foreground"
+                    >
+                      {{ getArmy(result.army_id)?.name ?? `Sectorielle #${result.army_id}` }}
+                    </p>
+                  </div>
+                </div>
+                <span class="shrink-0 text-xs font-medium">{{ result.placement_label }}</span>
+              </li>
+            </ul>
+            <p
+              v-else
+              class="rounded border border-dashed px-3 py-4 text-center text-xs text-muted-foreground"
+            >
+              Aucun tournoi terminé pour ce joueur.
+            </p>
+          </CardContent>
+        </Card>
+      </div>
+
+      <Card v-if="profile?.is_own_profile" id="profil" class="neon-panel lg:shrink-0">
         <CardHeader>
           <CardTitle>Mon profil</CardTitle>
           <CardDescription>
@@ -358,36 +427,9 @@ onMounted(refresh)
         </CardContent>
       </Card>
 
-      <WinDrawLossBar
-        :wins="player.wins"
-        :draws="player.draws"
-        :losses="player.losses"
-      />
-
-      <Card v-if="tournamentResults.length > 0" class="neon-panel">
-        <CardHeader>
-          <CardTitle>Palmarès tournois</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <ul class="space-y-2">
-            <li
-              v-for="result in tournamentResults"
-              :key="result.tournament_id"
-              class="flex justify-between rounded border px-3 py-2 text-sm"
-            >
-              <span>{{ result.tournament_name }}</span>
-              <span class="font-medium">{{ result.placement_label }}</span>
-            </li>
-          </ul>
-        </CardContent>
-      </Card>
-
-      <Card class="neon-panel page-panel-scroll">
+      <Card class="neon-panel page-panel-scroll min-h-0 flex-1">
         <CardHeader class="lg:shrink-0">
           <CardTitle>Historique des parties</CardTitle>
-          <CardDescription>
-            Toutes les parties enregistrées pour ce joueur.
-          </CardDescription>
         </CardHeader>
         <CardContent class="lg:min-h-0 lg:flex-1 lg:overflow-y-auto">
           <div
@@ -410,7 +452,7 @@ onMounted(refresh)
                 <TableHead>Date</TableHead>
                 <TableHead class="text-right">Joueur</TableHead>
                 <TableHead class="w-10" aria-hidden="true" />
-                <TableHead>Scénario</TableHead>
+                <TableHead>Contexte</TableHead>
                 <TableHead class="text-center">Résultat</TableHead>
                 <TableHead class="w-10" aria-hidden="true" />
                 <TableHead>Adversaire</TableHead>
@@ -428,8 +470,8 @@ onMounted(refresh)
                 <TableCell class="w-10 px-2">
                   <ArmyLogo :army-id="row.normalized.player1_army_id" />
                 </TableCell>
-                <TableCell class="text-sm text-muted-foreground">
-                  {{ row.normalized.scenario_name ?? '—' }}
+                <TableCell>
+                  <MatchContextCell :match="row.normalized" />
                 </TableCell>
                 <TableCell>
                   <MatchResultBadges :match="row.normalized" />

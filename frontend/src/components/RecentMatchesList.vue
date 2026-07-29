@@ -1,9 +1,13 @@
 <script setup lang="ts">
-import { History } from '@lucide/vue'
+import { computed } from 'vue'
+import { ChevronLeft, ChevronRight, History } from '@lucide/vue'
 import type { MatchRecord } from '@/types/elo'
 import MatchResultBadges from '@/components/MatchResultBadges.vue'
+import MatchContextCell from '@/components/MatchContextCell.vue'
 import ArmyLogo from '@/components/ArmyLogo.vue'
 import PlayerLink from '@/components/PlayerLink.vue'
+import { formatMatchRecordedDate } from '@/lib/tournamentMatchDisplay'
+import { Button } from '@/components/ui/button'
 import {
   Card,
   CardContent,
@@ -20,16 +24,33 @@ import {
   TableRow,
 } from '@/components/ui/table'
 
-defineProps<{
+const props = defineProps<{
   matches: MatchRecord[]
   loading?: boolean
+  page?: number
+  pageSize?: number
+  total?: number
+  totalPages?: number
 }>()
 
-function formatDate(timestamp: number) {
-  return new Intl.DateTimeFormat('fr-FR', {
-    dateStyle: 'short',
-    timeStyle: 'short',
-  }).format(new Date(timestamp * 1000))
+const emit = defineEmits<{
+  pageChange: [page: number]
+}>()
+
+const pageStart = computed(() => {
+  if (!props.total || props.total === 0) return 0
+  return ((props.page ?? 1) - 1) * (props.pageSize ?? 5) + 1
+})
+
+const pageEnd = computed(() => {
+  if (!props.total || props.total === 0) return 0
+  return Math.min((props.page ?? 1) * (props.pageSize ?? 5), props.total)
+})
+
+function goToPage(nextPage: number) {
+  if (!props.totalPages) return
+  if (nextPage < 1 || nextPage > props.totalPages) return
+  emit('pageChange', nextPage)
 }
 </script>
 
@@ -38,10 +59,15 @@ function formatDate(timestamp: number) {
     <CardHeader class="lg:shrink-0">
       <CardTitle class="flex items-center gap-2">
         <History class="size-5 text-primary" />
-        Derniers matchs
+        Matchs enregistrés
       </CardTitle>
       <CardDescription>
-        Les 20 matchs les plus récents, du plus récent au plus ancien.
+        <template v-if="total">
+          {{ total }} match{{ total > 1 ? 's' : '' }} au total, du plus récent au plus ancien.
+        </template>
+        <template v-else>
+          Du plus récent au plus ancien.
+        </template>
       </CardDescription>
     </CardHeader>
     <CardContent class="lg:min-h-0 lg:flex-1 lg:overflow-y-auto">
@@ -59,48 +85,84 @@ function formatDate(timestamp: number) {
         Aucun match enregistré pour l'instant.
       </div>
 
-      <Table v-else>
-        <TableHeader class="sticky top-0 z-10 bg-card/95 backdrop-blur">
-          <TableRow>
-            <TableHead>Date</TableHead>
-            <TableHead class="text-right">Joueur 1</TableHead>
-            <TableHead class="w-10" aria-hidden="true" />
-            <TableHead>Scénario</TableHead>
-            <TableHead class="text-center">Résultat</TableHead>
-            <TableHead class="w-10" aria-hidden="true" />
-            <TableHead>Joueur 2</TableHead>
-          </TableRow>
-        </TableHeader>
-        <TableBody>
-          <TableRow v-for="match in matches" :key="match.id">
-            <TableCell class="whitespace-nowrap text-muted-foreground">
-              {{ formatDate(match.recorded_at) }}
-            </TableCell>
-            <TableCell class="text-right">
-              <PlayerLink
-                :name="match.player1"
-                :display-name="match.player1_display_name"
-              />
-            </TableCell>
-            <TableCell class="w-10 px-2">
-              <ArmyLogo :army-id="match.player1_army_id" />
-            </TableCell>
-            <TableCell />
-            <TableCell>
-              <MatchResultBadges :match="match" />
-            </TableCell>
-            <TableCell class="w-10 px-2">
-              <ArmyLogo :army-id="match.player2_army_id" />
-            </TableCell>
-            <TableCell>
-              <PlayerLink
-                :name="match.player2"
-                :display-name="match.player2_display_name"
-              />
-            </TableCell>
-          </TableRow>
-        </TableBody>
-      </Table>
+      <template v-else>
+        <Table>
+          <TableHeader class="sticky top-0 z-10 bg-card/95 backdrop-blur">
+            <TableRow>
+              <TableHead>Date</TableHead>
+              <TableHead class="text-right">Joueur 1</TableHead>
+              <TableHead class="w-10" aria-hidden="true" />
+              <TableHead class="text-center">Résultat</TableHead>
+              <TableHead class="w-10" aria-hidden="true" />
+              <TableHead>Joueur 2</TableHead>
+              <TableHead>Contexte</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            <TableRow v-for="match in matches" :key="match.id">
+              <TableCell class="whitespace-nowrap text-muted-foreground">
+                {{ formatMatchRecordedDate(match.recorded_at) ?? '—' }}
+              </TableCell>
+              <TableCell class="text-right">
+                <PlayerLink
+                  :name="match.player1"
+                  :display-name="match.player1_display_name"
+                />
+              </TableCell>
+              <TableCell class="w-10 px-2">
+                <ArmyLogo :army-id="match.player1_army_id" />
+              </TableCell>
+              <TableCell>
+                <MatchResultBadges :match="match" />
+              </TableCell>
+              <TableCell class="w-10 px-2">
+                <ArmyLogo :army-id="match.player2_army_id" />
+              </TableCell>
+              <TableCell>
+                <PlayerLink
+                  :name="match.player2"
+                  :display-name="match.player2_display_name"
+                />
+              </TableCell>
+              <TableCell>
+                <MatchContextCell :match="match" />
+              </TableCell>
+            </TableRow>
+          </TableBody>
+        </Table>
+
+        <div
+          v-if="totalPages && totalPages > 1"
+          class="mt-4 flex flex-col gap-3 border-t border-border pt-4 sm:flex-row sm:items-center sm:justify-between"
+        >
+          <p class="text-sm text-muted-foreground">
+            {{ pageStart }}–{{ pageEnd }} sur {{ total }}
+          </p>
+          <div class="flex items-center gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              :disabled="(page ?? 1) <= 1 || loading"
+              @click="goToPage((page ?? 1) - 1)"
+            >
+              <ChevronLeft class="size-4" />
+              Précédent
+            </Button>
+            <span class="min-w-24 text-center text-sm text-muted-foreground">
+              Page {{ page ?? 1 }} / {{ totalPages }}
+            </span>
+            <Button
+              variant="outline"
+              size="sm"
+              :disabled="(page ?? 1) >= totalPages || loading"
+              @click="goToPage((page ?? 1) + 1)"
+            >
+              Suivant
+              <ChevronRight class="size-4" />
+            </Button>
+          </div>
+        </div>
+      </template>
     </CardContent>
   </Card>
 </template>

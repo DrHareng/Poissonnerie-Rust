@@ -4,6 +4,7 @@ import type {
   AuthUser,
   MatchOutcome,
   MatchRecord,
+  PaginatedMatches,
   Player,
   PlayerProfile,
   PlayerTournamentResult,
@@ -143,15 +144,19 @@ export function recordMatch(
   })
 }
 
-export function fetchRecentMatches(limit = 20): Promise<MatchRecord[]> {
-  return request<MatchRecord[]>(`/api/matches?limit=${limit}`)
+export function fetchRecentMatches(limit = 20, offset = 0): Promise<PaginatedMatches> {
+  const params = new URLSearchParams({
+    limit: String(limit),
+    offset: String(offset),
+  })
+  return request<PaginatedMatches>(`/api/matches?${params}`)
 }
 
 export function fetchPlayer(name: string): Promise<PlayerProfile> {
   return request<PlayerProfile>(`/api/players/${encodeURIComponent(name)}`)
 }
 
-export function fetchPlayerMatches(name: string, limit = 50): Promise<MatchRecord[]> {
+export function fetchPlayerMatches(name: string, limit = 200): Promise<MatchRecord[]> {
   return request<MatchRecord[]>(
     `/api/players/${encodeURIComponent(name)}/matches?limit=${limit}`,
   )

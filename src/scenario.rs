@@ -8,6 +8,19 @@ use serde::Serialize;
 use crate::migrate::migrate;
 use crate::store::normalize_name;
 
+pub fn strip_scenario_prefix(name: &str) -> String {
+    let trimmed = name.trim();
+    let Some((prefix, rest)) = trimmed.split_once(':') else {
+        return trimmed.to_string();
+    };
+
+    if prefix.trim().len() == 1 {
+        return rest.trim().to_string();
+    }
+
+    trimmed.to_string()
+}
+
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub struct Scenario {
     pub id: i64,
@@ -67,12 +80,12 @@ impl ScenarioStore {
     }
 
     pub fn get_or_create(&self, name: &str) -> Result<Scenario> {
-        let trimmed = name.trim();
+        let trimmed = strip_scenario_prefix(name);
         if trimmed.is_empty() {
             anyhow::bail!("indiquez un nom de scénario");
         }
 
-        let key = normalize_name(trimmed);
+        let key = normalize_name(&trimmed);
         let conn = self.conn.lock().unwrap();
 
         if let Some(existing) = self.get_by_key_in_conn(&conn, &key)? {
@@ -88,12 +101,12 @@ impl ScenarioStore {
 
         conn.execute(
             "INSERT INTO scenarios (name, name_key, usage_count) VALUES (?1, ?2, 1)",
-            params![trimmed, key],
+            params![&trimmed, key],
         )?;
         let id = conn.last_insert_rowid();
         Ok(Scenario {
             id,
-            name: trimmed.to_string(),
+            name: trimmed,
             usage_count: 1,
         })
     }
@@ -125,4 +138,21 @@ fn row_to_scenario(row: &rusqlite::Row<'_>) -> rusqlite::Result<Scenario> {
         name: row.get(1)?,
         usage_count: row.get(2)?,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn strip_scenario_prefix_removes_letter_prefix() {
+        assert_eq!(
+            strip_scenario_prefix("A : Scène de crime"),
+            "Scène de crime"
+        );
+        assert_eq!(
+            strip_scenario_prefix("Le combat de l'esprit"),
+            "Le combat de l'esprit"
+        );
+    }
 }

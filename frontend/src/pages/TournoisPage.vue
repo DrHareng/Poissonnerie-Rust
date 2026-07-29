@@ -4,10 +4,10 @@ import { useRouter } from 'vue-router'
 import { Plus, Medal } from '@lucide/vue'
 import { toast } from 'vue-sonner'
 import { createTournament, fetchTournaments } from '@/lib/api'
-import { formatRegistrationSummary, topFourDisplayRows } from '@/lib/tournamentDisplay'
+import { formatRegistrationSummary } from '@/lib/tournamentDisplay'
 import type { TournamentListEntry } from '@/types/elo'
 import { useAuth } from '@/composables/useAuth'
-import PlayerLink from '@/components/PlayerLink.vue'
+import BracketTree from '@/components/BracketTree.vue'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import {
@@ -121,7 +121,7 @@ onMounted(refresh)
       </CardContent>
     </Card>
 
-    <Card class="neon-panel">
+    <Card class="neon-panel page-panel-scroll">
       <CardHeader>
         <CardTitle class="flex items-center gap-2">
           <Medal class="size-5 text-primary" />
@@ -129,7 +129,7 @@ onMounted(refresh)
         </CardTitle>
         <CardDescription>Cliquez pour voir le détail.</CardDescription>
       </CardHeader>
-      <CardContent>
+      <CardContent class="lg:min-h-0 lg:flex-1 lg:overflow-y-auto">
         <div
           v-if="loading"
           class="rounded-lg border border-dashed p-8 text-center text-muted-foreground"
@@ -147,49 +147,25 @@ onMounted(refresh)
             v-for="tournament in tournaments"
             :key="tournament.id"
             type="button"
-            class="flex items-start justify-between gap-4 rounded-lg border p-4 text-left transition hover:border-primary/50 hover:bg-muted/30"
+            class="grid gap-3 rounded-lg border p-4 text-left transition hover:border-primary/50 hover:bg-muted/30"
             @click="router.push({ name: 'tournoi', params: { id: tournament.id } })"
           >
-            <div class="min-w-0 space-y-2">
-              <p class="font-medium">{{ tournament.name }}</p>
-              <p class="text-sm text-muted-foreground">
-                {{ formatRegistrationSummary(tournament.approved_count, tournament.waitlist_count) }}
-              </p>
-              <ol
-                v-if="tournament.status === 'completed' && tournament.top_four?.length"
-                class="space-y-1 text-sm"
-              >
-                <li
-                  v-for="row in topFourDisplayRows(tournament.top_four)"
-                  :key="row.label"
-                  class="flex items-center gap-2"
-                >
-                  <span class="w-8 shrink-0 tabular-nums text-muted-foreground">
-                    {{ row.label }}
-                  </span>
-                  <span class="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5">
-                    <template
-                      v-for="(entry, index) in row.entries"
-                      :key="entry.player_name"
-                    >
-                      <span
-                        v-if="index > 0"
-                        class="text-muted-foreground"
-                      >
-                        ·
-                      </span>
-                      <PlayerLink
-                        :name="entry.player_name"
-                        :display-name="entry.player_display_name"
-                      />
-                    </template>
-                  </span>
-                </li>
-              </ol>
+            <div class="flex items-start justify-between gap-4">
+              <div class="min-w-0 space-y-1">
+                <p class="font-medium">{{ tournament.name }}</p>
+                <p class="text-sm text-muted-foreground">
+                  {{ formatRegistrationSummary(tournament.approved_count, tournament.waitlist_count) }}
+                </p>
+              </div>
+              <Badge variant="outline" class="shrink-0">
+                {{ tournament.display_status }}
+              </Badge>
             </div>
-            <Badge variant="outline" class="shrink-0">
-              {{ tournament.display_status }}
-            </Badge>
+            <BracketTree
+              v-if="tournament.bracket_matches?.length"
+              :matches="tournament.bracket_matches"
+              compact
+            />
           </button>
         </div>
       </CardContent>

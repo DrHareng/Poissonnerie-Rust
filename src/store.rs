@@ -6,7 +6,7 @@ use anyhow::{bail, Context, Result};
 use rusqlite::{params, Connection};
 use serde::{Deserialize, Serialize};
 
-use crate::match_record::{now_unix, MatchRecord, MatchScores, MAX_MATCH_HISTORY};
+use crate::match_record::{now_unix, MatchRecord, MatchScores};
 use crate::migrate::migrate;
 use crate::player::{MatchOutcome, Player};
 
@@ -95,14 +95,17 @@ impl Leaderboard {
         {
             let mut stmt = conn.prepare(
                 "
-                SELECT id, player1, player2, outcome,
-                       player1_old, player1_new, player2_old, player2_new,
-                       player1_objectives, player1_survivors,
-                       player2_objectives, player2_survivors,
-                       player1_army_id, player2_army_id,
-                       scenario_id, scenario_name, recorded_at
-                FROM matches
-                ORDER BY recorded_at DESC
+                SELECT m.id, m.player1, m.player2, m.outcome,
+                       m.player1_old, m.player1_new, m.player2_old, m.player2_new,
+                       m.player1_objectives, m.player1_survivors,
+                       m.player2_objectives, m.player2_survivors,
+                       m.player1_army_id, m.player2_army_id,
+                       m.scenario_id, m.scenario_name,
+                       m.tournament_id, m.tournament_phase, t.name,
+                       m.recorded_at
+                FROM matches m
+                LEFT JOIN tournaments t ON t.id = m.tournament_id
+                ORDER BY m.recorded_at DESC, m.id DESC
                 ",
             )?;
             let rows = stmt.query_map([], row_to_match)?;
@@ -164,8 +167,10 @@ impl Leaderboard {
                     player1_objectives, player1_survivors,
                     player2_objectives, player2_survivors,
                     player1_army_id, player2_army_id,
-                    scenario_id, scenario_name, recorded_at
-                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17)
+                    scenario_id, scenario_name,
+                    tournament_id, tournament_phase,
+                    recorded_at
+                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19)
                 ",
                 params![
                     record.id,
@@ -184,6 +189,8 @@ impl Leaderboard {
                     record.player2_army_id,
                     record.scenario_id,
                     record.scenario_name,
+                    record.tournament_id,
+                    record.tournament_phase,
                     record.recorded_at,
                 ],
             )?;
@@ -326,6 +333,9 @@ impl Leaderboard {
             player2_army_id,
             scenario_id,
             scenario_name,
+            None,
+            None,
+            None,
         )
     }
 
@@ -340,6 +350,9 @@ impl Leaderboard {
         player2_army_id: Option<u32>,
         scenario_id: Option<i64>,
         scenario_name: Option<String>,
+        tournament_id: Option<i64>,
+        tournament_phase: Option<String>,
+        tournament_name: Option<String>,
     ) -> Result<MatchRecord> {
         let scores = scores.validate()?;
         let key1 = normalize_name(player1);
@@ -368,6 +381,9 @@ impl Leaderboard {
             player2_army_id,
             scenario_id,
             scenario_name,
+            tournament_id,
+            tournament_phase,
+            tournament_name,
         )
     }
 
@@ -382,6 +398,9 @@ impl Leaderboard {
         player2_army_id: Option<u32>,
         scenario_id: Option<i64>,
         scenario_name: Option<String>,
+        tournament_id: Option<i64>,
+        tournament_phase: Option<String>,
+        tournament_name: Option<String>,
     ) -> Result<MatchRecord> {
         let next_id = self
             .matches
@@ -402,19 +421,31 @@ impl Leaderboard {
             player2_army_id,
             scenario_id,
             scenario_name,
+            tournament_id,
+            tournament_phase,
+            tournament_name,
             now_unix(),
         );
 
         self.matches.insert(0, record.clone());
-        if self.matches.len() > MAX_MATCH_HISTORY {
-            self.matches.truncate(MAX_MATCH_HISTORY);
-        }
 
         Ok(record)
     }
 
     pub fn recent_matches(&self, limit: usize) -> Vec<&MatchRecord> {
         self.matches.iter().take(limit).collect()
+    }
+
+    pub fn match_count(&self) -> usize {
+        self.matches.len()
+    }
+
+    pub fn recent_matches_page(&self, limit: usize, offset: usize) -> Vec<&MatchRecord> {
+        self.matches
+            .iter()
+            .skip(offset)
+            .take(limit)
+            .collect()
     }
 
     pub fn player_matches(&self, name: &str, limit: usize) -> Result<Vec<&MatchRecord>> {
@@ -593,12 +624,451 @@ fn row_to_match(row: &rusqlite::Row<'_>) -> rusqlite::Result<MatchRecord> {
         player2_army_id: row.get(13)?,
         scenario_id: row.get(14)?,
         scenario_name: row.get(15)?,
-        recorded_at: row.get(16)?,
+        tournament_id: row.get(16)?,
+        tournament_phase: row.get(17)?,
+        tournament_name: row.get(18)?,
+        recorded_at: row.get(19)?,
     })
 }
 
 pub fn normalize_name(name: &str) -> String {
     name.trim().to_lowercase()
+}
+
+#[derive(Debug, Clone)]
+pub struct MergePlayersReport {
+    pub keep_name: String,
+    pub merged_aliases: Vec<String>,
+    pub matches_rewritten: u32,
+    pub rating: f64,
+    pub wins: u32,
+    pub draws: u32,
+    pub losses: u32,
+}
+
+/// Fusionne des doublons de joueurs vers `keep_name`, conserve tous les matchs,
+/// puis recalcule l'ELO chronologiquement.
+pub fn merge_players(
+    db_path: &Path,
+    keep_name: &str,
+    alias_names: &[&str],
+    k_factor: f64,
+) -> Result<MergePlayersReport> {
+    let keep_name = keep_name.trim();
+    if keep_name.is_empty() {
+        bail!("indiquez le nom à conserver");
+    }
+    if alias_names.is_empty() {
+        bail!("indiquez au moins un alias à fusionner");
+    }
+
+    let keep_key = normalize_name(keep_name);
+    let mut alias_keys = Vec::new();
+    for alias in alias_names {
+        let key = normalize_name(alias);
+        if key.is_empty() {
+            bail!("alias vide");
+        }
+        if key == keep_key {
+            bail!("un alias ne peut pas être identique au nom conservé");
+        }
+        if alias_keys.contains(&key) {
+            continue;
+        }
+        alias_keys.push(key);
+    }
+
+    let conn = Connection::open(db_path)
+        .with_context(|| format!("impossible d'ouvrir {}", db_path.display()))?;
+    migrate(&conn)?;
+    let tx = conn.unchecked_transaction()?;
+
+    let mut players: HashMap<String, Player> = HashMap::new();
+    {
+        let mut stmt = tx.prepare(
+            "SELECT name_key, name, rating, wins, draws, losses, discord_username FROM players",
+        )?;
+        let rows = stmt.query_map([], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                Player {
+                    name: row.get(1)?,
+                    rating: row.get(2)?,
+                    wins: row.get(3)?,
+                    draws: row.get(4)?,
+                    losses: row.get(5)?,
+                    discord_username: row.get(6)?,
+                },
+            ))
+        })?;
+        for row in rows {
+            let (key, player) = row?;
+            players.insert(key, player);
+        }
+    }
+
+    for key in &alias_keys {
+        if !players.contains_key(key) {
+            bail!("joueur alias introuvable : {key}");
+        }
+    }
+
+    let mut discord = players
+        .get(&keep_key)
+        .and_then(|p| p.discord_username.clone());
+    if discord.is_none() {
+        for key in &alias_keys {
+            if let Some(value) = players.get(key).and_then(|p| p.discord_username.clone()) {
+                discord = Some(value);
+                break;
+            }
+        }
+    }
+
+    // Libérer le pseudo Discord des aliases avant de l'attribuer au joueur conservé
+    // (contrainte UNIQUE sur players.discord_username).
+    for key in &alias_keys {
+        tx.execute(
+            "UPDATE players SET discord_username = NULL WHERE name_key = ?1",
+            params![key],
+        )?;
+    }
+
+    if !players.contains_key(&keep_key) {
+        tx.execute(
+            "
+            INSERT INTO players (name_key, name, rating, wins, draws, losses, discord_username)
+            VALUES (?1, ?2, ?3, 0, 0, 0, ?4)
+            ",
+            params![
+                keep_key,
+                keep_name,
+                crate::player::DEFAULT_RATING,
+                discord,
+            ],
+        )?;
+    } else {
+        tx.execute(
+            "
+            UPDATE players
+            SET name = ?1, discord_username = COALESCE(?2, discord_username)
+            WHERE name_key = ?3
+            ",
+            params![keep_name, discord, keep_key],
+        )?;
+    }
+
+    let mut name_variants: HashMap<String, Vec<String>> = HashMap::new();
+    let mut collect_name = |name: String| {
+        let key = normalize_name(&name);
+        name_variants.entry(key).or_default().push(name);
+    };
+    for player in players.values() {
+        collect_name(player.name.clone());
+    }
+    {
+        let mut stmt = tx.prepare(
+            "
+            SELECT DISTINCT player1 FROM matches
+            UNION SELECT DISTINCT player2 FROM matches
+            UNION SELECT DISTINCT player1 FROM tournament_matches WHERE player1 IS NOT NULL
+            UNION SELECT DISTINCT player2 FROM tournament_matches WHERE player2 IS NOT NULL
+            UNION SELECT DISTINCT forfeit_player FROM tournament_matches WHERE forfeit_player IS NOT NULL
+            UNION SELECT DISTINCT player_name FROM tournament_registrations
+            UNION SELECT DISTINCT player_name FROM tournament_players
+            UNION SELECT DISTINCT player_name FROM pool_players
+            ",
+        )?;
+        let rows = stmt.query_map([], |row| row.get::<_, String>(0))?;
+        for row in rows {
+            collect_name(row?);
+        }
+    }
+
+    let mut matches_rewritten = 0u32;
+    for alias_key in &alias_keys {
+        let variants = name_variants
+            .get(alias_key)
+            .cloned()
+            .unwrap_or_else(|| vec![alias_key.clone()]);
+        for variant in variants {
+            matches_rewritten += tx.execute(
+                "UPDATE matches SET player1 = ?1 WHERE player1 = ?2",
+                params![keep_name, variant],
+            )? as u32;
+            matches_rewritten += tx.execute(
+                "UPDATE matches SET player2 = ?1 WHERE player2 = ?2",
+                params![keep_name, variant],
+            )? as u32;
+            tx.execute(
+                "UPDATE tournament_matches SET player1 = ?1 WHERE player1 = ?2",
+                params![keep_name, variant],
+            )?;
+            tx.execute(
+                "UPDATE tournament_matches SET player2 = ?1 WHERE player2 = ?2",
+                params![keep_name, variant],
+            )?;
+            tx.execute(
+                "UPDATE tournament_matches SET forfeit_player = ?1 WHERE forfeit_player = ?2",
+                params![keep_name, variant],
+            )?;
+        }
+
+        rewrite_keyed_player_rows(&tx, "tournament_registrations", alias_key, keep_name, &keep_key)?;
+        rewrite_keyed_player_rows(&tx, "tournament_players", alias_key, keep_name, &keep_key)?;
+        rewrite_keyed_player_rows(&tx, "pool_players", alias_key, keep_name, &keep_key)?;
+
+        tx.execute("DELETE FROM players WHERE name_key = ?1", params![alias_key])?;
+    }
+
+    tx.commit()?;
+
+    let stats = recompute_elo_from_matches(db_path, k_factor)?;
+    let keep_stats = stats
+        .get(&keep_key)
+        .cloned()
+        .with_context(|| format!("joueur fusionné introuvable après recalcul : {keep_name}"))?;
+
+    Ok(MergePlayersReport {
+        keep_name: keep_name.to_string(),
+        merged_aliases: alias_names
+            .iter()
+            .map(|name| name.trim().to_string())
+            .collect(),
+        matches_rewritten,
+        rating: keep_stats.rating,
+        wins: keep_stats.wins,
+        draws: keep_stats.draws,
+        losses: keep_stats.losses,
+    })
+}
+
+fn rewrite_keyed_player_rows(
+    conn: &Connection,
+    table: &str,
+    alias_key: &str,
+    keep_name: &str,
+    keep_key: &str,
+) -> Result<()> {
+    let scope_column = match table {
+        "tournament_registrations" | "tournament_players" => "tournament_id",
+        "pool_players" => "pool_id",
+        _ => bail!("table non supportée pour fusion : {table}"),
+    };
+
+    let sql = format!(
+        "SELECT DISTINCT {scope_column} FROM {table} WHERE player_name_key = ?1"
+    );
+    let scopes: Vec<i64> = {
+        let mut stmt = conn.prepare(&sql)?;
+        let rows = stmt.query_map(params![alias_key], |row| row.get(0))?;
+        rows.collect::<Result<Vec<_>, _>>()?
+    };
+
+    for scope_id in scopes {
+        let keep_exists: bool = conn.query_row(
+            &format!(
+                "SELECT EXISTS(SELECT 1 FROM {table} WHERE {scope_column} = ?1 AND player_name_key = ?2)"
+            ),
+            params![scope_id, keep_key],
+            |row| row.get(0),
+        )?;
+
+        if keep_exists {
+            // Conflit : conserver la ligne la plus « active » pour les snapshots tournoi.
+            if table == "tournament_players" {
+                let alias_activity: (i64, i64, i64) = conn.query_row(
+                    "
+                    SELECT COALESCE(pool_points, 0), COALESCE(pool_objectives, 0),
+                           COALESCE(pool_survivors, 0)
+                    FROM tournament_players
+                    WHERE tournament_id = ?1 AND player_name_key = ?2
+                    ",
+                    params![scope_id, alias_key],
+                    |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+                )?;
+                let keep_activity: (i64, i64, i64) = conn.query_row(
+                    "
+                    SELECT COALESCE(pool_points, 0), COALESCE(pool_objectives, 0),
+                           COALESCE(pool_survivors, 0)
+                    FROM tournament_players
+                    WHERE tournament_id = ?1 AND player_name_key = ?2
+                    ",
+                    params![scope_id, keep_key],
+                    |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+                )?;
+                if alias_activity > keep_activity {
+                    conn.execute(
+                        "DELETE FROM tournament_players WHERE tournament_id = ?1 AND player_name_key = ?2",
+                        params![scope_id, keep_key],
+                    )?;
+                    conn.execute(
+                        "
+                        UPDATE tournament_players
+                        SET player_name = ?1, player_name_key = ?2
+                        WHERE tournament_id = ?3 AND player_name_key = ?4
+                        ",
+                        params![keep_name, keep_key, scope_id, alias_key],
+                    )?;
+                } else {
+                    conn.execute(
+                        "DELETE FROM tournament_players WHERE tournament_id = ?1 AND player_name_key = ?2",
+                        params![scope_id, alias_key],
+                    )?;
+                }
+            } else if table == "pool_players" {
+                // Deux entrées dans la même poule = doublon : supprimer l'alias.
+                conn.execute(
+                    "DELETE FROM pool_players WHERE pool_id = ?1 AND player_name_key = ?2",
+                    params![scope_id, alias_key],
+                )?;
+            } else {
+                // registrations : supprimer l'alias en double
+                conn.execute(
+                    "DELETE FROM tournament_registrations WHERE tournament_id = ?1 AND player_name_key = ?2",
+                    params![scope_id, alias_key],
+                )?;
+            }
+        } else {
+            conn.execute(
+                &format!(
+                    "
+                    UPDATE {table}
+                    SET player_name = ?1, player_name_key = ?2
+                    WHERE {scope_column} = ?3 AND player_name_key = ?4
+                    "
+                ),
+                params![keep_name, keep_key, scope_id, alias_key],
+            )?;
+        }
+    }
+
+    Ok(())
+}
+
+/// Recalcule rating / W-D-L de tous les joueurs à partir des outcomes, chronologiquement.
+pub fn recompute_elo_from_matches(
+    db_path: &Path,
+    k_factor: f64,
+) -> Result<HashMap<String, Player>> {
+    let conn = Connection::open(db_path)
+        .with_context(|| format!("impossible d'ouvrir {}", db_path.display()))?;
+    migrate(&conn)?;
+
+    let mut players: HashMap<String, Player> = HashMap::new();
+    {
+        let mut stmt = conn.prepare(
+            "SELECT name_key, name, discord_username FROM players",
+        )?;
+        let rows = stmt.query_map([], |row| {
+            let key: String = row.get(0)?;
+            let mut player = Player::new(row.get::<_, String>(1)?);
+            player.discord_username = row.get(2)?;
+            Ok((key, player))
+        })?;
+        for row in rows {
+            let (key, player) = row?;
+            players.insert(key, player);
+        }
+    }
+
+    let match_rows: Vec<(i64, String, String, String)> = {
+        let mut stmt = conn.prepare(
+            "
+            SELECT id, player1, player2, outcome
+            FROM matches
+            ORDER BY recorded_at ASC, id ASC
+            ",
+        )?;
+        let rows = stmt.query_map([], |row| {
+            Ok((
+                row.get::<_, i64>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+                row.get::<_, String>(3)?,
+            ))
+        })?;
+        rows.collect::<Result<Vec<_>, _>>()?
+    };
+
+    let tx = conn.unchecked_transaction()?;
+    for (match_id, player1, player2, outcome_raw) in match_rows {
+        let outcome = match outcome_raw.as_str() {
+            "player1_win" => MatchOutcome::Player1Win,
+            "player2_win" => MatchOutcome::Player2Win,
+            _ => MatchOutcome::Draw,
+        };
+        let key1 = normalize_name(&player1);
+        let key2 = normalize_name(&player2);
+
+        if !players.contains_key(&key1) {
+            players.insert(key1.clone(), Player::new(player1.clone()));
+        }
+        if !players.contains_key(&key2) {
+            players.insert(key2.clone(), Player::new(player2.clone()));
+        }
+
+        let old1 = players.get(&key1).unwrap().rating;
+        let old2 = players.get(&key2).unwrap().rating;
+        let score1 = outcome.score_for_player1();
+        let (new1, new2) = crate::elo::update_ratings(old1, old2, score1, k_factor);
+        let score2 = match score1 {
+            crate::elo::MatchScore::Win => crate::elo::MatchScore::Loss,
+            crate::elo::MatchScore::Draw => crate::elo::MatchScore::Draw,
+            crate::elo::MatchScore::Loss => crate::elo::MatchScore::Win,
+        };
+
+        {
+            let p1 = players.get_mut(&key1).unwrap();
+            p1.name = player1.clone();
+            p1.rating = new1;
+            p1.record_match(score1);
+        }
+        {
+            let p2 = players.get_mut(&key2).unwrap();
+            p2.name = player2.clone();
+            p2.rating = new2;
+            p2.record_match(score2);
+        }
+
+        tx.execute(
+            "
+            UPDATE matches
+            SET player1_old = ?1, player1_new = ?2,
+                player2_old = ?3, player2_new = ?4
+            WHERE id = ?5
+            ",
+            params![old1, new1, old2, new2, match_id],
+        )?;
+    }
+
+    for (key, player) in &players {
+        tx.execute(
+            "
+            INSERT INTO players (name_key, name, rating, wins, draws, losses, discord_username)
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+            ON CONFLICT(name_key) DO UPDATE SET
+                name = excluded.name,
+                rating = excluded.rating,
+                wins = excluded.wins,
+                draws = excluded.draws,
+                losses = excluded.losses,
+                discord_username = COALESCE(players.discord_username, excluded.discord_username)
+            ",
+            params![
+                key,
+                player.name,
+                player.rating,
+                player.wins,
+                player.draws,
+                player.losses,
+                player.discord_username,
+            ],
+        )?;
+    }
+
+    tx.commit()?;
+    Ok(players)
 }
 
 #[cfg(test)]
