@@ -1,4 +1,4 @@
-import type { TournamentMatch } from '@/types/elo'
+import type { Army, RankedPlayer, TournamentMatch } from '@/types/elo'
 
 export function matchPlayerScores(
   match: TournamentMatch,
@@ -57,4 +57,26 @@ export function formatMatchRecordedDate(timestamp: number): string | null {
     return null
   }
   return formatMatchDate(timestamp)
+}
+
+export interface MatchupPlayer {
+  name: string
+  armyId: number
+}
+
+export function formatPartieMatchup(
+  player1: MatchupPlayer,
+  player2: MatchupPlayer,
+  armies: Army[],
+  players: RankedPlayer[] = [],
+): string {
+  const label = (player: MatchupPlayer) => {
+    const displayName =
+      players.find((item) => item.name === player.name)?.display_name ?? player.name
+    const armyName =
+      armies.find((item) => item.id === player.armyId)?.name ?? 'Sectorielle'
+    return `${displayName} (${armyName})`
+  }
+
+  return `${label(player1)} vs ${label(player2)}`
 }

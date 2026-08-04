@@ -8,6 +8,8 @@ pub mod match_record;
 pub mod migrate;
 pub mod player;
 pub mod scenario;
+pub mod scenario_pack;
+pub mod session_store;
 pub mod store;
 pub mod tournament;
 pub mod tournament_api;
@@ -22,8 +24,9 @@ pub use match_record::{MatchRecord, MatchScores};
 pub use player::{apply_match, MatchOutcome, Player, RatingUpdate, DEFAULT_RATING};
 pub use scenario::{strip_scenario_prefix, Scenario, ScenarioStore};
 pub use store::{
-    merge_players, normalize_name, recompute_elo_from_matches, ArmyMatchStats, Leaderboard,
-    MergePlayersReport, PlayerArmyUsage,
+    fix_tournament_player_army, fix_tournament_player_army_opts, merge_players, normalize_name,
+    recompute_elo_from_matches,
+    ArmyMatchStats, FixTournamentArmyReport, Leaderboard, MergePlayersReport, PlayerArmyUsage,
 };
 pub use tournament::{
     BracketFormat, PlayerTournamentResult, Pool, Tournament, TournamentDetail,

@@ -17,6 +17,9 @@ pub struct User {
     pub avatar_url: String,
     pub local_display_name: Option<String>,
     pub local_avatar_url: Option<String>,
+    pub secondary_view_mode: Option<String>,
+    pub scenario_slug: Option<String>,
+    pub army_sort_mode: Option<String>,
     pub is_admin: bool,
     pub created_at: u64,
     pub last_login_at: u64,
@@ -93,6 +96,13 @@ pub struct DiscordProfile {
 pub struct LocalProfileUpdate {
     pub local_display_name: Option<Option<String>>,
     pub local_avatar_url: Option<Option<String>>,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct UiPrefsUpdate {
+    pub secondary_view_mode: Option<String>,
+    pub scenario_slug: Option<String>,
+    pub army_sort_mode: Option<String>,
 }
 
 pub struct UserStore {
@@ -197,6 +207,38 @@ impl UserStore {
             .with_context(|| "utilisateur introuvable après mise à jour")
     }
 
+    pub fn update_ui_prefs(&self, user_id: i64, update: UiPrefsUpdate) -> Result<User> {
+        let conn = self.conn.lock().unwrap();
+        let current = self
+            .get_by_id_in_conn(&conn, user_id)?
+            .with_context(|| "utilisateur introuvable")?;
+
+        let secondary_view_mode = update
+            .secondary_view_mode
+            .or(current.secondary_view_mode);
+        let scenario_slug = update.scenario_slug.or(current.scenario_slug);
+        let army_sort_mode = update.army_sort_mode.or(current.army_sort_mode);
+
+        conn.execute(
+            "
+            UPDATE users
+            SET secondary_view_mode = ?1,
+                scenario_slug = ?2,
+                army_sort_mode = ?3
+            WHERE id = ?4
+            ",
+            params![
+                secondary_view_mode,
+                scenario_slug,
+                army_sort_mode,
+                user_id
+            ],
+        )?;
+
+        self.get_by_id_in_conn(&conn, user_id)?
+            .with_context(|| "utilisateur introuvable après mise à jour")
+    }
+
     pub fn get_by_id(&self, id: i64) -> Result<Option<User>> {
         let conn = self.conn.lock().unwrap();
         self.get_by_id_in_conn(&conn, id)
@@ -216,7 +258,8 @@ impl UserStore {
         let mut stmt = conn.prepare(
             "
             SELECT id, discord_id, username, display_name, avatar_url,
-                   local_display_name, local_avatar_url, is_admin,
+                   local_display_name, local_avatar_url, secondary_view_mode,
+                   scenario_slug, army_sort_mode, is_admin,
                    created_at, last_login_at
             FROM users
             WHERE id = ?1
@@ -237,7 +280,8 @@ impl UserStore {
         let mut stmt = conn.prepare(
             "
             SELECT id, discord_id, username, display_name, avatar_url,
-                   local_display_name, local_avatar_url, is_admin,
+                   local_display_name, local_avatar_url, secondary_view_mode,
+                   scenario_slug, army_sort_mode, is_admin,
                    created_at, last_login_at
             FROM users
             WHERE discord_id = ?1
@@ -258,7 +302,8 @@ impl UserStore {
         let mut stmt = conn.prepare(
             "
             SELECT id, discord_id, username, display_name, avatar_url,
-                   local_display_name, local_avatar_url, is_admin,
+                   local_display_name, local_avatar_url, secondary_view_mode,
+                   scenario_slug, army_sort_mode, is_admin,
                    created_at, last_login_at
             FROM users
             WHERE lower(username) = lower(?1)
@@ -292,9 +337,12 @@ fn row_to_user(row: &rusqlite::Row<'_>) -> rusqlite::Result<User> {
         avatar_url: row.get(4)?,
         local_display_name: row.get(5)?,
         local_avatar_url: row.get(6)?,
-        is_admin: row.get::<_, i64>(7)? != 0,
-        created_at: row.get(8)?,
-        last_login_at: row.get(9)?,
+        secondary_view_mode: row.get(7)?,
+        scenario_slug: row.get(8)?,
+        army_sort_mode: row.get(9)?,
+        is_admin: row.get::<_, i64>(10)? != 0,
+        created_at: row.get(11)?,
+        last_login_at: row.get(12)?,
     })
 }
 

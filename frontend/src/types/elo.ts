@@ -92,6 +92,7 @@ export interface MatchRecord extends RatingUpdate, MatchScores {
   player1_army_id?: number | null
   player2_army_id?: number | null
   scenario_id?: number | null
+  scenario_other?: string | null
   scenario_name?: string | null
   tournament_id?: number | null
   tournament_phase?: string | null
@@ -103,7 +104,65 @@ export interface Scenario {
   id: number
   name: string
   usage_count: number
+  slug?: string | null
+  map_filename?: string | null
+  pack_id?: number | null
 }
+
+export interface ScenarioPack {
+  id: number
+  slug: string
+  name: string
+  version?: string | null
+  preamble_md: string
+}
+
+export interface ScenarioSummary {
+  id: number
+  slug: string
+  name: string
+  flavor_text?: string | null
+  map_filename?: string | null
+  sort_order: number
+}
+
+export interface ScenarioPackPage {
+  pack: ScenarioPack
+  scenarios: ScenarioSummary[]
+}
+
+export interface SecondaryObjective {
+  id: number
+  slug: string
+  name: string
+  body_md: string
+}
+
+export interface CommonRule {
+  id: number
+  slug: string
+  name: string
+  body_md: string
+}
+
+export interface ScenarioDetail {
+  id: number
+  slug: string
+  name: string
+  flavor_text?: string | null
+  map_filename?: string | null
+  end_condition_md?: string | null
+  objectives_md?: string | null
+  deployment_notes_md?: string | null
+  exclusion_zones_md?: string | null
+  elements_md?: string | null
+  special_rules_md?: string | null
+  sort_order: number
+  exclusion_rule?: CommonRule | null
+  common_rules: CommonRule[]
+}
+
+export const DEFAULT_SCENARIO_PACK_SLUG = 'poissonnerie-v2'
 
 export type TournamentStatus =
   | 'draft'
@@ -190,6 +249,7 @@ export interface TournamentMatch {
   forfeit_player_display_name?: string | null
   status: TournamentMatchStatus
   scenario_id?: number | null
+  scenario_other?: string | null
   scenario_name?: string | null
   player1_army_id?: number | null
   player2_army_id?: number | null

@@ -1,6 +1,7 @@
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
+use anyhow::Result;
 use axum::{
     extract::{Path, Query, State},
     http::{HeaderValue, Method, StatusCode},
@@ -9,16 +10,19 @@ use axum::{
     Json, Router,
 };
 use serde::{Deserialize, Serialize};
+use time::Duration;
 use tower_http::cors::{AllowHeaders, AllowMethods, AllowOrigin, CorsLayer};
-use tower_sessions::{MemoryStore, Session, SessionManagerLayer};
+use tower_sessions::{Expiry, Session, SessionManagerLayer};
 
 use crate::{
     auth::{self, AuthConfig, CallbackQuery},
-    default_db_path, scenario::{strip_scenario_prefix, ScenarioStore}, tournament_api, ArmyStore, Leaderboard,
-    MatchOutcome, MatchRecord, MatchScores, Player, TournamentStore, User,
+    default_db_path, scenario::ScenarioStore, session_store::SqliteSessionStore, tournament_api,
+    ArmyStore, Leaderboard, MatchOutcome, MatchRecord, MatchScores, Player, TournamentStore, User,
     UserStore, DEFAULT_K_FACTOR,
 };
-use crate::user::{LocalProfileUpdate, UserResponse};
+use crate::user::{LocalProfileUpdate, UiPrefsUpdate, UserResponse};
+
+const SESSION_INACTIVITY_DAYS: i64 = 30;
 
 #[derive(Clone)]
 pub struct AppState {
@@ -81,7 +85,7 @@ struct RecordMatchRequest {
     #[serde(default)]
     scenario_id: Option<i64>,
     #[serde(default)]
-    scenario_name: Option<String>,
+    scenario_other: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -110,6 +114,24 @@ struct UpdateProfileRequest {
     clear_local_display_name: bool,
     #[serde(default)]
     clear_local_avatar_url: bool,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct PrefsResponse {
+    secondary_view_mode: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    scenario_slug: Option<String>,
+    army_sort_mode: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct UpdatePrefsRequest {
+    #[serde(default)]
+    secondary_view_mode: Option<String>,
+    #[serde(default)]
+    scenario_slug: Option<String>,
+    #[serde(default)]
+    army_sort_mode: Option<String>,
 }
 
 fn default_match_limit() -> usize {
@@ -152,15 +174,18 @@ fn cors_layer() -> CorsLayer {
         .allow_headers(AllowHeaders::mirror_request())
 }
 
-pub fn router(state: AppState) -> Router {
-    let session_store = MemoryStore::default();
-    let session_layer = SessionManagerLayer::new(session_store).with_secure(false);
+pub fn router(state: AppState) -> Result<Router> {
+    let session_store = SqliteSessionStore::open(&state.db_path)?;
+    let session_layer = SessionManagerLayer::new(session_store)
+        .with_secure(false)
+        .with_expiry(Expiry::OnInactivity(Duration::days(SESSION_INACTIVITY_DAYS)));
 
-    Router::new()
+    Ok(Router::new()
         .route("/api/auth/discord", get(discord_login))
         .route("/api/auth/callback", get(discord_callback))
         .route("/api/auth/me", get(auth_me).patch(update_profile))
         .route("/api/auth/logout", post(auth_logout))
+        .route("/api/prefs", get(get_prefs).patch(update_prefs))
         .route("/api/armies", get(list_armies))
         .route("/api/armies/ranking", get(get_army_ranking))
         .route("/api/armies/{id}/matches", get(get_army_matches))
@@ -174,7 +199,7 @@ pub fn router(state: AppState) -> Router {
         .merge(tournament_api::tournament_routes())
         .layer(cors_layer())
         .layer(session_layer)
-        .with_state(state)
+        .with_state(state))
 }
 
 async fn health() -> &'static str {
@@ -280,6 +305,132 @@ async fn auth_logout(session: Session) -> Result<StatusCode, ApiError> {
         .await
         .map_err(|error| ApiError::bad_request(error.to_string()))?;
     Ok(StatusCode::NO_CONTENT)
+}
+
+async fn get_prefs(
+    State(state): State<AppState>,
+    session: Session,
+) -> Result<Json<PrefsResponse>, ApiError> {
+    resolve_prefs(&state, &session).await.map(Json)
+}
+
+async fn update_prefs(
+    State(state): State<AppState>,
+    session: Session,
+    Json(payload): Json<UpdatePrefsRequest>,
+) -> Result<Json<PrefsResponse>, ApiError> {
+    let mut ui_update = UiPrefsUpdate::default();
+
+    if let Some(raw) = payload.secondary_view_mode.as_deref() {
+        let mode = auth::parse_secondary_view_mode(raw)
+            .ok_or_else(|| ApiError::bad_request("mode d'affichage invalide"))?;
+        session
+            .insert(auth::SESSION_SECONDARY_VIEW_MODE, mode.to_string())
+            .await
+            .map_err(|error| ApiError::bad_request(error.to_string()))?;
+        ui_update.secondary_view_mode = Some(mode.to_string());
+    }
+
+    if let Some(raw) = payload.scenario_slug.as_deref() {
+        let slug = auth::normalize_scenario_slug(raw)
+            .ok_or_else(|| ApiError::bad_request("scénario invalide"))?;
+        session
+            .insert(auth::SESSION_SCENARIO_SLUG, slug.clone())
+            .await
+            .map_err(|error| ApiError::bad_request(error.to_string()))?;
+        ui_update.scenario_slug = Some(slug);
+    }
+
+    if let Some(raw) = payload.army_sort_mode.as_deref() {
+        let mode = auth::parse_army_sort_mode(raw)
+            .ok_or_else(|| ApiError::bad_request("tri sectorielles invalide"))?;
+        session
+            .insert(auth::SESSION_ARMY_SORT_MODE, mode.to_string())
+            .await
+            .map_err(|error| ApiError::bad_request(error.to_string()))?;
+        ui_update.army_sort_mode = Some(mode.to_string());
+    }
+
+    if ui_update.secondary_view_mode.is_none()
+        && ui_update.scenario_slug.is_none()
+        && ui_update.army_sort_mode.is_none()
+    {
+        return Err(ApiError::bad_request("aucune préférence à mettre à jour"));
+    }
+
+    if let Some(user) = auth::current_user(state.users.as_ref(), &session)
+        .await
+        .map_err(|error| ApiError::bad_request(error.to_string()))?
+    {
+        state
+            .users
+            .update_ui_prefs(user.id, ui_update)
+            .map_err(|error| ApiError::bad_request(error.to_string()))?;
+    }
+
+    resolve_prefs(&state, &session).await.map(Json)
+}
+
+async fn resolve_prefs(state: &AppState, session: &Session) -> Result<PrefsResponse, ApiError> {
+    let user = auth::current_user(state.users.as_ref(), session)
+        .await
+        .map_err(|error| ApiError::bad_request(error.to_string()))?;
+
+    let secondary_view_mode = if let Some(mode) = user
+        .as_ref()
+        .and_then(|u| u.secondary_view_mode.as_deref())
+        .and_then(auth::parse_secondary_view_mode)
+    {
+        mode
+    } else {
+        let from_session: Option<String> = session
+            .get(auth::SESSION_SECONDARY_VIEW_MODE)
+            .await
+            .map_err(|error| ApiError::bad_request(error.to_string()))?;
+        from_session
+            .as_deref()
+            .and_then(auth::parse_secondary_view_mode)
+            .unwrap_or(auth::DEFAULT_SECONDARY_VIEW_MODE)
+    };
+
+    let scenario_slug = if let Some(slug) = user
+        .as_ref()
+        .and_then(|u| u.scenario_slug.as_deref())
+        .and_then(auth::normalize_scenario_slug)
+    {
+        Some(slug)
+    } else {
+        let from_session: Option<String> = session
+            .get(auth::SESSION_SCENARIO_SLUG)
+            .await
+            .map_err(|error| ApiError::bad_request(error.to_string()))?;
+        from_session
+            .as_deref()
+            .and_then(auth::normalize_scenario_slug)
+    };
+
+    let army_sort_mode = if let Some(mode) = user
+        .as_ref()
+        .and_then(|u| u.army_sort_mode.as_deref())
+        .and_then(auth::parse_army_sort_mode)
+    {
+        mode
+    } else {
+        let from_session: Option<String> = session
+            .get(auth::SESSION_ARMY_SORT_MODE)
+            .await
+            .map_err(|error| ApiError::bad_request(error.to_string()))?;
+        from_session
+            .as_deref()
+            .and_then(auth::parse_army_sort_mode)
+            .unwrap_or(auth::DEFAULT_ARMY_SORT_MODE)
+    };
+
+    Ok(PrefsResponse {
+        secondary_view_mode: secondary_view_mode.to_string(),
+        scenario_slug,
+        army_sort_mode: army_sort_mode.to_string(),
+    })
 }
 
 async fn require_user(state: &AppState, session: &Session) -> Result<User, ApiError> {
@@ -559,25 +710,38 @@ async fn record_match(
             .map_err(|error| ApiError::bad_request(error.to_string()))?;
     }
 
-    let scenario_name = payload
-        .scenario_name
+    let scenario_other = payload
+        .scenario_other
         .as_deref()
-        .map(strip_scenario_prefix)
-        .filter(|name| !name.is_empty());
+        .map(str::trim)
+        .filter(|name| !name.is_empty())
+        .map(str::to_string);
 
-    let scenario_id = if let Some(ref name) = scenario_name {
-        Some(state.scenarios.get_or_create(name).map(|s| s.id).map_err(
-            |error| ApiError::bad_request(error.to_string()),
-        )?)
-    } else if let Some(id) = payload.scenario_id {
-        state
-            .scenarios
-            .increment_usage(id)
-            .map_err(|error| ApiError::bad_request(error.to_string()))?;
-        Some(id)
-    } else {
-        None
-    };
+    let (scenario_id, scenario_other, scenario_name) =
+        match (payload.scenario_id, scenario_other) {
+            (Some(_), Some(_)) => {
+                return Err(ApiError::bad_request(
+                    "choisissez un scénario du catalogue ou un texte libre, pas les deux",
+                ));
+            }
+            (Some(id), None) => {
+                let scenario = state
+                    .scenarios
+                    .get(id)
+                    .map_err(|error| ApiError::bad_request(error.to_string()))?
+                    .ok_or_else(|| ApiError::bad_request("scénario introuvable"))?;
+                state
+                    .scenarios
+                    .increment_usage(id)
+                    .map_err(|error| ApiError::bad_request(error.to_string()))?;
+                (Some(id), None, Some(scenario.name))
+            }
+            (None, Some(other)) => {
+                let label = other.clone();
+                (None, Some(other), Some(label))
+            }
+            (None, None) => (None, None, None),
+        };
 
     let mut board = state.board.lock().unwrap();
     let scores = MatchScores {
@@ -596,6 +760,7 @@ async fn record_match(
             payload.player1_army_id,
             payload.player2_army_id,
             scenario_id,
+            scenario_other,
             scenario_name,
         )
         .map_err(|error| ApiError::bad_request(error.to_string()))?;

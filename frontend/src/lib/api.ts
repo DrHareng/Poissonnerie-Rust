@@ -2,6 +2,7 @@ import type {
   ApiError,
   Army,
   AuthUser,
+  CommonRule,
   MatchOutcome,
   MatchRecord,
   PaginatedMatches,
@@ -11,6 +12,10 @@ import type {
   RankedArmy,
   RankedPlayer,
   Scenario,
+  ScenarioDetail,
+  ScenarioPack,
+  ScenarioPackPage,
+  SecondaryObjective,
   Tournament,
   TournamentDetail,
   TournamentListEntry,
@@ -112,6 +117,30 @@ export function updateProfile(payload: {
   })
 }
 
+export type SecondaryViewMode = 'liste' | 'cartes'
+export type ArmySortMode = 'win_rate' | 'matches'
+
+export interface UserPrefs {
+  secondary_view_mode: SecondaryViewMode
+  scenario_slug?: string | null
+  army_sort_mode: ArmySortMode
+}
+
+export function fetchPrefs(): Promise<UserPrefs> {
+  return request<UserPrefs>('/api/prefs')
+}
+
+export function updatePrefs(payload: {
+  secondary_view_mode?: SecondaryViewMode
+  scenario_slug?: string
+  army_sort_mode?: ArmySortMode
+}): Promise<UserPrefs> {
+  return request<UserPrefs>('/api/prefs', {
+    method: 'PATCH',
+    body: JSON.stringify(payload),
+  })
+}
+
 export function addPlayer(payload: { name: string; discord_username: string }): Promise<Player> {
   return request<Player>('/api/players', {
     method: 'POST',
@@ -135,7 +164,7 @@ export function recordMatch(
   },
   scenario?: {
     scenario_id?: number
-    scenario_name?: string
+    scenario_other?: string
   },
 ): Promise<MatchRecord> {
   return request<MatchRecord>('/api/matches', {
@@ -162,10 +191,99 @@ export function fetchPlayerMatches(name: string, limit = 200): Promise<MatchReco
   )
 }
 
-export function fetchScenarios(q?: string, limit = 20): Promise<Scenario[]> {
+export function fetchScenarios(q?: string, limit = 100): Promise<Scenario[]> {
   const params = new URLSearchParams({ limit: String(limit) })
   if (q?.trim()) params.set('q', q.trim())
   return request<Scenario[]>(`/api/scenarios?${params}`)
+}
+
+export function fetchScenarioPack(slug: string): Promise<ScenarioPackPage> {
+  return request<ScenarioPackPage>(`/api/scenario-packs/${encodeURIComponent(slug)}`)
+}
+
+export function fetchPackSecondaries(slug: string): Promise<SecondaryObjective[]> {
+  return request<SecondaryObjective[]>(
+    `/api/scenario-packs/${encodeURIComponent(slug)}/secondaries`,
+  )
+}
+
+export function fetchPackCommonRules(slug: string): Promise<CommonRule[]> {
+  return request<CommonRule[]>(
+    `/api/scenario-packs/${encodeURIComponent(slug)}/common-rules`,
+  )
+}
+
+export function fetchScenarioContentImages(): Promise<string[]> {
+  return request<string[]>('/api/scenario-content-images')
+}
+
+export function fetchPackScenario(
+  packSlug: string,
+  scenarioSlug: string,
+): Promise<ScenarioDetail> {
+  return request<ScenarioDetail>(
+    `/api/scenario-packs/${encodeURIComponent(packSlug)}/scenarios/${encodeURIComponent(scenarioSlug)}`,
+  )
+}
+
+export function updateScenarioPack(
+  slug: string,
+  payload: { preamble_md: string },
+): Promise<ScenarioPack> {
+  return request<ScenarioPack>(`/api/scenario-packs/${encodeURIComponent(slug)}`, {
+    method: 'PATCH',
+    body: JSON.stringify(payload),
+  })
+}
+
+export function updatePackSecondary(
+  packSlug: string,
+  secondarySlug: string,
+  payload: { name: string; body_md: string },
+): Promise<SecondaryObjective> {
+  return request<SecondaryObjective>(
+    `/api/scenario-packs/${encodeURIComponent(packSlug)}/secondaries/${encodeURIComponent(secondarySlug)}`,
+    {
+      method: 'PATCH',
+      body: JSON.stringify(payload),
+    },
+  )
+}
+
+export function updatePackCommonRule(
+  packSlug: string,
+  ruleSlug: string,
+  payload: { name: string; body_md: string },
+): Promise<CommonRule> {
+  return request<CommonRule>(
+    `/api/scenario-packs/${encodeURIComponent(packSlug)}/common-rules/${encodeURIComponent(ruleSlug)}`,
+    {
+      method: 'PATCH',
+      body: JSON.stringify(payload),
+    },
+  )
+}
+
+export function updatePackScenario(
+  packSlug: string,
+  scenarioSlug: string,
+  payload: {
+    flavor_text?: string
+    end_condition_md?: string
+    objectives_md?: string
+    deployment_notes_md?: string
+    exclusion_zones_md?: string
+    elements_md?: string
+    special_rules_md?: string
+  },
+): Promise<ScenarioDetail> {
+  return request<ScenarioDetail>(
+    `/api/scenario-packs/${encodeURIComponent(packSlug)}/scenarios/${encodeURIComponent(scenarioSlug)}`,
+    {
+      method: 'PATCH',
+      body: JSON.stringify(payload),
+    },
+  )
 }
 
 export function fetchTournaments(): Promise<TournamentListEntry[]> {
@@ -278,7 +396,8 @@ export function submitTournamentMatch(
     player2_objectives: number
     player1_survivors?: number
     player2_survivors?: number
-    scenario_name?: string
+    scenario_id?: number
+    scenario_other?: string
   },
 ): Promise<TournamentMatch> {
   return request<TournamentMatch>(`/api/tournament-matches/${matchId}/submit`, {

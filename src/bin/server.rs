@@ -51,7 +51,7 @@ async fn main() -> Result<()> {
         k_factor: args.k,
     };
 
-    let app = api::router(state);
+    let app = api::router(state)?;
     let listener = tokio::net::TcpListener::bind(args.listen).await?;
     println!("API ELO disponible sur http://{}", args.listen);
     axum::serve(listener, app).await?;

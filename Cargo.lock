@@ -817,6 +817,7 @@ name = "poissonnerie-elo"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "async-trait",
  "axum",
  "clap",
  "csv",
@@ -825,6 +826,7 @@ dependencies = [
  "rusqlite",
  "serde",
  "serde_json",
+ "time",
  "tokio",
  "tower-http",
  "tower-sessions",

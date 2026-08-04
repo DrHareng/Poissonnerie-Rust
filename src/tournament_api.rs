@@ -120,7 +120,7 @@ struct ScenarioQuery {
 }
 
 fn default_scenario_limit() -> usize {
-    20
+    100
 }
 
 #[derive(Debug, Serialize)]
@@ -136,6 +136,34 @@ pub struct RankedPlayerWithStars {
 pub fn tournament_routes() -> axum::Router<AppState> {
     axum::Router::new()
         .route("/api/scenarios", get(list_scenarios))
+        .route(
+            "/api/scenario-content-images",
+            get(list_scenario_content_images),
+        )
+        .route(
+            "/api/scenario-packs/{slug}",
+            get(get_scenario_pack).patch(update_scenario_pack),
+        )
+        .route(
+            "/api/scenario-packs/{slug}/secondaries",
+            get(list_pack_secondaries),
+        )
+        .route(
+            "/api/scenario-packs/{slug}/common-rules",
+            get(list_pack_common_rules),
+        )
+        .route(
+            "/api/scenario-packs/{slug}/secondaries/{secondary_slug}",
+            axum::routing::patch(update_pack_secondary),
+        )
+        .route(
+            "/api/scenario-packs/{slug}/common-rules/{rule_slug}",
+            axum::routing::patch(update_pack_common_rule),
+        )
+        .route(
+            "/api/scenario-packs/{slug}/scenarios/{scenario_slug}",
+            get(get_pack_scenario).patch(update_pack_scenario),
+        )
         .route("/api/tournaments", get(list_tournaments).post(create_tournament))
         .route("/api/tournaments/{id}", get(get_tournament))
         .route(
@@ -205,6 +233,124 @@ async fn list_scenarios(
         .list(query.q.as_deref(), query.limit)
         .map(Json)
         .map_err(|error| ApiError::bad_request(error.to_string()))
+}
+
+async fn list_scenario_content_images() -> Result<Json<Vec<String>>, ApiError> {
+    crate::scenario_pack::list_scenario_content_images()
+        .map(Json)
+        .map_err(|error| ApiError::bad_request(error.to_string()))
+}
+
+async fn get_scenario_pack(
+    State(state): State<AppState>,
+    Path(slug): Path<String>,
+) -> Result<Json<crate::scenario_pack::ScenarioPackPage>, ApiError> {
+    state
+        .scenarios
+        .pack_page(&slug)
+        .map_err(|error| ApiError::bad_request(error.to_string()))?
+        .map(Json)
+        .ok_or_else(|| ApiError::bad_request("pack de scénarios introuvable"))
+}
+
+async fn list_pack_secondaries(
+    State(state): State<AppState>,
+    Path(slug): Path<String>,
+) -> Result<Json<Vec<crate::scenario_pack::SecondaryObjective>>, ApiError> {
+    state
+        .scenarios
+        .pack_secondaries(&slug)
+        .map(Json)
+        .map_err(|error| ApiError::bad_request(error.to_string()))
+}
+
+async fn list_pack_common_rules(
+    State(state): State<AppState>,
+    Path(slug): Path<String>,
+) -> Result<Json<Vec<crate::scenario_pack::CommonRule>>, ApiError> {
+    state
+        .scenarios
+        .pack_common_rules(&slug)
+        .map(Json)
+        .map_err(|error| ApiError::bad_request(error.to_string()))
+}
+
+async fn get_pack_scenario(
+    State(state): State<AppState>,
+    Path((_pack_slug, scenario_slug)): Path<(String, String)>,
+) -> Result<Json<crate::scenario_pack::ScenarioDetail>, ApiError> {
+    state
+        .scenarios
+        .scenario_detail(&scenario_slug)
+        .map_err(|error| ApiError::bad_request(error.to_string()))?
+        .map(Json)
+        .ok_or_else(|| ApiError::bad_request("scénario introuvable"))
+}
+
+async fn update_scenario_pack(
+    State(state): State<AppState>,
+    session: Session,
+    Path(slug): Path<String>,
+    Json(body): Json<crate::scenario_pack::UpdatePackRequest>,
+) -> Result<Json<crate::scenario_pack::ScenarioPack>, ApiError> {
+    require_admin(&state, &session).await?;
+    state
+        .scenarios
+        .update_pack_preamble(&slug, &body.preamble_md)
+        .map_err(|error| ApiError::bad_request(error.to_string()))?
+        .map(Json)
+        .ok_or_else(|| ApiError::bad_request("pack de scénarios introuvable"))
+}
+
+async fn update_pack_secondary(
+    State(state): State<AppState>,
+    session: Session,
+    Path((pack_slug, secondary_slug)): Path<(String, String)>,
+    Json(body): Json<crate::scenario_pack::UpdateNamedMdRequest>,
+) -> Result<Json<crate::scenario_pack::SecondaryObjective>, ApiError> {
+    require_admin(&state, &session).await?;
+    if body.name.trim().is_empty() {
+        return Err(ApiError::bad_request("le nom est requis"));
+    }
+    state
+        .scenarios
+        .update_secondary(&pack_slug, &secondary_slug, &body.name, &body.body_md)
+        .map_err(|error| ApiError::bad_request(error.to_string()))?
+        .map(Json)
+        .ok_or_else(|| ApiError::bad_request("objectif secondaire introuvable"))
+}
+
+async fn update_pack_common_rule(
+    State(state): State<AppState>,
+    session: Session,
+    Path((pack_slug, rule_slug)): Path<(String, String)>,
+    Json(body): Json<crate::scenario_pack::UpdateNamedMdRequest>,
+) -> Result<Json<crate::scenario_pack::CommonRule>, ApiError> {
+    require_admin(&state, &session).await?;
+    if body.name.trim().is_empty() {
+        return Err(ApiError::bad_request("le nom est requis"));
+    }
+    state
+        .scenarios
+        .update_common_rule(&pack_slug, &rule_slug, &body.name, &body.body_md)
+        .map_err(|error| ApiError::bad_request(error.to_string()))?
+        .map(Json)
+        .ok_or_else(|| ApiError::bad_request("règle commune introuvable"))
+}
+
+async fn update_pack_scenario(
+    State(state): State<AppState>,
+    session: Session,
+    Path((pack_slug, scenario_slug)): Path<(String, String)>,
+    Json(body): Json<crate::scenario_pack::UpdateScenarioContentRequest>,
+) -> Result<Json<crate::scenario_pack::ScenarioDetail>, ApiError> {
+    require_admin(&state, &session).await?;
+    state
+        .scenarios
+        .update_scenario_content(&pack_slug, &scenario_slug, &body)
+        .map_err(|error| ApiError::bad_request(error.to_string()))?
+        .map(Json)
+        .ok_or_else(|| ApiError::bad_request("scénario introuvable"))
 }
 
 async fn list_tournaments(
@@ -684,6 +830,7 @@ fn apply_tournament_match_to_board(
             tm.player1_army_id,
             tm.player2_army_id,
             tm.scenario_id,
+            tm.scenario_other.clone(),
             tm.scenario_name.clone(),
             Some(tm.tournament_id),
             Some(tm.phase.as_str().to_string()),

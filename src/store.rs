@@ -44,7 +44,8 @@ impl ArmyMatchStats {
         if total == 0 {
             0.0
         } else {
-            (self.wins as f64 / total as f64) * 100.0
+            let effective_wins = self.wins as f64 + 0.5 * self.draws as f64;
+            (effective_wins / total as f64) * 100.0
         }
     }
 }
@@ -100,10 +101,12 @@ impl Leaderboard {
                        m.player1_objectives, m.player1_survivors,
                        m.player2_objectives, m.player2_survivors,
                        m.player1_army_id, m.player2_army_id,
-                       m.scenario_id, m.scenario_name,
+                       m.scenario_id, m.scenario_other,
+                       COALESCE(s.name, m.scenario_other),
                        m.tournament_id, m.tournament_phase, t.name,
                        m.recorded_at
                 FROM matches m
+                LEFT JOIN scenarios s ON s.id = m.scenario_id
                 LEFT JOIN tournaments t ON t.id = m.tournament_id
                 ORDER BY m.recorded_at DESC, m.id DESC
                 ",
@@ -167,7 +170,7 @@ impl Leaderboard {
                     player1_objectives, player1_survivors,
                     player2_objectives, player2_survivors,
                     player1_army_id, player2_army_id,
-                    scenario_id, scenario_name,
+                    scenario_id, scenario_other,
                     tournament_id, tournament_phase,
                     recorded_at
                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19)
@@ -188,7 +191,7 @@ impl Leaderboard {
                     record.player1_army_id,
                     record.player2_army_id,
                     record.scenario_id,
-                    record.scenario_name,
+                    record.scenario_other,
                     record.tournament_id,
                     record.tournament_phase,
                     record.recorded_at,
@@ -282,6 +285,7 @@ impl Leaderboard {
         player1_army_id: Option<u32>,
         player2_army_id: Option<u32>,
         scenario_id: Option<i64>,
+        scenario_other: Option<String>,
         scenario_name: Option<String>,
     ) -> Result<MatchRecord> {
         let scores = scores.validate()?;
@@ -332,6 +336,7 @@ impl Leaderboard {
             player1_army_id,
             player2_army_id,
             scenario_id,
+            scenario_other,
             scenario_name,
             None,
             None,
@@ -349,6 +354,7 @@ impl Leaderboard {
         player1_army_id: Option<u32>,
         player2_army_id: Option<u32>,
         scenario_id: Option<i64>,
+        scenario_other: Option<String>,
         scenario_name: Option<String>,
         tournament_id: Option<i64>,
         tournament_phase: Option<String>,
@@ -380,6 +386,7 @@ impl Leaderboard {
             player1_army_id,
             player2_army_id,
             scenario_id,
+            scenario_other,
             scenario_name,
             tournament_id,
             tournament_phase,
@@ -397,6 +404,7 @@ impl Leaderboard {
         player1_army_id: Option<u32>,
         player2_army_id: Option<u32>,
         scenario_id: Option<i64>,
+        scenario_other: Option<String>,
         scenario_name: Option<String>,
         tournament_id: Option<i64>,
         tournament_phase: Option<String>,
@@ -420,6 +428,7 @@ impl Leaderboard {
             player1_army_id,
             player2_army_id,
             scenario_id,
+            scenario_other,
             scenario_name,
             tournament_id,
             tournament_phase,
@@ -623,16 +632,152 @@ fn row_to_match(row: &rusqlite::Row<'_>) -> rusqlite::Result<MatchRecord> {
         player1_army_id: row.get(12)?,
         player2_army_id: row.get(13)?,
         scenario_id: row.get(14)?,
-        scenario_name: row.get(15)?,
-        tournament_id: row.get(16)?,
-        tournament_phase: row.get(17)?,
-        tournament_name: row.get(18)?,
-        recorded_at: row.get(19)?,
+        scenario_other: row.get(15)?,
+        scenario_name: row.get(16)?,
+        tournament_id: row.get(17)?,
+        tournament_phase: row.get(18)?,
+        tournament_name: row.get(19)?,
+        recorded_at: row.get(20)?,
     })
 }
 
 pub fn normalize_name(name: &str) -> String {
     name.trim().to_lowercase()
+}
+
+#[derive(Debug, Clone)]
+pub struct FixTournamentArmyReport {
+    pub tournament_id: i64,
+    pub player_name: String,
+    pub army_id: u32,
+    pub registration_updated: bool,
+    pub tournament_matches_updated: u32,
+    pub matches_updated: u32,
+}
+
+/// Corrige l'armée d'un joueur pour un tournoi (inscription + matchs tournoi + table matches).
+///
+/// Si `bracket_only` est vrai, ne touche pas à l'inscription ni aux matchs de poule
+/// (uniquement `round_of_16` / `quarter` / `semi` / `final`).
+pub fn fix_tournament_player_army(
+    db_path: &Path,
+    tournament_id: i64,
+    player_name: &str,
+    army_id: u32,
+) -> Result<FixTournamentArmyReport> {
+    fix_tournament_player_army_opts(db_path, tournament_id, player_name, army_id, false)
+}
+
+pub fn fix_tournament_player_army_opts(
+    db_path: &Path,
+    tournament_id: i64,
+    player_name: &str,
+    army_id: u32,
+    bracket_only: bool,
+) -> Result<FixTournamentArmyReport> {
+    let player_name = player_name.trim();
+    if player_name.is_empty() {
+        bail!("indiquez un nom de joueur");
+    }
+    let key = normalize_name(player_name);
+
+    let conn = Connection::open(db_path)
+        .with_context(|| format!("impossible d'ouvrir {}", db_path.display()))?;
+    migrate(&conn)?;
+
+    let canonical_name: Option<String> = conn
+        .query_row(
+            "
+            SELECT player_name FROM tournament_registrations
+            WHERE tournament_id = ?1 AND player_name_key = ?2
+            ",
+            params![tournament_id, key],
+            |row| row.get(0),
+        )
+        .ok();
+
+    if canonical_name.is_none() {
+        bail!(
+            "joueur « {player_name} » introuvable dans le tournoi {tournament_id}"
+        );
+    }
+
+    let name = canonical_name.as_deref().unwrap_or(player_name);
+
+    let registration_updated = if bracket_only {
+        false
+    } else {
+        conn.execute(
+            "
+            UPDATE tournament_registrations SET army_id = ?1
+            WHERE tournament_id = ?2 AND player_name_key = ?3
+            ",
+            params![army_id, tournament_id, key],
+        )? > 0
+    };
+
+    let tournament_matches_updated = {
+        let phase_filter = if bracket_only {
+            " AND phase != 'pool'"
+        } else {
+            ""
+        };
+        let p1 = conn.execute(
+            &format!(
+                "
+            UPDATE tournament_matches SET player1_army_id = ?1
+            WHERE tournament_id = ?2 AND player1 = ?3{phase_filter}
+            "
+            ),
+            params![army_id, tournament_id, name],
+        )? as u32;
+        let p2 = conn.execute(
+            &format!(
+                "
+            UPDATE tournament_matches SET player2_army_id = ?1
+            WHERE tournament_id = ?2 AND player2 = ?3{phase_filter}
+            "
+            ),
+            params![army_id, tournament_id, name],
+        )? as u32;
+        p1 + p2
+    };
+
+    let matches_updated = {
+        let phase_filter = if bracket_only {
+            " AND tournament_phase IS NOT NULL AND tournament_phase != 'pool'"
+        } else {
+            ""
+        };
+        let p1 = conn.execute(
+            &format!(
+                "
+            UPDATE matches SET player1_army_id = ?1
+            WHERE tournament_id = ?2 AND player1 = ?3{phase_filter}
+            "
+            ),
+            params![army_id, tournament_id, name],
+        )? as u32;
+        let p2 = conn.execute(
+            &format!(
+                "
+            UPDATE matches SET player2_army_id = ?1
+            WHERE tournament_id = ?2 AND player2 = ?3{phase_filter}
+            "
+            ),
+            params![army_id, tournament_id, name],
+        )? as u32;
+        p1 + p2
+    };
+
+    Ok(FixTournamentArmyReport {
+        tournament_id,
+        player_name: name.to_string(),
+        army_id,
+        registration_updated,
+        tournament_matches_updated,
+        matches_updated,
+    })
 }
 
 #[derive(Debug, Clone)]
@@ -1098,10 +1243,10 @@ mod tests {
         board.add_player("Alice").unwrap();
         board.add_player("Bob").unwrap();
         board.add_player("Charlie").unwrap();
-        board.record_match("Alice", "Bob", MatchOutcome::Player1Win, 32.0, MatchScores::default(), None, None, None, None)
+        board.record_match("Alice", "Bob", MatchOutcome::Player1Win, 32.0, MatchScores::default(), None, None, None, None, None)
             .unwrap();
         board
-            .record_match("Bob", "Charlie", MatchOutcome::Player2Win, 32.0, MatchScores::default(), None, None, None, None)
+            .record_match("Bob", "Charlie", MatchOutcome::Player2Win, 32.0, MatchScores::default(), None, None, None, None, None)
             .unwrap();
 
         let alice_matches = board.player_matches("Alice", 10).unwrap();
@@ -1131,6 +1276,7 @@ mod tests {
                 Some(201),
                 None,
                 None,
+                None,
             )
             .unwrap();
         board
@@ -1144,6 +1290,7 @@ mod tests {
                 Some(201),
                 None,
                 None,
+                None,
             )
             .unwrap();
         board
@@ -1155,6 +1302,7 @@ mod tests {
                 MatchScores::default(),
                 Some(102),
                 Some(201),
+                None,
                 None,
                 None,
             )
@@ -1187,6 +1335,7 @@ mod tests {
                 Some(201),
                 None,
                 None,
+                None,
             )
             .unwrap();
         board
@@ -1198,6 +1347,7 @@ mod tests {
                 MatchScores::default(),
                 Some(101),
                 Some(201),
+                None,
                 None,
                 None,
             )
@@ -1213,6 +1363,7 @@ mod tests {
                 Some(202),
                 None,
                 None,
+                None,
             )
             .unwrap();
 
@@ -1221,7 +1372,7 @@ mod tests {
         assert_eq!(army101.wins, 1);
         assert_eq!(army101.draws, 1);
         assert_eq!(army101.losses, 1);
-        assert!((army101.win_rate() - (100.0 / 3.0)).abs() < 0.001);
+        assert!((army101.win_rate() - 50.0).abs() < 0.001);
 
         let army201 = ranking.iter().find(|entry| entry.army_id == 201).unwrap();
         assert_eq!(army201.wins, 0);
@@ -1248,6 +1399,7 @@ mod tests {
                 Some(201),
                 None,
                 None,
+                None,
             )
             .unwrap();
         board
@@ -1257,6 +1409,7 @@ mod tests {
                 MatchOutcome::Player2Win,
                 32.0,
                 MatchScores::default(),
+                None,
                 None,
                 None,
                 None,
@@ -1284,6 +1437,7 @@ mod tests {
                 MatchOutcome::Player1Win,
                 32.0,
                 MatchScores::default(),
+                None,
                 None,
                 None,
                 None,

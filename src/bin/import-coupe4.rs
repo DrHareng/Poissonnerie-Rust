@@ -116,6 +116,7 @@ fn apply_to_board(board: &mut Leaderboard, tm: &TournamentMatch) -> Result<()> {
         tm.player1_army_id,
         tm.player2_army_id,
         tm.scenario_id,
+        tm.scenario_other.clone(),
         tm.scenario_name.clone(),
         Some(tm.tournament_id),
         Some(tm.phase.as_str().to_string()),
@@ -152,7 +153,7 @@ fn submit_score(
             player1_army_id: None,
             player2_army_id: None,
             scenario_id: None,
-            scenario_name: line.scenario.map(str::to_string),
+            scenario_other: line.scenario.map(str::to_string),
         },
         ADMIN_ID,
         true,
@@ -198,7 +199,7 @@ fn submit_bracket(
             player1_army_id: None,
             player2_army_id: None,
             scenario_id: None,
-            scenario_name: Some(scenario.to_string()),
+            scenario_other: Some(scenario.to_string()),
         },
         ADMIN_ID,
         true,
@@ -290,13 +291,14 @@ fn rebuild_leaderboard_from_matches(db_path: &Path) -> Result<()> {
                player1_objectives, player1_survivors,
                player2_objectives, player2_survivors,
                player1_army_id, player2_army_id,
-               scenario_id, scenario_name,
+               scenario_id, scenario_other,
                tournament_id, tournament_phase, recorded_at
         FROM matches
         ORDER BY recorded_at ASC, id ASC
         ",
     )?;
     let rows = stmt.query_map([], |row| {
+        let scenario_other: Option<String> = row.get(15)?;
         Ok(MatchRecord {
             id: row.get(0)?,
             player1: row.get(1)?,
@@ -317,7 +319,8 @@ fn rebuild_leaderboard_from_matches(db_path: &Path) -> Result<()> {
             player1_army_id: row.get(12)?,
             player2_army_id: row.get(13)?,
             scenario_id: row.get(14)?,
-            scenario_name: row.get(15)?,
+            scenario_other: scenario_other.clone(),
+            scenario_name: scenario_other,
             tournament_id: row.get(16)?,
             tournament_phase: row.get(17)?,
             tournament_name: None,
@@ -348,6 +351,7 @@ fn rebuild_leaderboard_from_matches(db_path: &Path) -> Result<()> {
             record.player1_army_id,
             record.player2_army_id,
             record.scenario_id,
+            record.scenario_other,
             record.scenario_name,
             record.tournament_id,
             record.tournament_phase,

@@ -89,7 +89,7 @@ pub struct SubmitMatchRequest {
     #[serde(default)]
     pub scenario_id: Option<i64>,
     #[serde(default)]
-    pub scenario_name: Option<String>,
+    pub scenario_other: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -768,11 +768,33 @@ impl TournamentStore {
             .or(request.player1_army_id);
         let player2_army_id = registration_army_id_in_conn(&conn, tm.tournament_id, &p2)?
             .or(request.player2_army_id);
-        let scenario_name = request
-            .scenario_name
+        let scenario_other = request
+            .scenario_other
             .as_deref()
-            .map(crate::scenario::strip_scenario_prefix)
-            .filter(|name| !name.is_empty());
+            .map(str::trim)
+            .filter(|name| !name.is_empty())
+            .map(str::to_string);
+
+        if request.scenario_id.is_some() && scenario_other.is_some() {
+            anyhow::bail!(
+                "choisissez un scénario du catalogue ou un texte libre, pas les deux"
+            );
+        }
+
+        if let Some(id) = request.scenario_id {
+            let exists: bool = conn.query_row(
+                "SELECT EXISTS(SELECT 1 FROM scenarios WHERE id = ?1)",
+                params![id],
+                |row| row.get(0),
+            )?;
+            if !exists {
+                anyhow::bail!("scénario introuvable");
+            }
+            conn.execute(
+                "UPDATE scenarios SET usage_count = usage_count + 1 WHERE id = ?1",
+                params![id],
+            )?;
+        }
 
         conn.execute(
             "
@@ -785,7 +807,7 @@ impl TournamentStore {
                 player1_rating_used = ?10, player2_rating_used = ?11,
                 status = ?12, submitted_by_user_id = ?13, submitted_at = ?14,
                 confirmed_by_user_id = ?15, confirmed_at = ?16,
-                scenario_id = ?17, scenario_name = ?18,
+                scenario_id = ?17, scenario_other = ?18,
                 player1_army_id = ?19, player2_army_id = ?20,
                 played_at = ?21
             WHERE id = ?22
@@ -812,7 +834,7 @@ impl TournamentStore {
                 if auto_confirm { Some(user_id) } else { None::<i64> },
                 if auto_confirm { Some(now) } else { None::<u64> },
                 request.scenario_id,
-                scenario_name,
+                scenario_other,
                 player1_army_id,
                 player2_army_id,
                 now,
@@ -2183,6 +2205,16 @@ impl TournamentStore {
         Ok(qualified)
     }
 
+    /// Recalcule les `final_placement` d'un tournoi terminé (après correction d'arbre).
+    pub fn refresh_final_placements(&self, tournament_id: i64) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "UPDATE tournament_players SET final_placement = NULL WHERE tournament_id = ?1",
+            params![tournament_id],
+        )?;
+        self.assign_final_placements_in_conn(&conn, tournament_id)
+    }
+
     fn assign_final_placements_in_conn(
         &self,
         conn: &Connection,
@@ -2576,29 +2608,35 @@ impl TournamentStore {
             .query_map(params![tournament_id], |row| row.get(0))?
             .collect::<Result<Vec<_>, _>>()?;
 
-        Ok(ids
-            .into_iter()
-            .filter_map(|id| self.get_match_in_conn(conn, id).ok().flatten())
-            .collect())
+        let mut matches = Vec::with_capacity(ids.len());
+        for id in ids {
+            if let Some(tm) = self.get_match_in_conn(conn, id)? {
+                matches.push(tm);
+            }
+        }
+        Ok(matches)
     }
 
     fn get_match_in_conn(&self, conn: &Connection, id: i64) -> Result<Option<TournamentMatch>> {
         let mut stmt = conn.prepare(
             "
-            SELECT id, tournament_id, phase, pool_id, bracket_slot,
-                   player1, player2,
-                   player1_objectives, player2_objectives,
-                   player1_survivors, player2_survivors,
-                   player1_tournament_points, player2_tournament_points,
-                   outcome, is_forfeit, forfeit_player,
-                   player1_elo_delta, player2_elo_delta,
-                   player1_rating_used, player2_rating_used,
-                   elo_applied_at, status,
-                   submitted_by_user_id, submitted_at,
-                   confirmed_by_user_id, confirmed_at,
-                   scenario_id, scenario_name,
-                   player1_army_id, player2_army_id, played_at, is_unplayed
-            FROM tournament_matches WHERE id = ?1
+            SELECT tm.id, tm.tournament_id, tm.phase, tm.pool_id, tm.bracket_slot,
+                   tm.player1, tm.player2,
+                   tm.player1_objectives, tm.player2_objectives,
+                   tm.player1_survivors, tm.player2_survivors,
+                   tm.player1_tournament_points, tm.player2_tournament_points,
+                   tm.outcome, tm.is_forfeit, tm.forfeit_player,
+                   tm.player1_elo_delta, tm.player2_elo_delta,
+                   tm.player1_rating_used, tm.player2_rating_used,
+                   tm.elo_applied_at, tm.status,
+                   tm.submitted_by_user_id, tm.submitted_at,
+                   tm.confirmed_by_user_id, tm.confirmed_at,
+                   tm.scenario_id, tm.scenario_other,
+                   COALESCE(s.name, tm.scenario_other),
+                   tm.player1_army_id, tm.player2_army_id, tm.played_at, tm.is_unplayed
+            FROM tournament_matches tm
+            LEFT JOIN scenarios s ON s.id = tm.scenario_id
+            WHERE tm.id = ?1
             ",
         )?;
         let mut rows = stmt.query(params![id])?;
@@ -2795,11 +2833,12 @@ fn row_to_tournament_match(row: &rusqlite::Row<'_>) -> rusqlite::Result<Tourname
         confirmed_by_user_id: row.get(24)?,
         confirmed_at: row.get(25)?,
         scenario_id: row.get(26)?,
-        scenario_name: row.get(27)?,
-        player1_army_id: row.get(28)?,
-        player2_army_id: row.get(29)?,
-        played_at: row.get(30)?,
-        is_unplayed: row.get::<_, i64>(31)? != 0,
+        scenario_other: row.get(27)?,
+        scenario_name: row.get(28)?,
+        player1_army_id: row.get(29)?,
+        player2_army_id: row.get(30)?,
+        played_at: row.get(31)?,
+        is_unplayed: row.get::<_, i64>(32)? != 0,
     })
 }
 
@@ -2857,7 +2896,7 @@ mod tests {
             player1_army_id: None,
             player2_army_id: None,
             scenario_id: None,
-            scenario_name: None,
+            scenario_other: None,
         };
 
         let (updated, _) = store.correct_match_score(1, &request, 32.0).unwrap();
@@ -2900,7 +2939,7 @@ mod tests {
             player1_army_id: None,
             player2_army_id: None,
             scenario_id: None,
-            scenario_name: None,
+            scenario_other: None,
         };
 
         let (updated, _) = store.correct_match_score(1, &request, 32.0).unwrap();
@@ -2937,7 +2976,7 @@ mod tests {
             player1_army_id: None,
             player2_army_id: None,
             scenario_id: None,
-            scenario_name: None,
+            scenario_other: None,
         };
 
         let (updated, _) = store.correct_match_score(1, &request, 32.0).unwrap();

@@ -13,10 +13,12 @@ case "$(uname -s)" in
     MINGW* | MSYS* | CYGWIN*)
         EXE_EXT=".exe"
         HAS_SETSID=0
+        IS_WINDOWS=1
         ;;
     *)
         EXE_EXT=""
         HAS_SETSID=1
+        IS_WINDOWS=0
         command -v setsid >/dev/null 2>&1 || HAS_SETSID=0
         ;;
 esac
@@ -76,6 +78,56 @@ port_is_open() {
     local host="${addr%:*}"
     local port="${addr##*:}"
     timeout 1 bash -c "echo >/dev/tcp/$host/$port" 2>/dev/null
+}
+
+kill_port_listeners() {
+    local port="$1"
+    local pids=""
+
+    if [[ "$IS_WINDOWS" == 1 ]]; then
+        pids="$(
+            netstat -ano 2>/dev/null |
+                grep -E ":${port}[[:space:]]" |
+                grep LISTENING |
+                awk '{print $NF}' |
+                sort -u
+        )"
+        for pid in $pids; do
+            [[ "$pid" =~ ^[0-9]+$ && "$pid" != 0 ]] || continue
+            taskkill //F //T //PID "$pid" >/dev/null 2>&1 || true
+        done
+    elif command -v fuser >/dev/null 2>&1; then
+        fuser -k "${port}/tcp" 2>/dev/null || true
+    elif command -v lsof >/dev/null 2>&1; then
+        pids="$(lsof -ti ":$port" 2>/dev/null || true)"
+        for pid in $pids; do
+            kill -KILL "$pid" 2>/dev/null || true
+        done
+    fi
+}
+
+kill_process_tree() {
+    local pid="$1"
+
+    if [[ "$IS_WINDOWS" == 1 ]]; then
+        taskkill //F //T //PID "$pid" >/dev/null 2>&1 || kill -TERM "$pid" 2>/dev/null || true
+    elif [[ "$HAS_SETSID" == 1 ]]; then
+        kill -TERM -- "-$pid" 2>/dev/null || kill -TERM "$pid" 2>/dev/null || true
+    else
+        kill -TERM "$pid" 2>/dev/null || true
+    fi
+}
+
+force_kill_process_tree() {
+    local pid="$1"
+
+    if [[ "$IS_WINDOWS" == 1 ]]; then
+        taskkill //F //T //PID "$pid" >/dev/null 2>&1 || kill -KILL "$pid" 2>/dev/null || true
+    elif [[ "$HAS_SETSID" == 1 ]]; then
+        kill -KILL -- "-$pid" 2>/dev/null || kill -KILL "$pid" 2>/dev/null || true
+    else
+        kill -KILL "$pid" 2>/dev/null || true
+    fi
 }
 
 wait_for_port() {
@@ -162,6 +214,16 @@ start_frontend() {
     fi
 
     if port_is_open "$FRONTEND_ADDR"; then
+        local tracked_pid
+        tracked_pid="$(read_pid "$FRONTEND_PID_FILE")"
+        if ! pid_is_running "$tracked_pid"; then
+            log "Port ${FRONTEND_ADDR##*:} occupé par un processus orphelin, libération..."
+            kill_port_listeners "${FRONTEND_ADDR##*:}"
+            sleep 1
+        fi
+    fi
+
+    if port_is_open "$FRONTEND_ADDR"; then
         err "le port $FRONTEND_ADDR est déjà utilisé"
         return 1
     fi
@@ -197,11 +259,7 @@ stop_process() {
     fi
 
     log "Arrêt de $label (PID $pid)..."
-    if [[ "$HAS_SETSID" == 1 ]]; then
-        kill -TERM -- "-$pid" 2>/dev/null || kill -TERM "$pid" 2>/dev/null || true
-    else
-        kill -TERM "$pid" 2>/dev/null || true
-    fi
+    kill_process_tree "$pid"
 
     for _ in {1..10}; do
         if ! pid_is_running "$pid"; then
@@ -212,11 +270,7 @@ stop_process() {
         sleep 1
     done
 
-    if [[ "$HAS_SETSID" == 1 ]]; then
-        kill -KILL -- "-$pid" 2>/dev/null || kill -KILL "$pid" 2>/dev/null || true
-    else
-        kill -KILL "$pid" 2>/dev/null || true
-    fi
+    force_kill_process_tree "$pid"
     rm -f "$pid_file"
     log "$label arrêté (SIGKILL)"
 }
@@ -225,9 +279,7 @@ stop_frontend() {
     stop_process "$FRONTEND_PID_FILE" "Frontend"
     if port_is_open "$FRONTEND_ADDR"; then
         log "Libération du port ${FRONTEND_ADDR##*:}..."
-        if command -v fuser >/dev/null 2>&1; then
-            fuser -k "${FRONTEND_ADDR##*:}/tcp" 2>/dev/null || true
-        fi
+        kill_port_listeners "${FRONTEND_ADDR##*:}"
         sleep 1
     fi
 }

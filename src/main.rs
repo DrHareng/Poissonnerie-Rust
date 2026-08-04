@@ -99,6 +99,7 @@ fn main() -> Result<()> {
                 None,
                 None,
                 None,
+                None,
             )?;
             board.save(&cli.db)?;
 

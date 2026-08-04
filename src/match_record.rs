@@ -50,6 +50,10 @@ pub struct MatchRecord {
     pub player2_army_id: Option<u32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub scenario_id: Option<i64>,
+    /// Texte libre si le scénario n'est pas choisi dans le catalogue.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub scenario_other: Option<String>,
+    /// Libellé d'affichage (nom catalogue ou texte libre).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub scenario_name: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -72,6 +76,7 @@ impl MatchRecord {
         player1_army_id: Option<u32>,
         player2_army_id: Option<u32>,
         scenario_id: Option<i64>,
+        scenario_other: Option<String>,
         scenario_name: Option<String>,
         tournament_id: Option<i64>,
         tournament_phase: Option<String>,
@@ -94,6 +99,7 @@ impl MatchRecord {
             player1_army_id,
             player2_army_id,
             scenario_id,
+            scenario_other,
             scenario_name,
             tournament_id,
             tournament_phase,

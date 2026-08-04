@@ -75,7 +75,9 @@ impl RegistrationStatus {
 #[serde(rename_all = "snake_case")]
 pub enum BracketFormat {
     QuartersDirect,
+    #[serde(rename = "round_of_16")]
     RoundOf16,
+    #[serde(rename = "round_of_16_full")]
     RoundOf16Full,
 }
 
@@ -102,6 +104,7 @@ impl BracketFormat {
 #[serde(rename_all = "snake_case")]
 pub enum TournamentPhase {
     Pool,
+    #[serde(rename = "round_of_16")]
     RoundOf16,
     Quarter,
     Semi,
@@ -331,6 +334,8 @@ pub struct TournamentMatch {
     pub confirmed_by_user_id: Option<i64>,
     pub confirmed_at: Option<u64>,
     pub scenario_id: Option<i64>,
+    pub scenario_other: Option<String>,
+    /// Libellé d'affichage (nom catalogue ou texte libre).
     pub scenario_name: Option<String>,
     pub player1_army_id: Option<u32>,
     pub player2_army_id: Option<u32>,
@@ -838,6 +843,7 @@ mod tests {
             confirmed_by_user_id: None,
             confirmed_at: None,
             scenario_id: None,
+            scenario_other: None,
             scenario_name: None,
             player1_army_id: None,
             player2_army_id: None,
@@ -927,6 +933,7 @@ mod tests {
                 confirmed_by_user_id: None,
                 confirmed_at: None,
                 scenario_id: None,
+                scenario_other: None,
                 scenario_name: None,
                 player1_army_id: None,
                 player2_army_id: None,
@@ -973,6 +980,7 @@ mod tests {
                 confirmed_by_user_id: None,
                 confirmed_at: None,
                 scenario_id: None,
+                scenario_other: None,
                 scenario_name: None,
                 player1_army_id: None,
                 player2_army_id: None,
@@ -1010,6 +1018,7 @@ mod tests {
                 confirmed_by_user_id: None,
                 confirmed_at: None,
                 scenario_id: None,
+                scenario_other: None,
                 scenario_name: None,
                 player1_army_id: None,
                 player2_army_id: None,

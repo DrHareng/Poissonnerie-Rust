@@ -2,8 +2,8 @@
 import { computed, onMounted, ref, watch } from 'vue'
 import { toast } from 'vue-sonner'
 import { Swords } from '@lucide/vue'
-import { fetchArmies, recordMatch } from '@/lib/api'
-import type { Army, MatchOutcome, RankedPlayer } from '@/types/elo'
+import { fetchArmies, fetchScenarios, recordMatch } from '@/lib/api'
+import type { Army, MatchOutcome, RankedPlayer, Scenario } from '@/types/elo'
 import { Button } from '@/components/ui/button'
 import {
   Card,
@@ -14,8 +14,17 @@ import {
 } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
 import SectorialPicker from '@/components/SectorialPicker.vue'
 import PlayerPicker from '@/components/PlayerPicker.vue'
+
+const SCENARIO_OTHER_VALUE = '__other__'
 
 const props = defineProps<{
   players: RankedPlayer[]
@@ -33,11 +42,14 @@ const player1ArmyId = ref<string>()
 const player2ArmyId = ref<string>()
 const armies = ref<Army[]>([])
 const armiesLoading = ref(true)
+const scenarios = ref<Scenario[]>([])
+const scenariosLoading = ref(true)
 const player1Objectives = ref(0)
 const player1Survivors = ref(0)
 const player2Objectives = ref(0)
 const player2Survivors = ref(0)
-const scenarioName = ref('')
+const scenarioChoice = ref<string>()
+const scenarioOther = ref('')
 const submitting = ref(false)
 
 const playerOptions = computed(() =>
@@ -48,6 +60,10 @@ const playerOptions = computed(() =>
 )
 
 const armyOptions = computed(() => armies.value)
+
+const isScenarioOther = computed(
+  () => scenarioChoice.value === SCENARIO_OTHER_VALUE,
+)
 
 const bothPlayersSelected = computed(
   () =>
@@ -131,11 +147,17 @@ function resetPlayer2Details() {
   player2Survivors.value = 0
 }
 
+function resetScenario() {
+  scenarioChoice.value = undefined
+  scenarioOther.value = ''
+}
+
 function resetForm() {
   player1.value = undefined
   player2.value = undefined
   resetPlayer1Details()
   resetPlayer2Details()
+  resetScenario()
 }
 
 function cancel() {
@@ -143,9 +165,27 @@ function cancel() {
   emit('cancel')
 }
 
+function scenarioPayload():
+  | { scenario_id: number }
+  | { scenario_other: string }
+  | undefined {
+  if (!scenarioChoice.value) return undefined
+  if (scenarioChoice.value === SCENARIO_OTHER_VALUE) {
+    const other = scenarioOther.value.trim()
+    return other ? { scenario_other: other } : undefined
+  }
+  const id = Number(scenarioChoice.value)
+  return Number.isFinite(id) ? { scenario_id: id } : undefined
+}
+
 onMounted(async () => {
   try {
-    armies.value = await fetchArmies()
+    const [loadedArmies, loadedScenarios] = await Promise.all([
+      fetchArmies(),
+      fetchScenarios(),
+    ])
+    armies.value = loadedArmies
+    scenarios.value = loadedScenarios
   } catch (error) {
     toast.error(
       error instanceof Error
@@ -154,6 +194,7 @@ onMounted(async () => {
     )
   } finally {
     armiesLoading.value = false
+    scenariosLoading.value = false
   }
 })
 
@@ -173,6 +214,12 @@ watch(player1ArmyId, () => {
 watch(player2ArmyId, () => {
   player2Objectives.value = 0
   player2Survivors.value = 0
+})
+
+watch(scenarioChoice, (value) => {
+  if (value !== SCENARIO_OTHER_VALUE) {
+    scenarioOther.value = ''
+  }
 })
 
 function parseScores() {
@@ -212,9 +259,7 @@ async function submit() {
         player1_army_id: Number(player1ArmyId.value),
         player2_army_id: Number(player2ArmyId.value),
       },
-      scenarioName.value.trim()
-        ? { scenario_name: scenarioName.value.trim() }
-        : undefined,
+      scenarioPayload(),
     )
     toast.success(
       `${record.player1} ${Math.round(record.player1_old)} → ${Math.round(record.player1_new)} | ` +
@@ -358,10 +403,26 @@ async function submit() {
         </div>
 
         <div class="grid gap-2">
-          <Label for="scenario-name">Scénario (optionnel)</Label>
+          <Label>Scénario (optionnel)</Label>
+          <Select v-model="scenarioChoice" :disabled="scenariosLoading">
+            <SelectTrigger>
+              <SelectValue placeholder="Choisir un scénario" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem
+                v-for="scenario in scenarios"
+                :key="scenario.id"
+                :value="String(scenario.id)"
+              >
+                {{ scenario.name }}
+              </SelectItem>
+              <SelectItem :value="SCENARIO_OTHER_VALUE">Autre…</SelectItem>
+            </SelectContent>
+          </Select>
           <Input
-            id="scenario-name"
-            v-model="scenarioName"
+            v-if="isScenarioOther"
+            id="scenario-other"
+            v-model="scenarioOther"
             placeholder="Nom du scénario"
             autocomplete="off"
           />

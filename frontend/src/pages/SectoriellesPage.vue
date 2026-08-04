@@ -42,7 +42,7 @@ onMounted(refreshRanking)
     <section class="page-header">
       <h1 class="page-title">Sectorielles</h1>
       <p class="page-description">
-        Classement par win rate des factions jouées dans les parties enregistrées.
+        Classement des factions jouées dans les parties enregistrées (win rate ou nombre de parties).
       </p>
     </section>
 

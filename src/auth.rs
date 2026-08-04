@@ -3,13 +3,43 @@ use reqwest::Client;
 use serde::Deserialize;
 use tower_sessions::Session;
 
-use crate::user::{discord_avatar_url, DiscordProfile, User, UserStore};
+use crate::user::{discord_avatar_url, DiscordProfile, UiPrefsUpdate, User, UserStore};
 
 const DISCORD_AUTHORIZE_URL: &str = "https://discord.com/api/oauth2/authorize";
 const DISCORD_TOKEN_URL: &str = "https://discord.com/api/oauth2/token";
 const DISCORD_USER_URL: &str = "https://discord.com/api/users/@me";
 
 pub const SESSION_USER_ID: &str = "user_id";
+pub const SESSION_SECONDARY_VIEW_MODE: &str = "secondary_view_mode";
+pub const SESSION_SCENARIO_SLUG: &str = "scenario_slug";
+pub const SESSION_ARMY_SORT_MODE: &str = "army_sort_mode";
+pub const DEFAULT_SECONDARY_VIEW_MODE: &str = "liste";
+pub const DEFAULT_ARMY_SORT_MODE: &str = "win_rate";
+
+pub fn parse_secondary_view_mode(value: &str) -> Option<&'static str> {
+    match value {
+        "liste" => Some("liste"),
+        "cartes" => Some("cartes"),
+        _ => None,
+    }
+}
+
+pub fn parse_army_sort_mode(value: &str) -> Option<&'static str> {
+    match value {
+        "win_rate" => Some("win_rate"),
+        "matches" => Some("matches"),
+        _ => None,
+    }
+}
+
+pub fn normalize_scenario_slug(value: &str) -> Option<String> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        None
+    } else {
+        Some(trimmed.to_string())
+    }
+}
 
 #[derive(Clone)]
 pub struct AuthConfig {
@@ -54,7 +84,104 @@ pub async fn login_with_code(
         .insert(SESSION_USER_ID, user.id)
         .await
         .context("impossible d'enregistrer la session")?;
+
+    sync_pref_on_login(
+        users,
+        session,
+        user.id,
+        user.secondary_view_mode.as_deref(),
+        SESSION_SECONDARY_VIEW_MODE,
+        parse_secondary_view_mode,
+        |value| UiPrefsUpdate {
+            secondary_view_mode: Some(value.to_string()),
+            ..UiPrefsUpdate::default()
+        },
+    )
+    .await?;
+
+    sync_string_pref_on_login(
+        users,
+        session,
+        user.id,
+        user.scenario_slug.as_deref(),
+        SESSION_SCENARIO_SLUG,
+        |value| UiPrefsUpdate {
+            scenario_slug: Some(value.to_string()),
+            ..UiPrefsUpdate::default()
+        },
+    )
+    .await?;
+
+    sync_pref_on_login(
+        users,
+        session,
+        user.id,
+        user.army_sort_mode.as_deref(),
+        SESSION_ARMY_SORT_MODE,
+        parse_army_sort_mode,
+        |value| UiPrefsUpdate {
+            army_sort_mode: Some(value.to_string()),
+            ..UiPrefsUpdate::default()
+        },
+    )
+    .await?;
+
     Ok(user)
+}
+
+async fn sync_pref_on_login(
+    users: &UserStore,
+    session: &Session,
+    user_id: i64,
+    user_value: Option<&str>,
+    session_key: &str,
+    parse: fn(&str) -> Option<&'static str>,
+    to_update: fn(&str) -> UiPrefsUpdate,
+) -> Result<()> {
+    if let Some(mode) = user_value.and_then(parse) {
+        session
+            .insert(session_key, mode.to_string())
+            .await
+            .context("impossible d'enregistrer la préférence")?;
+    } else {
+        let from_session: Option<String> = session
+            .get(session_key)
+            .await
+            .context("impossible de lire la préférence")?;
+        if let Some(mode) = from_session.as_deref().and_then(parse) {
+            users
+                .update_ui_prefs(user_id, to_update(mode))
+                .context("impossible de sauvegarder la préférence")?;
+        }
+    }
+    Ok(())
+}
+
+async fn sync_string_pref_on_login(
+    users: &UserStore,
+    session: &Session,
+    user_id: i64,
+    user_value: Option<&str>,
+    session_key: &str,
+    to_update: fn(&str) -> UiPrefsUpdate,
+) -> Result<()> {
+    if let Some(value) = user_value.and_then(normalize_scenario_slug) {
+        session
+            .insert(session_key, value)
+            .await
+            .context("impossible d'enregistrer la préférence")?;
+    } else {
+        let from_session: Option<String> = session
+            .get(session_key)
+            .await
+            .context("impossible de lire la préférence")?;
+        if let Some(value) = from_session.as_deref().and_then(normalize_scenario_slug) {
+            users
+                .update_ui_prefs(user_id, to_update(&value))
+                .context("impossible de sauvegarder la préférence")?;
+        }
+    }
+    Ok(())
 }
 
 pub async fn current_user(users: &UserStore, session: &Session) -> Result<Option<User>> {

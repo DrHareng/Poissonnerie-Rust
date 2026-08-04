@@ -4,10 +4,14 @@ import { useRoute } from 'vue-router'
 import {
   BarChart3,
   ChevronDown,
+  Eye,
   LogIn,
   LogOut,
+  Map,
   Medal,
+  Pencil,
   Shield,
+  Play,
   Swords,
   Trophy,
   User,
@@ -21,20 +25,31 @@ import {
   DropdownMenuTrigger,
 } from 'reka-ui'
 import { useAuth } from '@/composables/useAuth'
+import { useAdminEditMode } from '@/composables/useAdminEditMode'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 
 const route = useRoute()
-const { user, player, isAuthenticated, hasPlayer, loading, login, logout } = useAuth()
+const { user, player, isAuthenticated, hasPlayer, loading, login, logout } =
+  useAuth()
+const { isAdmin, isEditMode, setEditMode } = useAdminEditMode()
 
 const links = [
   { to: '/classement', label: 'Classement', icon: Trophy },
   { to: '/tournois', label: 'Tournois', icon: Medal },
+  { to: '/scenarios', label: 'Scénarios', icon: Map },
   { to: '/sectorielles', label: 'Sectorielles', icon: Shield },
   { to: '/matchs', label: 'Matchs', icon: Swords },
 ]
 
 const activePath = computed(() => route.path)
+
+function isLinkActive(to: string) {
+  if (activePath.value === to) return true
+  if (to === '/tournois' && activePath.value.startsWith('/tournoi')) return true
+  if (to === '/scenarios' && activePath.value.startsWith('/scenarios')) return true
+  return false
+}
 
 const playerPageRoute = computed(() =>
   hasPlayer.value && player.value
@@ -73,11 +88,19 @@ async function handleLogout() {
     <div class="flex flex-col gap-3 md:flex-row md:items-center md:gap-4">
       <nav class="topbar-nav" aria-label="Navigation principale">
         <RouterLink
+          to="/partie"
+          class="topbar-cta"
+          :class="{ 'topbar-cta-active': activePath === '/partie' }"
+        >
+          <Play class="size-4" />
+          Démarrer une partie
+        </RouterLink>
+        <RouterLink
           v-for="link in links"
           :key="link.to"
           :to="link.to"
           class="topbar-link"
-          :class="{ 'topbar-link-active': activePath === link.to || (link.to === '/tournois' && activePath.startsWith('/tournoi')) }"
+          :class="{ 'topbar-link-active': isLinkActive(link.to) }"
         >
           <component :is="link.icon" class="size-4" />
           {{ link.label }}
@@ -88,45 +111,94 @@ async function handleLogout() {
         <div v-if="loading" class="text-sm text-muted-foreground">
           Connexion...
         </div>
-        <DropdownMenuRoot v-else-if="isAuthenticated && user">
-          <DropdownMenuTrigger
-            class="topbar-user-trigger"
-            aria-label="Menu compte"
+        <template v-else-if="isAuthenticated && user">
+          <div
+            v-if="isAdmin"
+            class="flex items-center gap-0"
+            role="group"
+            aria-label="Mode d’édition"
           >
-            <img
-              :src="user.effective_avatar_url"
-              :alt="user.effective_display_name"
-              class="size-8 rounded-full border border-primary/30 object-cover"
-            />
-            <span class="truncate text-sm font-medium">{{ user.effective_display_name }}</span>
-            <ChevronDown class="size-4 shrink-0 opacity-60" />
-          </DropdownMenuTrigger>
-          <DropdownMenuPortal>
-            <DropdownMenuContent
-              align="end"
-              :side-offset="8"
-              class="topbar-user-menu"
+            <Button
+              type="button"
+              size="xs"
+              variant="outline"
+              :class="[
+                'rounded-r-none',
+                isEditMode
+                  ? 'border-primary bg-primary! text-primary-foreground hover:bg-primary/90'
+                  : 'border-border bg-black text-white hover:text-primary',
+              ]"
+              :aria-pressed="isEditMode"
+              title="Mode édition"
+              @click="setEditMode(true)"
             >
-              <DropdownMenuItem v-if="profileRoute" as-child>
-                <RouterLink :to="profileRoute" :class="menuItemClass">
-                  <User class="size-4" />
-                  Mon profil
-                </RouterLink>
-              </DropdownMenuItem>
-              <DropdownMenuItem v-if="statsRoute" as-child>
-                <RouterLink :to="statsRoute" :class="menuItemClass">
-                  <BarChart3 class="size-4" />
-                  Mes stats
-                </RouterLink>
-              </DropdownMenuItem>
-              <DropdownMenuSeparator v-if="hasPlayer" class="topbar-user-menu-separator" />
-              <DropdownMenuItem :class="menuItemClass" @select="handleLogout">
-                <LogOut class="size-4" />
-                Déconnexion
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenuPortal>
-        </DropdownMenuRoot>
+              <Pencil class="size-3.5" />
+              Édition
+            </Button>
+            <Button
+              type="button"
+              size="xs"
+              variant="outline"
+              :class="[
+                'rounded-l-none border-l-0',
+                !isEditMode
+                  ? 'border-primary bg-primary! text-primary-foreground hover:bg-primary/90'
+                  : 'border-border bg-black text-white hover:text-primary',
+              ]"
+              :aria-pressed="!isEditMode"
+              title="Mode consultation"
+              @click="setEditMode(false)"
+            >
+              <Eye class="size-3.5" />
+              Lecture
+            </Button>
+          </div>
+
+          <DropdownMenuRoot>
+            <DropdownMenuTrigger
+              class="topbar-user-trigger"
+              aria-label="Menu compte"
+            >
+              <img
+                :src="user.effective_avatar_url"
+                :alt="user.effective_display_name"
+                class="size-8 rounded-full border border-primary/30 object-cover"
+              />
+              <span class="truncate text-sm font-medium">{{
+                user.effective_display_name
+              }}</span>
+              <ChevronDown class="size-4 shrink-0 opacity-60" />
+            </DropdownMenuTrigger>
+            <DropdownMenuPortal>
+              <DropdownMenuContent
+                align="end"
+                :side-offset="8"
+                class="topbar-user-menu"
+              >
+                <DropdownMenuItem v-if="profileRoute" as-child>
+                  <RouterLink :to="profileRoute" :class="menuItemClass">
+                    <User class="size-4" />
+                    Mon profil
+                  </RouterLink>
+                </DropdownMenuItem>
+                <DropdownMenuItem v-if="statsRoute" as-child>
+                  <RouterLink :to="statsRoute" :class="menuItemClass">
+                    <BarChart3 class="size-4" />
+                    Mes stats
+                  </RouterLink>
+                </DropdownMenuItem>
+                <DropdownMenuSeparator
+                  v-if="hasPlayer"
+                  class="topbar-user-menu-separator"
+                />
+                <DropdownMenuItem :class="menuItemClass" @select="handleLogout">
+                  <LogOut class="size-4" />
+                  Déconnexion
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenuPortal>
+          </DropdownMenuRoot>
+        </template>
         <Button v-else size="sm" @click="login">
           <LogIn class="size-4" />
           Connexion Discord

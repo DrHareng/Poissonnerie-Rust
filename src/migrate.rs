@@ -43,6 +43,14 @@ pub fn migrate(conn: &Connection) -> Result<()> {
             last_login_at INTEGER NOT NULL
         );
 
+        CREATE TABLE IF NOT EXISTS sessions (
+            id TEXT PRIMARY KEY NOT NULL,
+            data BLOB NOT NULL,
+            expiry_date INTEGER NOT NULL
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_sessions_expiry_date ON sessions(expiry_date);
+
         CREATE TABLE IF NOT EXISTS scenarios (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             name TEXT NOT NULL UNIQUE,
@@ -135,7 +143,7 @@ pub fn migrate(conn: &Connection) -> Result<()> {
             confirmed_by_user_id INTEGER,
             confirmed_at INTEGER,
             scenario_id INTEGER REFERENCES scenarios(id),
-            scenario_name TEXT,
+            scenario_other TEXT,
             player1_army_id INTEGER,
             player2_army_id INTEGER,
             played_at INTEGER
@@ -170,9 +178,8 @@ pub fn migrate(conn: &Connection) -> Result<()> {
         conn.execute("ALTER TABLE matches ADD COLUMN scenario_id INTEGER", [])?;
     }
 
-    if !column_exists(conn, "matches", "scenario_name")? {
-        conn.execute("ALTER TABLE matches ADD COLUMN scenario_name TEXT", [])?;
-    }
+    rename_scenario_name_to_other(conn, "matches")?;
+    rename_scenario_name_to_other(conn, "tournament_matches")?;
 
     if !column_exists(conn, "matches", "tournament_id")? {
         conn.execute("ALTER TABLE matches ADD COLUMN tournament_id INTEGER", [])?;
@@ -287,6 +294,18 @@ pub fn migrate(conn: &Connection) -> Result<()> {
         conn.execute("ALTER TABLE users ADD COLUMN local_avatar_url TEXT", [])?;
     }
 
+    if !column_exists(conn, "users", "secondary_view_mode")? {
+        conn.execute("ALTER TABLE users ADD COLUMN secondary_view_mode TEXT", [])?;
+    }
+
+    if !column_exists(conn, "users", "scenario_slug")? {
+        conn.execute("ALTER TABLE users ADD COLUMN scenario_slug TEXT", [])?;
+    }
+
+    if !column_exists(conn, "users", "army_sort_mode")? {
+        conn.execute("ALTER TABLE users ADD COLUMN army_sort_mode TEXT", [])?;
+    }
+
     if !column_exists(conn, "tournament_matches", "is_unplayed")? {
         conn.execute(
             "ALTER TABLE tournament_matches ADD COLUMN is_unplayed INTEGER NOT NULL DEFAULT 0",
@@ -297,16 +316,16 @@ pub fn migrate(conn: &Connection) -> Result<()> {
     conn.execute_batch(
         "
         UPDATE matches
-        SET scenario_name = TRIM(SUBSTR(scenario_name, 5))
-        WHERE scenario_name IS NOT NULL
-          AND LENGTH(scenario_name) > 4
-          AND SUBSTR(scenario_name, 2, 3) = ' : ';
+        SET scenario_other = TRIM(SUBSTR(scenario_other, 5))
+        WHERE scenario_other IS NOT NULL
+          AND LENGTH(scenario_other) > 4
+          AND SUBSTR(scenario_other, 2, 3) = ' : ';
 
         UPDATE tournament_matches
-        SET scenario_name = TRIM(SUBSTR(scenario_name, 5))
-        WHERE scenario_name IS NOT NULL
-          AND LENGTH(scenario_name) > 4
-          AND SUBSTR(scenario_name, 2, 3) = ' : ';
+        SET scenario_other = TRIM(SUBSTR(scenario_other, 5))
+        WHERE scenario_other IS NOT NULL
+          AND LENGTH(scenario_other) > 4
+          AND SUBSTR(scenario_other, 2, 3) = ' : ';
 
         UPDATE scenarios
         SET name = TRIM(SUBSTR(name, 5)),
@@ -316,6 +335,8 @@ pub fn migrate(conn: &Connection) -> Result<()> {
           AND SUBSTR(name, 2, 3) = ' : ';
         ",
     )?;
+
+    migrate_scenario_pack_schema(conn)?;
 
     backfill_matches_from_tournaments(conn)?;
 
@@ -373,7 +394,7 @@ fn backfill_matches_from_tournaments(conn: &Connection) -> Result<()> {
             player1_objectives, player1_survivors,
             player2_objectives, player2_survivors,
             player1_army_id, player2_army_id,
-            scenario_id, scenario_name,
+            scenario_id, scenario_other,
             tournament_id, tournament_phase,
             recorded_at
         )
@@ -392,7 +413,7 @@ fn backfill_matches_from_tournaments(conn: &Connection) -> Result<()> {
             tm.player1_army_id,
             tm.player2_army_id,
             tm.scenario_id,
-            tm.scenario_name,
+            tm.scenario_other,
             tm.tournament_id,
             tm.phase,
             COALESCE(tm.played_at, tm.confirmed_at, tm.submitted_at, t.completed_at, t.started_at, 0)
@@ -426,6 +447,103 @@ fn backfill_matches_from_tournaments(conn: &Connection) -> Result<()> {
           );
         ",
     )?;
+    Ok(())
+}
+
+fn rename_scenario_name_to_other(conn: &Connection, table: &str) -> Result<()> {
+    if column_exists(conn, table, "scenario_name")?
+        && !column_exists(conn, table, "scenario_other")?
+    {
+        conn.execute(
+            &format!("ALTER TABLE {table} RENAME COLUMN scenario_name TO scenario_other"),
+            [],
+        )?;
+    } else if !column_exists(conn, table, "scenario_other")? {
+        conn.execute(
+            &format!("ALTER TABLE {table} ADD COLUMN scenario_other TEXT"),
+            [],
+        )?;
+    }
+    Ok(())
+}
+
+fn migrate_scenario_pack_schema(conn: &Connection) -> Result<()> {
+    conn.execute_batch(
+        "
+        CREATE TABLE IF NOT EXISTS scenario_packs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            slug TEXT NOT NULL UNIQUE,
+            name TEXT NOT NULL,
+            version TEXT,
+            preamble_md TEXT NOT NULL DEFAULT '',
+            sort_order INTEGER NOT NULL DEFAULT 0
+        );
+
+        CREATE TABLE IF NOT EXISTS common_rules (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            pack_id INTEGER NOT NULL REFERENCES scenario_packs(id),
+            slug TEXT NOT NULL,
+            name TEXT NOT NULL,
+            body_md TEXT NOT NULL DEFAULT '',
+            sort_order INTEGER NOT NULL DEFAULT 0,
+            UNIQUE(pack_id, slug)
+        );
+
+        CREATE TABLE IF NOT EXISTS secondary_objectives (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            pack_id INTEGER NOT NULL REFERENCES scenario_packs(id),
+            slug TEXT NOT NULL,
+            name TEXT NOT NULL,
+            body_md TEXT NOT NULL DEFAULT '',
+            sort_order INTEGER NOT NULL DEFAULT 0,
+            UNIQUE(pack_id, slug)
+        );
+
+        CREATE TABLE IF NOT EXISTS scenario_common_rules (
+            scenario_id INTEGER NOT NULL REFERENCES scenarios(id) ON DELETE CASCADE,
+            common_rule_id INTEGER NOT NULL REFERENCES common_rules(id) ON DELETE CASCADE,
+            PRIMARY KEY (scenario_id, common_rule_id)
+        );
+        ",
+    )?;
+
+    let upgrading_scenarios = !column_exists(conn, "scenarios", "map_filename")?;
+
+    for (column, ddl) in [
+        ("pack_id", "ALTER TABLE scenarios ADD COLUMN pack_id INTEGER REFERENCES scenario_packs(id)"),
+        ("slug", "ALTER TABLE scenarios ADD COLUMN slug TEXT"),
+        ("map_filename", "ALTER TABLE scenarios ADD COLUMN map_filename TEXT"),
+        ("flavor_text", "ALTER TABLE scenarios ADD COLUMN flavor_text TEXT"),
+        ("end_condition_md", "ALTER TABLE scenarios ADD COLUMN end_condition_md TEXT"),
+        ("objectives_md", "ALTER TABLE scenarios ADD COLUMN objectives_md TEXT"),
+        ("deployment_notes_md", "ALTER TABLE scenarios ADD COLUMN deployment_notes_md TEXT"),
+        ("exclusion_zones_md", "ALTER TABLE scenarios ADD COLUMN exclusion_zones_md TEXT"),
+        ("elements_md", "ALTER TABLE scenarios ADD COLUMN elements_md TEXT"),
+        ("special_rules_md", "ALTER TABLE scenarios ADD COLUMN special_rules_md TEXT"),
+        ("sort_order", "ALTER TABLE scenarios ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0"),
+    ] {
+        if !column_exists(conn, "scenarios", column)? {
+            conn.execute(ddl, [])?;
+        }
+    }
+
+    if upgrading_scenarios {
+        // Purge du catalogue hérité avant intégration du pack de scénarios.
+        // Les libellés historiques restent dans scenario_other.
+        conn.execute_batch(
+            "
+            UPDATE matches SET scenario_id = NULL;
+            UPDATE tournament_matches SET scenario_id = NULL;
+            DELETE FROM scenario_common_rules;
+            DELETE FROM scenarios;
+            ",
+        )?;
+    }
+
+    crate::scenario_pack::seed_default_pack_if_needed(conn)?;
+    crate::scenario_pack::sync_map_filenames(conn)?;
+    crate::scenario_pack::sync_exclusion_rule_links(conn)?;
+
     Ok(())
 }
 

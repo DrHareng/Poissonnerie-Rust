@@ -123,7 +123,8 @@
   h1,
   h2,
   h3,
-  .font-display {
+  .font-display,
+  .md-inline-title {
     font-family: var(--font-heading);
     letter-spacing: 0.04em;
   }
@@ -223,8 +224,53 @@
     box-shadow: 0 0 16px oklch(0.8 0.14 195 / 20%);
   }
 
+  .topbar-cta {
+    @apply inline-flex items-center gap-2 rounded-md border border-primary/50 bg-primary/20 px-4 py-2 text-sm font-semibold text-primary no-underline transition-colors;
+    box-shadow: 0 0 20px oklch(0.8 0.14 195 / 18%);
+  }
+
+  .topbar-cta:hover {
+    @apply border-primary bg-primary/30 text-primary;
+  }
+
+  .topbar-cta-active {
+    @apply border-primary bg-primary/35 text-primary-foreground;
+  }
+
+  .partie-stepper {
+    @apply flex flex-wrap items-center gap-2 sm:gap-4;
+  }
+
+  .partie-stepper-item {
+    @apply flex items-center gap-2 text-sm text-muted-foreground;
+  }
+
+  .partie-stepper-item--active .partie-stepper-label {
+    @apply font-medium text-primary;
+  }
+
+  .partie-stepper-item--done .partie-stepper-label {
+    @apply text-foreground;
+  }
+
+  .partie-stepper-badge {
+    @apply inline-flex size-7 shrink-0 items-center justify-center rounded-full border border-border bg-muted/40 text-xs font-semibold;
+  }
+
+  .partie-stepper-badge--active {
+    @apply border-primary bg-primary/20 text-primary;
+  }
+
+  .partie-stepper-badge--done {
+    @apply border-primary/50 bg-primary/30 text-primary;
+  }
+
+  .partie-stepper-label {
+    @apply hidden sm:inline;
+  }
+
   .topbar-auth {
-    @apply flex items-center justify-end;
+    @apply flex items-center justify-end gap-3;
   }
 
   .topbar-user-trigger {
@@ -261,12 +307,30 @@
     @apply font-display text-2xl font-bold tracking-wide text-foreground uppercase md:text-3xl;
   }
 
+  .page-title-tabs {
+    @apply flex shrink-0 flex-wrap items-baseline gap-x-5 gap-y-1 border-b border-border/60 pb-3;
+  }
+
+  .page-title-tab {
+    @apply relative font-display text-2xl font-bold tracking-wide uppercase transition md:text-3xl;
+    @apply text-muted-foreground/40 hover:text-muted-foreground;
+  }
+
+  .page-title-tab--active {
+    @apply text-foreground;
+  }
+
+  .page-title-tab--active::after {
+    content: '';
+    @apply absolute -bottom-3 left-0 right-0 h-0.5 bg-primary;
+  }
+
   .page-description {
     @apply max-w-2xl text-sm text-muted-foreground md:text-base;
   }
 
   .neon-panel {
-    @apply border border-primary/25 bg-card/75 shadow-[0_0_40px_-12px_oklch(0.8_0.14_195_/_35%)] backdrop-blur-md;
+    @apply relative border border-primary/25 bg-card/75 shadow-[0_0_40px_-12px_oklch(0.8_0.14_195_/_35%)] backdrop-blur-md;
   }
 
   .neon-panel-accent {
@@ -807,5 +871,197 @@
 
   .player-detail-modal {
     @apply max-h-[85vh] w-full max-w-3xl overflow-y-auto;
+  }
+
+  .scenario-grid {
+    @apply grid gap-3 sm:grid-cols-2 xl:grid-cols-3;
+  }
+
+  .scenario-card {
+    @apply flex gap-3 rounded-lg p-4 transition-colors hover:border-primary/50 hover:bg-primary/5;
+  }
+
+  .scenario-card-icon {
+    @apply flex size-10 shrink-0 items-center justify-center rounded-md border border-primary/25 bg-primary/10;
+  }
+
+  .scenario-card-title {
+    @apply font-display text-sm font-semibold tracking-wide text-foreground uppercase;
+  }
+
+  .scenario-card-flavor {
+    @apply mt-1 line-clamp-2 text-xs italic text-muted-foreground;
+  }
+
+  .scenario-map {
+    @apply w-full rounded-md border border-border object-contain;
+  }
+
+  .scenario-map-button {
+    @apply cursor-pointer rounded-md transition hover:opacity-90 focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50;
+  }
+
+  .scenario-detail-row {
+    @apply grid shrink-0 gap-4;
+  }
+
+  .scenario-detail-row--top {
+    @apply grid-cols-1 lg:grid-cols-[1fr_4fr];
+  }
+
+  .scenario-detail-row--map {
+    @apply grid-cols-1 lg:grid-cols-[7fr_3fr];
+  }
+
+  .scenario-detail-cell {
+    @apply min-w-0;
+  }
+
+  .scenario-subtabs {
+    @apply min-w-0 flex-1 flex-wrap overflow-x-visible;
+  }
+
+  .secondary-card-grid {
+    @apply grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3;
+  }
+
+  .secondary-card {
+    @apply overflow-hidden;
+  }
+
+  .secondary-card--clickable {
+    @apply cursor-pointer transition hover:border-primary/50;
+  }
+
+  .secondary-card-image {
+    aspect-ratio: 5 / 7;
+    @apply block w-full object-cover object-top;
+  }
+
+  .image-viewer-overlay {
+    @apply fixed inset-0 z-50 flex items-center justify-center bg-background/90 p-4 backdrop-blur-sm;
+  }
+
+  .image-viewer-figure {
+    @apply relative flex max-h-full max-w-full flex-col items-center gap-3;
+  }
+
+  .image-viewer-image {
+    @apply max-h-[min(90vh,1200px)] max-w-[min(92vw,900px)] object-contain shadow-[0_0_40px_-12px_oklch(0.8_0.14_195_/_45%)];
+  }
+
+  .image-viewer-caption {
+    @apply flex items-center gap-3 font-display text-sm font-semibold tracking-wide text-foreground uppercase;
+  }
+
+  .image-viewer-counter {
+    @apply text-xs font-normal tracking-normal text-muted-foreground normal-case;
+  }
+
+  .image-viewer-close {
+    @apply absolute top-3 right-3 z-10 text-foreground hover:bg-primary/15 hover:text-primary;
+  }
+
+  .image-viewer-nav {
+    @apply absolute top-1/2 z-10 size-16 -translate-y-1/2 rounded-full bg-card/80 text-foreground shadow-md hover:bg-primary/20 hover:text-primary;
+  }
+
+  .image-viewer-nav--prev {
+    @apply left-2 md:left-6;
+  }
+
+  .image-viewer-nav--next {
+    @apply right-2 md:right-6;
+  }
+
+  .md-content {
+    @apply space-y-2 text-sm leading-relaxed text-foreground/90;
+  }
+
+  .md-content h2 {
+    @apply font-display text-base font-semibold tracking-wide text-primary uppercase;
+  }
+
+  .md-content h3 {
+    @apply pt-1 text-sm font-semibold text-foreground;
+  }
+
+  .md-content .md-inline-title {
+    @apply font-semibold text-foreground;
+  }
+
+  .md-content .md-inline-title mark {
+    font-family: inherit;
+    letter-spacing: inherit;
+  }
+
+  .md-content .md-rule-ref {
+    @apply cursor-help border-b border-dotted border-muted-foreground/50 bg-transparent p-0 font-semibold text-muted-foreground;
+  }
+
+  .md-content .md-rule-ref:hover,
+  .md-content .md-rule-ref:focus-visible {
+    @apply border-foreground/50 text-foreground/80;
+  }
+
+  .md-rule-tooltip {
+    @apply fixed z-50 max-h-[min(50vh,24rem)] overflow-y-auto rounded-lg p-3 text-sm shadow-lg;
+  }
+
+  .md-rule-tooltip-title {
+    @apply mb-2 font-semibold;
+  }
+
+  .md-rule-tooltip-body {
+    @apply text-sm;
+  }
+
+  .md-content ul {
+    @apply list-disc space-y-1 pl-5;
+  }
+
+  .md-content ul ul {
+    @apply mt-1;
+  }
+
+  .md-content li {
+    @apply marker:text-primary;
+  }
+
+  .md-content p {
+    @apply text-sm;
+  }
+
+  .md-content .md-note {
+    @apply text-muted-foreground;
+  }
+
+  .md-content strong {
+    @apply font-semibold text-foreground;
+  }
+
+  .md-content .md-highlight,
+  .md-content .md-c-b {
+    @apply bg-transparent font-semibold;
+    color: #00e5ff;
+  }
+
+  .md-content .md-c-v {
+    @apply bg-transparent font-semibold;
+    color: #39ff88;
+  }
+
+  .md-content .md-c-r {
+    @apply bg-transparent font-semibold;
+    color: #ff2ed1;
+  }
+
+  .md-content .md-c-o {
+    @apply bg-transparent font-semibold;
+    color: #ff9500;
+  }
+
+  .md-content .md-scenario-img {
+    @apply my-2 max-h-48 max-w-full cursor-pointer rounded-md object-contain transition hover:opacity-90;
   }
 }
