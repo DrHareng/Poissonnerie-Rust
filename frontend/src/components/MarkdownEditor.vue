@@ -21,11 +21,14 @@ const props = withDefaults(
     rows?: number
     rules?: CommonRule[]
     placeholder?: string
+    /** Masque les liens de règles et l’insertion d’images. */
+    simple?: boolean
   }>(),
   {
     rows: 10,
     rules: () => [],
     placeholder: '',
+    simple: false,
   },
 )
 
@@ -47,6 +50,7 @@ const sortedRules = computed(() =>
 )
 
 onMounted(async () => {
+  if (props.simple) return
   try {
     scenarioImages.value = await fetchScenarioContentImages()
   } catch {
@@ -322,49 +326,51 @@ function onKeydown(event: KeyboardEvent) {
 
       <span class="mx-0.5 h-4 w-px bg-border" aria-hidden="true" />
 
-      <Button
-        type="button"
-        variant="ghost"
-        size="icon-xs"
-        title="Lien de règle ([[slug|libellé]])"
-        @mousedown.prevent
-        @click="insertBlankRuleRef"
-      >
-        <Link2 />
-      </Button>
-      <select
-        v-if="sortedRules.length > 0"
-        v-model="rulePick"
-        class="md-editor-rule-pick h-6 max-w-[10rem] rounded-[min(var(--radius-md),10px)] border border-transparent bg-transparent px-1 text-xs text-muted-foreground outline-none hover:bg-muted focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50"
-        title="Insérer une règle existante"
-        @mousedown="rememberSelection"
-      >
-        <option value="">Règle…</option>
-        <option
-          v-for="rule in sortedRules"
-          :key="rule.slug"
-          :value="rule.slug"
+      <template v-if="!simple">
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon-xs"
+          title="Lien de règle ([[slug|libellé]])"
+          @mousedown.prevent
+          @click="insertBlankRuleRef"
         >
-          {{ rule.name }}
-        </option>
-      </select>
+          <Link2 />
+        </Button>
+        <select
+          v-if="sortedRules.length > 0"
+          v-model="rulePick"
+          class="md-editor-rule-pick h-6 max-w-[10rem] rounded-[min(var(--radius-md),10px)] border border-transparent bg-transparent px-1 text-xs text-muted-foreground outline-none hover:bg-muted focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50"
+          title="Insérer une règle existante"
+          @mousedown="rememberSelection"
+        >
+          <option value="">Règle…</option>
+          <option
+            v-for="rule in sortedRules"
+            :key="rule.slug"
+            :value="rule.slug"
+          >
+            {{ rule.name }}
+          </option>
+        </select>
 
-      <select
-        v-if="scenarioImages.length > 0"
-        v-model="imagePick"
-        class="md-editor-rule-pick h-6 max-w-[10rem] rounded-[min(var(--radius-md),10px)] border border-transparent bg-transparent px-1 text-xs text-muted-foreground outline-none hover:bg-muted focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50"
-        title="Insérer une image de scénario ([img]fichier[img])"
-        @mousedown="rememberSelection"
-      >
-        <option value="">Image…</option>
-        <option
-          v-for="name in scenarioImages"
-          :key="name"
-          :value="name"
+        <select
+          v-if="scenarioImages.length > 0"
+          v-model="imagePick"
+          class="md-editor-rule-pick h-6 max-w-[10rem] rounded-[min(var(--radius-md),10px)] border border-transparent bg-transparent px-1 text-xs text-muted-foreground outline-none hover:bg-muted focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50"
+          title="Insérer une image de scénario ([img]fichier[img])"
+          @mousedown="rememberSelection"
         >
-          {{ name }}
-        </option>
-      </select>
+          <option value="">Image…</option>
+          <option
+            v-for="name in scenarioImages"
+            :key="name"
+            :value="name"
+          >
+            {{ name }}
+          </option>
+        </select>
+      </template>
 
       <Button
         type="button"
@@ -417,7 +423,7 @@ function onKeydown(event: KeyboardEvent) {
       <MarkdownContent
         v-if="modelValue.trim()"
         :source="modelValue"
-        :rules="rules"
+        :rules="simple ? [] : rules"
       />
       <p v-else class="text-sm text-muted-foreground italic">
         (vide)

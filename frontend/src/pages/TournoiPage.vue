@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { ArrowLeft, Check, X } from '@lucide/vue'
+import { Check, X } from '@lucide/vue'
 import { toast } from 'vue-sonner'
 import {
   adminRegisterForTournament,
@@ -759,11 +759,6 @@ onMounted(refresh)
 
 <template>
   <div class="page-stack">
-    <Button variant="ghost" class="w-fit" @click="router.push('/tournois')">
-      <ArrowLeft class="size-4" />
-      Retour aux tournois
-    </Button>
-
     <div v-if="loading" class="text-muted-foreground">Chargement...</div>
 
     <template v-else-if="detail">

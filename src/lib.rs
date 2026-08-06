@@ -20,7 +20,7 @@ pub use api::{default_state, router, AppState};
 pub use army::{default_db_path, Army, ArmyStore};
 pub use auth::AuthConfig;
 pub use elo::{expected_score, update_ratings, MatchScore, DEFAULT_K_FACTOR};
-pub use match_record::{MatchRecord, MatchScores};
+pub use match_record::{MatchRecord, MatchReport, MatchScores, MatchStatus};
 pub use player::{apply_match, MatchOutcome, Player, RatingUpdate, DEFAULT_RATING};
 pub use scenario::{strip_scenario_prefix, Scenario, ScenarioStore};
 pub use store::{

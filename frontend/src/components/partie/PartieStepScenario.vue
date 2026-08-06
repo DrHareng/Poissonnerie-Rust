@@ -196,13 +196,13 @@ function submit() {
 
     <div
       v-else-if="showPackPreview && scenarioDetail"
-      class="grid grid-cols-1 gap-4 md:grid-cols-2"
+      class="grid grid-cols-1 items-start gap-4 md:grid-cols-2"
     >
-      <Card class="neon-panel min-h-0">
+      <Card class="neon-panel">
         <CardHeader>
           <CardTitle class="text-base">Objectifs</CardTitle>
         </CardHeader>
-        <CardContent class="scenario-card-body max-h-80 overflow-y-auto !pb-2 !pr-4 !pl-8">
+        <CardContent class="scenario-card-body !pb-2 !pr-4 !pl-8">
           <MarkdownContent
             :source="scenarioDetail.objectives_md"
             :rules="ruleGlossary"
@@ -210,16 +210,16 @@ function submit() {
         </CardContent>
       </Card>
 
-      <Card class="neon-panel min-h-0 overflow-hidden">
+      <Card class="neon-panel">
         <CardHeader>
           <CardTitle class="text-base">Carte</CardTitle>
         </CardHeader>
-        <CardContent class="flex min-h-0 items-center justify-center pt-0">
+        <CardContent class="pt-0">
           <img
             v-if="mapPreviewSrc"
             :src="mapPreviewSrc"
             :alt="`Carte — ${scenarioDetail.name}`"
-            class="scenario-map max-h-80 w-full object-contain"
+            class="scenario-map w-full object-contain"
             @error="mapFailed = true"
           />
           <p v-else class="py-6 text-sm text-muted-foreground">

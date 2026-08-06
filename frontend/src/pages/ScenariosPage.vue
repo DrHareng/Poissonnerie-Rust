@@ -16,6 +16,7 @@ import {
 } from '@/lib/api'
 import { pageTitle } from '@/lib/pageTitle'
 import { shufflePick } from '@/lib/shufflePick'
+import { secondaryImageSrc } from '@/lib/secondaryImages'
 import { splitRuleTitle } from '@/lib/ruleTitle'
 import {
   DEFAULT_SCENARIO_PACK_SLUG,
@@ -44,17 +45,6 @@ type ScenarioTabId = 'liste' | 'regles' | 'secondaires'
 
 const TP_SECTION = '## Calcul des points de tournoi'
 const TAB_IDS: ScenarioTabId[] = ['liste', 'regles', 'secondaires']
-
-const SECONDARY_IMAGES: Record<string, string> = {
-  enlevement: 'Enlèvement.png',
-  'saisie-de-materiel': 'Saisie_de_matériel.png',
-  'soif-de-sang': 'Soif_de_sang.png',
-  'ciblage-orbital': 'Ciblage_orbital.png',
-  'reconnaissance-poussee': 'Reconnaissance.png',
-  'vol-informations': "Vol_d'informations.png",
-  'tete-de-pont': 'Tête_de_pont.png',
-  investigation: 'Investigation.png',
-}
 
 const route = useRoute()
 const router = useRouter()
@@ -176,11 +166,6 @@ function setSelectedScenario(slug: string) {
   void updatePrefs({ scenario_slug: slug }).catch(() => {
     // Keep the local choice even if persistence fails.
   })
-}
-
-function secondaryImageSrc(slug: string) {
-  const filename = SECONDARY_IMAGES[slug]
-  return filename ? `/secondaires/${encodeURIComponent(filename)}` : null
 }
 
 function openSecondaryViewer(slug: string) {

@@ -11,5 +11,5 @@ export const SECONDARY_IMAGES: Record<string, string> = {
 
 export function secondaryImageSrc(slug: string): string | undefined {
   const filename = SECONDARY_IMAGES[slug]
-  return filename ? `/scenario/${filename}` : undefined
+  return filename ? `/secondaires/${encodeURIComponent(filename)}` : undefined
 }

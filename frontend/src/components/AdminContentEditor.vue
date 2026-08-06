@@ -17,6 +17,8 @@ const props = withDefaults(
     markdown?: boolean
     /** Règles pour le sélecteur de liens `[[slug]]`. */
     rules?: CommonRule[]
+    /** Éditeur sans liens de règles ni images. */
+    simpleMarkdown?: boolean
     persist: (payload: { name?: string; body: string }) => Promise<void>
   }>(),
   {
@@ -24,6 +26,7 @@ const props = withDefaults(
     rows: 10,
     markdown: true,
     rules: () => [],
+    simpleMarkdown: false,
   },
 )
 
@@ -113,6 +116,7 @@ async function save() {
       v-model="draftBody"
       :rows="rows"
       :rules="rules"
+      :simple="simpleMarkdown"
     />
     <textarea
       v-else

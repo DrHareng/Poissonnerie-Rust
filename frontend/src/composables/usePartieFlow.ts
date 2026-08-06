@@ -1,7 +1,13 @@
 import { computed, ref } from 'vue'
+import type { PartieLieutenant } from '@/lib/lieutenantRoll'
 import type { MatchOutcome } from '@/types/elo'
 
-export type PartieStep = 'joueurs' | 'scenario' | 'secondaires' | 'resultat'
+export type PartieStep =
+  | 'joueurs'
+  | 'scenario'
+  | 'secondaires'
+  | 'lieutenant'
+  | 'resultat'
 
 export type ScenarioMode = 'list' | 'random' | 'other'
 
@@ -25,22 +31,34 @@ export interface PartieScores {
   player2Survivors: number
 }
 
-const STEPS: PartieStep[] = ['joueurs', 'scenario', 'secondaires', 'resultat']
+const STEPS: PartieStep[] = [
+  'joueurs',
+  'scenario',
+  'secondaires',
+  'lieutenant',
+  'resultat',
+]
 
 export const PARTIE_STEP_LABELS: Record<PartieStep, string> = {
   joueurs: 'Joueurs',
   scenario: 'Scénario',
   secondaires: 'Secondaires',
+  lieutenant: 'Jet de lieutenant',
   resultat: 'Résultat',
 }
 
 export function usePartieFlow() {
   const step = ref<PartieStep>('joueurs')
+  const matchId = ref<number | null>(null)
   const player1 = ref<PartiePlayerSlot | null>(null)
   const player2 = ref<PartiePlayerSlot | null>(null)
   const scenario = ref<PartieScenario | null>(null)
   const secondariesPlayer1 = ref<string[]>([])
   const secondariesPlayer2 = ref<string[]>([])
+  const secondaryPool = ref<string[]>([])
+  const chosenSecondaryPlayer1 = ref<string | null>(null)
+  const chosenSecondaryPlayer2 = ref<string | null>(null)
+  const lieutenant = ref<PartieLieutenant | null>(null)
   const scores = ref<PartieScores>({
     player1Objectives: 0,
     player1Survivors: 0,
@@ -81,6 +99,10 @@ export function usePartieFlow() {
     )
   }
 
+  function setMatchId(id: number | null) {
+    matchId.value = id
+  }
+
   function setJoueurs(
     p1Name: string,
     p1ArmyId: number,
@@ -95,9 +117,22 @@ export function usePartieFlow() {
     scenario.value = value
   }
 
-  function setSecondaries(p1: string[], p2: string[]) {
+  function setSecondaries(
+    p1: string[],
+    p2: string[],
+    chosenP1: string | null = null,
+    chosenP2: string | null = null,
+    pool: string[] = [],
+  ) {
     secondariesPlayer1.value = p1
     secondariesPlayer2.value = p2
+    chosenSecondaryPlayer1.value = chosenP1
+    chosenSecondaryPlayer2.value = chosenP2
+    secondaryPool.value = pool
+  }
+
+  function setLieutenant(value: PartieLieutenant) {
+    lieutenant.value = value
   }
 
   function goTo(next: PartieStep) {
@@ -120,11 +155,16 @@ export function usePartieFlow() {
 
   function reset() {
     step.value = 'joueurs'
+    matchId.value = null
     player1.value = null
     player2.value = null
     scenario.value = null
     secondariesPlayer1.value = []
     secondariesPlayer2.value = []
+    secondaryPool.value = []
+    chosenSecondaryPlayer1.value = null
+    chosenSecondaryPlayer2.value = null
+    lieutenant.value = null
     scores.value = {
       player1Objectives: 0,
       player1Survivors: 0,
@@ -152,20 +192,27 @@ export function usePartieFlow() {
   return {
     step,
     stepIndex,
+    matchId,
     player1,
     player2,
     scenario,
     secondariesPlayer1,
     secondariesPlayer2,
+    secondaryPool,
+    chosenSecondaryPlayer1,
+    chosenSecondaryPlayer2,
+    lieutenant,
     scores,
     resolvedOutcome,
     STEPS,
     clampObjectives,
     clampSurvivors,
     canAdvanceFromJoueurs,
+    setMatchId,
     setJoueurs,
     setScenario,
     setSecondaries,
+    setLieutenant,
     goTo,
     nextStep,
     prevStep,

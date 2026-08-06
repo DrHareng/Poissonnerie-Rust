@@ -66,6 +66,8 @@ export interface RankedArmy {
   win_rate: number
 }
 
+export type MatchStatus = 'in_progress' | 'completed'
+
 export type MatchOutcome = 'player1_win' | 'player2_win' | 'draw'
 
 export interface RatingUpdate {
@@ -82,13 +84,21 @@ export interface MatchScores {
   player2_survivors: number
 }
 
+export interface MatchReport {
+  id: number
+  body_md: string
+  created_at: number
+  updated_at: number
+}
+
 export interface MatchRecord extends RatingUpdate, MatchScores {
   id: number
   player1: string
   player2: string
   player1_display_name?: string
   player2_display_name?: string
-  outcome: MatchOutcome
+  status?: MatchStatus
+  outcome?: MatchOutcome | null
   player1_army_id?: number | null
   player2_army_id?: number | null
   scenario_id?: number | null
@@ -97,6 +107,20 @@ export interface MatchRecord extends RatingUpdate, MatchScores {
   tournament_id?: number | null
   tournament_phase?: string | null
   tournament_name?: string | null
+  player1_report?: MatchReport | null
+  player2_report?: MatchReport | null
+  player1_army_list_code?: string | null
+  player2_army_list_code?: string | null
+  player1_secondary_slugs?: string[] | null
+  player2_secondary_slugs?: string[] | null
+  secondary_pool_slugs?: string[] | null
+  player1_chosen_secondary?: string | null
+  player2_chosen_secondary?: string | null
+  lieutenant_winner?: string | null
+  lieutenant_winner_choice?: string | null
+  lieutenant_other_choice?: string | null
+  partie_step?: string | null
+  created_by?: string | null
   recorded_at: number
 }
 

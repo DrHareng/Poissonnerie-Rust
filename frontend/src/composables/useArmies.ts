@@ -34,10 +34,17 @@ export function useArmies() {
     return armiesById.value.get(armyId)
   }
 
+  function getArmyBySlug(slug?: string | null) {
+    if (!slug) return undefined
+    const key = slug.trim().toLowerCase()
+    return armies.value.find((army) => army.slug.toLowerCase() === key)
+  }
+
   return {
     armies,
     armiesById,
     ensureLoaded,
     getArmy,
+    getArmyBySlug,
   }
 }

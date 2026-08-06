@@ -8,6 +8,10 @@ use crate::user::{discord_avatar_url, DiscordProfile, UiPrefsUpdate, User, UserS
 const DISCORD_AUTHORIZE_URL: &str = "https://discord.com/api/oauth2/authorize";
 const DISCORD_TOKEN_URL: &str = "https://discord.com/api/oauth2/token";
 const DISCORD_USER_URL: &str = "https://discord.com/api/users/@me";
+const DISCORD_USER_GUILDS_URL: &str = "https://discord.com/api/users/@me/guilds";
+const DISCORD_OAUTH_SCOPES: &str = "identify guilds";
+const DISCORD_GUILDS_PAGE_SIZE: usize = 200;
+const DEFAULT_DISCORD_GUILD_ID: &str = "299262973241720832";
 
 pub const SESSION_USER_ID: &str = "user_id";
 pub const SESSION_SECONDARY_VIEW_MODE: &str = "secondary_view_mode";
@@ -47,6 +51,7 @@ pub struct AuthConfig {
     pub client_secret: String,
     pub redirect_uri: String,
     pub frontend_url: String,
+    pub required_guild_id: String,
 }
 
 impl AuthConfig {
@@ -60,14 +65,17 @@ impl AuthConfig {
                 .unwrap_or_else(|_| "http://127.0.0.1:3000/api/auth/callback".into()),
             frontend_url: std::env::var("FRONTEND_URL")
                 .unwrap_or_else(|_| "http://127.0.0.1:5173".into()),
+            required_guild_id: std::env::var("DISCORD_GUILD_ID")
+                .unwrap_or_else(|_| DEFAULT_DISCORD_GUILD_ID.into()),
         })
     }
 
     pub fn authorize_url(&self) -> String {
         format!(
-            "{DISCORD_AUTHORIZE_URL}?client_id={}&redirect_uri={}&response_type=code&scope=identify",
+            "{DISCORD_AUTHORIZE_URL}?client_id={}&redirect_uri={}&response_type=code&scope={}",
             urlencoding::encode(&self.client_id),
             urlencoding::encode(&self.redirect_uri),
+            urlencoding::encode(DISCORD_OAUTH_SCOPES),
         )
     }
 }
@@ -218,6 +226,11 @@ struct DiscordUserResponse {
     avatar: Option<String>,
 }
 
+#[derive(Debug, Deserialize)]
+struct DiscordGuildResponse {
+    id: String,
+}
+
 async fn exchange_code(auth: &AuthConfig, code: &str) -> Result<DiscordProfile> {
     let client = Client::new();
     let response = client
@@ -246,10 +259,13 @@ async fn exchange_code(auth: &AuthConfig, code: &str) -> Result<DiscordProfile> 
 
     let token_response = serde_json::from_str::<DiscordTokenResponse>(&body)
         .context("réponse token Discord invalide")?;
+    let access_token = token_response.access_token;
+
+    ensure_required_guild_membership(&client, &access_token, &auth.required_guild_id).await?;
 
     let discord_user = client
         .get(DISCORD_USER_URL)
-        .bearer_auth(token_response.access_token)
+        .bearer_auth(&access_token)
         .send()
         .await
         .context("échec de la requête profil Discord")?
@@ -270,4 +286,57 @@ async fn exchange_code(auth: &AuthConfig, code: &str) -> Result<DiscordProfile> 
         display_name,
         avatar_url: discord_avatar_url(&discord_user.id, discord_user.avatar.as_deref()),
     })
+}
+
+async fn ensure_required_guild_membership(
+    client: &Client,
+    access_token: &str,
+    required_guild_id: &str,
+) -> Result<()> {
+    let mut after: Option<String> = None;
+
+    loop {
+        let mut request = client
+            .get(DISCORD_USER_GUILDS_URL)
+            .bearer_auth(access_token)
+            .query(&[("limit", DISCORD_GUILDS_PAGE_SIZE.to_string())]);
+        if let Some(cursor) = after.as_deref() {
+            request = request.query(&[("after", cursor)]);
+        }
+
+        let response = request
+            .send()
+            .await
+            .context("échec de la requête serveurs Discord")?;
+
+        let status = response.status();
+        let body = response
+            .text()
+            .await
+            .context("réponse serveurs Discord illisible")?;
+
+        if !status.is_success() {
+            anyhow::bail!("liste des serveurs Discord refusée (HTTP {status}) : {body}");
+        }
+
+        let guilds = serde_json::from_str::<Vec<DiscordGuildResponse>>(&body)
+            .context("réponse serveurs Discord invalide")?;
+
+        if guilds.iter().any(|guild| guild.id == required_guild_id) {
+            return Ok(());
+        }
+
+        if guilds.len() < DISCORD_GUILDS_PAGE_SIZE {
+            anyhow::bail!(
+                "connexion refusée : vous devez être membre du serveur Discord Poissonnerie"
+            );
+        }
+
+        let Some(last) = guilds.last() else {
+            anyhow::bail!(
+                "connexion refusée : vous devez être membre du serveur Discord Poissonnerie"
+            );
+        };
+        after = Some(last.id.clone());
+    }
 }

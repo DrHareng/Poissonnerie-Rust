@@ -181,6 +181,91 @@ export function fetchRecentMatches(limit = 20, offset = 0): Promise<PaginatedMat
   return request<PaginatedMatches>(`/api/matches?${params}`)
 }
 
+export function fetchMatch(id: number): Promise<MatchRecord> {
+  return request<MatchRecord>(`/api/matches/${id}`)
+}
+
+export function deleteMatch(id: number): Promise<void> {
+  return request<void>(`/api/matches/${id}`, { method: 'DELETE' })
+}
+
+export function updateMatchReport(id: number, body_md: string): Promise<MatchRecord> {
+  return request<MatchRecord>(`/api/matches/${id}/report`, {
+    method: 'PATCH',
+    body: JSON.stringify({ body_md }),
+  })
+}
+
+export function updateMatchArmyList(
+  id: number,
+  army_list_code: string,
+  army_id?: number | null,
+): Promise<MatchRecord> {
+  return request<MatchRecord>(`/api/matches/${id}/army-list`, {
+    method: 'PATCH',
+    body: JSON.stringify({
+      army_list_code,
+      ...(army_id != null ? { army_id } : {}),
+    }),
+  })
+}
+
+export function startMatch(payload: {
+  player1: string
+  player2: string
+  player1_army_id: number
+  player2_army_id: number
+  player1_secondary_slugs: string[]
+  player2_secondary_slugs: string[]
+}): Promise<MatchRecord> {
+  return request<MatchRecord>('/api/matches/start', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  })
+}
+
+export function updateMatchProgress(
+  id: number,
+  payload: {
+    scenario_id?: number
+    scenario_other?: string
+    player1_secondary_slugs?: string[]
+    player2_secondary_slugs?: string[]
+    secondary_pool_slugs?: string[]
+    player1_chosen_secondary?: string | null
+    player2_chosen_secondary?: string | null
+    lieutenant_winner?: string
+    lieutenant_winner_choice?: string
+    lieutenant_other_choice?: string
+    partie_step?: string
+  },
+): Promise<MatchRecord> {
+  return request<MatchRecord>(`/api/matches/${id}`, {
+    method: 'PATCH',
+    body: JSON.stringify(payload),
+  })
+}
+
+export function completeMatch(
+  id: number,
+  payload: {
+    outcome: MatchOutcome
+    player1_objectives: number
+    player1_survivors: number
+    player2_objectives: number
+    player2_survivors: number
+  },
+): Promise<MatchRecord> {
+  return request<MatchRecord>(`/api/matches/${id}/complete`, {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  })
+}
+
+export function fetchMyInProgressMatches(): Promise<MatchRecord[]> {
+  return request<MatchRecord[]>('/api/matches/mine/in-progress')
+}
+
 export function fetchPlayer(name: string): Promise<PlayerProfile> {
   return request<PlayerProfile>(`/api/players/${encodeURIComponent(name)}`)
 }

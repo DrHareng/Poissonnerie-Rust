@@ -2,7 +2,7 @@
 import type { MatchRecord } from '@/types/elo'
 import { Badge } from '@/components/ui/badge'
 
-defineProps<{
+const props = defineProps<{
   match: MatchRecord
 }>()
 
@@ -10,6 +10,9 @@ function badgeVariant(
   match: MatchRecord,
   player: 'player1' | 'player2',
 ): 'default' | 'secondary' | 'outline' {
+  if (!match.outcome || match.status === 'in_progress') {
+    return 'secondary'
+  }
   if (match.outcome === 'draw') {
     return 'secondary'
   }
@@ -28,7 +31,13 @@ function scoreLabel(objectives: number, survivors: number) {
 </script>
 
 <template>
-  <div class="mx-auto grid w-36 grid-cols-2 gap-2">
+  <div
+    v-if="match.status === 'in_progress' || !match.outcome"
+    class="mx-auto text-center"
+  >
+    <Badge variant="secondary">En cours</Badge>
+  </div>
+  <div v-else class="mx-auto grid w-36 grid-cols-2 gap-2">
     <Badge :variant="badgeVariant(match, 'player1')" class="justify-self-end tabular-nums">
       {{ scoreLabel(match.player1_objectives, match.player1_survivors) }}
     </Badge>

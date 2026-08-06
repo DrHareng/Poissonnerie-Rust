@@ -2,6 +2,7 @@ import { createRouter, createWebHistory } from 'vue-router'
 import ClassementPage from '@/pages/ClassementPage.vue'
 import JoueurPage from '@/pages/JoueurPage.vue'
 import MatchsPage from '@/pages/MatchsPage.vue'
+import MatchPage from '@/pages/MatchPage.vue'
 import SectoriellesPage from '@/pages/SectoriellesPage.vue'
 import SectoriellePage from '@/pages/SectoriellePage.vue'
 import ScenariosPage from '@/pages/ScenariosPage.vue'
@@ -62,8 +63,20 @@ export const router = createRouter({
       meta: { title: 'Matchs' },
     },
     {
+      path: '/matchs/:id',
+      name: 'match',
+      component: MatchPage,
+      props: true,
+    },
+    {
       path: '/partie',
       name: 'partie',
+      component: PartiePage,
+      meta: { title: 'Partie' },
+    },
+    {
+      path: '/partie/:id',
+      name: 'partie-resume',
       component: PartiePage,
       meta: { title: 'Partie' },
     },
@@ -85,6 +98,10 @@ export const router = createRouter({
 
 router.afterEach((to) => {
   if (to.name === 'scenarios' && typeof to.query.scenario === 'string') {
+    return
+  }
+  if (to.name === 'match') {
+    document.title = 'Match'
     return
   }
   const suffix = to.meta.title

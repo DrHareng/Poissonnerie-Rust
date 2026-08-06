@@ -2,7 +2,6 @@
 import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useTitle } from '@vueuse/core'
-import { ArrowLeft } from '@lucide/vue'
 import { toast } from 'vue-sonner'
 import { fetchArmyMatches, fetchArmyStats } from '@/lib/api'
 import { pageTitle } from '@/lib/pageTitle'
@@ -14,7 +13,6 @@ import WinDrawLossBar from '@/components/WinDrawLossBar.vue'
 import ArmyLogo from '@/components/ArmyLogo.vue'
 import PlayerLink from '@/components/PlayerLink.vue'
 import { useArmies } from '@/composables/useArmies'
-import { Button } from '@/components/ui/button'
 import {
   Card,
   CardContent,
@@ -151,11 +149,6 @@ onMounted(refresh)
 
 <template>
   <div class="page-stack">
-    <Button variant="ghost" class="w-fit" @click="router.back()">
-      <ArrowLeft class="size-4" />
-      Retour
-    </Button>
-
     <div
       v-if="loading"
       class="rounded-lg border border-dashed p-8 text-center text-muted-foreground"

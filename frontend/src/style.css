@@ -181,6 +181,14 @@
     @apply hidden shrink-0 lg:flex lg:h-full;
   }
 
+  .poissonnerie-side-panel--custom {
+    @apply w-80 xl:w-96;
+  }
+
+  .poissonnerie-side-slot {
+    @apply flex h-full min-h-0 w-full flex-col overflow-y-auto;
+  }
+
   .poissonnerie-side-image {
     @apply block h-full w-auto max-w-full rounded-xl object-contain;
     filter: saturate(1.05) contrast(1.02);
@@ -300,7 +308,7 @@
   }
 
   .page-panel-scroll {
-    @apply lg:min-h-0 lg:flex-1;
+    @apply lg:min-h-0 lg:flex-1 lg:overflow-y-auto;
   }
 
   .page-title {
@@ -826,7 +834,27 @@
   }
 
   .army-logo {
-    @apply size-5 object-contain;
+    @apply size-5 shrink-0 object-contain;
+  }
+
+  .army-logo--md {
+    @apply size-8;
+  }
+
+  .army-logo--lg {
+    @apply size-12;
+  }
+
+  .player-match-panel--compact {
+    @apply gap-2 p-2.5;
+  }
+
+  .player-match-panel--winner {
+    @apply border-2 border-primary;
+    box-shadow:
+      0 0 28px oklch(0.8 0.14 195 / 55%),
+      0 0 12px oklch(0.8 0.14 195 / 35%),
+      inset 0 0 24px oklch(0.8 0.14 195 / 10%);
   }
 
   .searchable-picker {
@@ -925,6 +953,10 @@
     @apply grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3;
   }
 
+  .secondary-card-grid--compact {
+    @apply grid-cols-2 gap-2 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-5;
+  }
+
   .secondary-card {
     @apply overflow-hidden;
   }
@@ -933,9 +965,207 @@
     @apply cursor-pointer transition hover:border-primary/50;
   }
 
+  .secondary-card--selected {
+    @apply border-primary ring-2 ring-primary/60;
+    box-shadow: 0 0 20px oklch(0.8 0.14 195 / 25%);
+  }
+
+  .secondary-card--banned {
+    @apply border-muted-foreground/30 opacity-55 grayscale;
+  }
+
+  .secondary-card-ban-mark {
+    @apply pointer-events-none absolute inset-0 z-10;
+  }
+
+  .secondary-card-ban-mark svg {
+    @apply h-full w-full;
+    stroke: #ef4444;
+    stroke-width: 3.5;
+    stroke-linecap: round;
+    filter: drop-shadow(0 0 8px oklch(0.65 0.25 25 / 70%));
+  }
+
+  .secondary-card-choice {
+    @apply absolute top-2 right-2 z-10 inline-flex size-8 cursor-pointer items-center justify-center;
+  }
+
+  .secondary-card-radio {
+    @apply sr-only;
+  }
+
+  .secondary-card-radio-visual {
+    @apply size-5 rounded-full border-2 border-white/80 bg-background/70 shadow-md transition;
+    box-shadow: 0 0 0 1px oklch(0.8 0.14 195 / 35%);
+  }
+
+  .secondary-card-radio:checked + .secondary-card-radio-visual,
+  .secondary-card-radio:focus-visible + .secondary-card-radio-visual {
+    @apply border-primary bg-primary;
+    box-shadow:
+      inset 0 0 0 3px oklch(0.12 0.02 260),
+      0 0 12px oklch(0.8 0.14 195 / 45%);
+  }
+
+  .secondary-card-radio:focus-visible + .secondary-card-radio-visual {
+    outline: 2px solid oklch(0.8 0.14 195 / 70%);
+    outline-offset: 2px;
+  }
+
   .secondary-card-image {
     aspect-ratio: 5 / 7;
     @apply block w-full object-cover object-top;
+  }
+
+  .combat-esprit-player-header {
+    @apply min-w-0;
+  }
+
+  .combat-esprit-step-badge {
+    @apply pointer-events-none z-20 flex items-center justify-center self-stretch;
+  }
+
+  .combat-esprit-step-badge > span {
+    @apply flex size-7 items-center justify-center rounded-full border-2 border-white font-display text-sm font-bold text-white sm:size-8 sm:text-base;
+    background: oklch(0 0 0 / 45%);
+    text-shadow: 0 0 8px oklch(1 0 0 / 50%);
+    box-shadow: 0 0 12px oklch(1 0 0 / 35%);
+  }
+
+  .combat-esprit-step-badge--span > span {
+    @apply size-8 text-base sm:size-9 sm:text-lg;
+  }
+
+  .combat-esprit-step-badge--current > span {
+    @apply border-primary text-primary;
+    box-shadow:
+      0 0 16px oklch(0.8 0.14 195 / 55%),
+      0 0 8px oklch(0.8 0.14 195 / 35%);
+  }
+
+  .combat-esprit-ban-card-mark {
+    @apply pointer-events-none absolute inset-0 z-10;
+  }
+
+  .combat-esprit-ban-card-mark svg {
+    @apply h-full w-full;
+    stroke: #ef4444;
+    stroke-width: 3.5;
+    stroke-linecap: round;
+    filter: drop-shadow(0 0 8px oklch(0.65 0.25 25 / 70%));
+  }
+
+  .combat-esprit-strip-ban {
+    @apply pointer-events-none absolute inset-0 z-10;
+  }
+
+  .combat-esprit-strip-ban svg {
+    @apply h-full w-full;
+    stroke: #ef4444;
+    stroke-width: 3.5;
+    stroke-linecap: round;
+    filter: drop-shadow(0 0 6px oklch(0.65 0.25 25 / 70%));
+  }
+
+  .combat-esprit-player--active {
+    @apply border-2 border-primary;
+    box-shadow:
+      0 0 28px oklch(0.8 0.14 195 / 55%),
+      0 0 12px oklch(0.8 0.14 195 / 35%),
+      inset 0 0 24px oklch(0.8 0.14 195 / 10%);
+  }
+
+  .combat-esprit-results {
+    @apply grid grid-cols-1 gap-3 md:grid-cols-[1fr_auto_1fr] md:items-start;
+  }
+
+  .combat-esprit-banned-stack {
+    @apply flex flex-wrap items-start justify-center gap-2;
+  }
+
+  .combat-esprit-strip {
+    @apply grid w-full grid-cols-8 gap-1.5;
+  }
+
+  .combat-esprit-strip-slot {
+    @apply relative min-w-0 overflow-hidden p-0;
+  }
+
+  .combat-esprit-strip-slot--selectable {
+    @apply cursor-pointer transition hover:border-primary/60;
+  }
+
+  .combat-esprit-strip-slot--banned {
+    @apply opacity-55 grayscale;
+  }
+
+  .combat-esprit-strip-slot--taken,
+  .combat-esprit-strip-slot--empty {
+    @apply opacity-100;
+    min-height: 0;
+  }
+
+  .combat-esprit-strip-slot--empty {
+    aspect-ratio: 5 / 7;
+    @apply border-dashed border-muted-foreground/30 bg-muted/10;
+  }
+
+  .combat-esprit-strip-slot--taken-p1 {
+    @apply ring-1 ring-primary/50 opacity-80;
+  }
+
+  .combat-esprit-strip-slot--taken-p2 {
+    @apply ring-1 ring-accent/50 opacity-80;
+  }
+
+  .combat-esprit-hand-slots {
+    @apply mt-3 grid grid-cols-4 gap-2;
+  }
+
+  .combat-esprit-hand-slots--compact {
+    @apply mt-2 gap-1.5;
+  }
+
+  .combat-esprit-hand-slot {
+    @apply relative min-w-0 overflow-hidden rounded-md border-2 border-primary/50 bg-background/40;
+    aspect-ratio: 5 / 7;
+    box-shadow: 0 0 16px oklch(0.8 0.14 195 / 18%);
+  }
+
+  .combat-esprit-hand-slot--ban {
+    @apply border-red-500/80;
+    box-shadow: 0 0 16px oklch(0.65 0.25 25 / 22%);
+  }
+
+  .combat-esprit-hand-slot--filled {
+    @apply border-primary ring-2 ring-primary/60 p-0;
+    box-shadow: 0 0 20px oklch(0.8 0.14 195 / 25%);
+  }
+
+  .combat-esprit-hand-slot--ban.combat-esprit-hand-slot--filled {
+    @apply border-red-500 ring-red-500/50;
+    box-shadow: 0 0 20px oklch(0.65 0.25 25 / 28%);
+  }
+
+  .combat-esprit-hand-slot-image {
+    @apply block h-full w-full object-cover object-top;
+  }
+
+  .combat-esprit-hand-slot-image--banned {
+    @apply opacity-55 grayscale;
+  }
+
+  .combat-esprit-hand-slot-fallback {
+    @apply flex h-full items-center justify-center p-1 text-center text-[10px] leading-tight;
+  }
+
+  .combat-esprit-strip-image {
+    aspect-ratio: 5 / 7;
+    @apply block w-full object-cover object-top;
+  }
+
+  .combat-esprit-strip-fallback {
+    @apply block break-words p-1 text-[10px] leading-tight;
   }
 
   .image-viewer-overlay {

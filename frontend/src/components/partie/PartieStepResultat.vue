@@ -4,7 +4,7 @@ import { useRouter } from 'vue-router'
 import { toast } from 'vue-sonner'
 import { Swords } from '@lucide/vue'
 import { COMBAT_ESPRIT_SLUG } from '@/lib/combatEspritDraft'
-import { recordMatch } from '@/lib/api'
+import { completeMatch } from '@/lib/api'
 import type { PartiePlayerSlot, PartieScenario, PartieScores } from '@/composables/usePartieFlow'
 import type { MatchOutcome } from '@/types/elo'
 import { useAuth } from '@/composables/useAuth'
@@ -13,15 +13,12 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 
 const props = defineProps<{
+  matchId: number
   player1: PartiePlayerSlot
   player2: PartiePlayerSlot
   scenario: PartieScenario
   scores: PartieScores
   resolvedOutcome: MatchOutcome
-  scenarioPayload: () =>
-    | { scenario_id: number }
-    | { scenario_other: string }
-    | undefined
 }>()
 
 const emit = defineEmits<{
@@ -77,28 +74,19 @@ async function submit() {
 
   submitting.value = true
   try {
-    const record = await recordMatch(
-      props.player1.name,
-      props.player2.name,
-      props.resolvedOutcome,
-      {
-        player1_objectives: clampObjectives(props.scores.player1Objectives),
-        player1_survivors: clampSurvivors(props.scores.player1Survivors),
-        player2_objectives: clampObjectives(props.scores.player2Objectives),
-        player2_survivors: clampSurvivors(props.scores.player2Survivors),
-      },
-      {
-        player1_army_id: props.player1.armyId,
-        player2_army_id: props.player2.armyId,
-      },
-      props.scenarioPayload(),
-    )
+    const record = await completeMatch(props.matchId, {
+      outcome: props.resolvedOutcome,
+      player1_objectives: clampObjectives(props.scores.player1Objectives),
+      player1_survivors: clampSurvivors(props.scores.player1Survivors),
+      player2_objectives: clampObjectives(props.scores.player2Objectives),
+      player2_survivors: clampSurvivors(props.scores.player2Survivors),
+    })
     toast.success(
       `${record.player1} ${Math.round(record.player1_old)} → ${Math.round(record.player1_new)} | ` +
         `${record.player2} ${Math.round(record.player2_old)} → ${Math.round(record.player2_new)}`,
     )
     emit('recorded')
-    router.push('/matchs')
+    router.push(`/matchs/${record.id}`)
   } catch (error) {
     toast.error(error instanceof Error ? error.message : 'Erreur inconnue')
   } finally {

@@ -6,7 +6,9 @@ use anyhow::{bail, Context, Result};
 use rusqlite::{params, Connection};
 use serde::{Deserialize, Serialize};
 
-use crate::match_record::{now_unix, MatchRecord, MatchScores};
+use crate::match_record::{
+    decode_slug_list, encode_slug_list, now_unix, MatchRecord, MatchReport, MatchScores, MatchStatus,
+};
 use crate::migrate::migrate;
 use crate::player::{MatchOutcome, Player};
 
@@ -32,6 +34,24 @@ pub struct ArmyMatchStats {
     pub wins: u32,
     pub draws: u32,
     pub losses: u32,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct InProgressMatchUpdate {
+    pub scenario_id: Option<i64>,
+    pub scenario_other: Option<String>,
+    pub scenario_name: Option<Option<String>>,
+    pub player1_secondary_slugs: Option<Vec<String>>,
+    pub player2_secondary_slugs: Option<Vec<String>>,
+    pub secondary_pool_slugs: Option<Vec<String>>,
+    pub player1_chosen_secondary: Option<Option<String>>,
+    pub player2_chosen_secondary: Option<Option<String>>,
+    pub lieutenant_winner: Option<String>,
+    pub lieutenant_winner_choice: Option<String>,
+    pub lieutenant_other_choice: Option<String>,
+    pub partie_step: Option<String>,
+    /// Used for Combat de l'Esprit: drop the initial 3+3 draw so the draft can rewrite.
+    pub clear_secondary_draws: bool,
 }
 
 impl ArmyMatchStats {
@@ -104,7 +124,14 @@ impl Leaderboard {
                        m.scenario_id, m.scenario_other,
                        COALESCE(s.name, m.scenario_other),
                        m.tournament_id, m.tournament_phase, t.name,
-                       m.recorded_at
+                       m.status,
+                       m.player1_secondary_slugs, m.player2_secondary_slugs,
+                       m.player1_chosen_secondary, m.player2_chosen_secondary,
+                       m.lieutenant_winner, m.lieutenant_winner_choice, m.lieutenant_other_choice,
+                       m.partie_step, m.created_by,
+                       m.player1_army_list_code, m.player2_army_list_code,
+                       m.recorded_at,
+                       m.secondary_pool_slugs
                 FROM matches m
                 LEFT JOIN scenarios s ON s.id = m.scenario_id
                 LEFT JOIN tournaments t ON t.id = m.tournament_id
@@ -116,6 +143,8 @@ impl Leaderboard {
                 matches.push(row?);
             }
         }
+
+        attach_match_reports(&conn, &mut matches)?;
 
         if players.is_empty() && matches.is_empty() && Path::new(LEGACY_JSON_PATH).exists() {
             let board = Self::load_from_json(Path::new(LEGACY_JSON_PATH))?;
@@ -140,6 +169,7 @@ impl Leaderboard {
             .transaction()
             .context("impossible de démarrer la transaction")?;
 
+        tx.execute("DELETE FROM match_reports", [])?;
         tx.execute("DELETE FROM matches", [])?;
         tx.execute("DELETE FROM players", [])?;
 
@@ -172,14 +202,23 @@ impl Leaderboard {
                     player1_army_id, player2_army_id,
                     scenario_id, scenario_other,
                     tournament_id, tournament_phase,
-                    recorded_at
-                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19)
+                    status,
+                    player1_secondary_slugs, player2_secondary_slugs,
+                    player1_chosen_secondary, player2_chosen_secondary,
+                    lieutenant_winner, lieutenant_winner_choice, lieutenant_other_choice,
+                    partie_step, created_by,
+                    player1_army_list_code, player2_army_list_code,
+                    recorded_at, secondary_pool_slugs
+                ) VALUES (
+                    ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16,
+                    ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29, ?30, ?31, ?32
+                )
                 ",
                 params![
                     record.id,
                     record.player1,
                     record.player2,
-                    outcome_to_str(record.outcome),
+                    outcome_option_to_str(record.outcome),
                     record.player1_old,
                     record.player1_new,
                     record.player2_old,
@@ -194,9 +233,55 @@ impl Leaderboard {
                     record.scenario_other,
                     record.tournament_id,
                     record.tournament_phase,
+                    record.status.as_str(),
+                    encode_slug_list(record.player1_secondary_slugs.as_deref()),
+                    encode_slug_list(record.player2_secondary_slugs.as_deref()),
+                    record.player1_chosen_secondary,
+                    record.player2_chosen_secondary,
+                    record.lieutenant_winner,
+                    record.lieutenant_winner_choice,
+                    record.lieutenant_other_choice,
+                    record.partie_step,
+                    record.created_by,
+                    record.player1_army_list_code,
+                    record.player2_army_list_code,
                     record.recorded_at,
+                    encode_slug_list(record.secondary_pool_slugs.as_deref()),
                 ],
             )?;
+
+            if let Some(report) = &record.player1_report {
+                tx.execute(
+                    "
+                    INSERT INTO match_reports (id, match_id, player_name, body_md, created_at, updated_at)
+                    VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+                    ",
+                    params![
+                        report.id,
+                        record.id,
+                        record.player1,
+                        report.body_md,
+                        report.created_at,
+                        report.updated_at,
+                    ],
+                )?;
+            }
+            if let Some(report) = &record.player2_report {
+                tx.execute(
+                    "
+                    INSERT INTO match_reports (id, match_id, player_name, body_md, created_at, updated_at)
+                    VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+                    ",
+                    params![
+                        report.id,
+                        record.id,
+                        record.player2,
+                        report.body_md,
+                        report.created_at,
+                        report.updated_at,
+                    ],
+                )?;
+            }
         }
 
         tx.commit().context("impossible de valider la transaction")?;
@@ -449,6 +534,384 @@ impl Leaderboard {
         self.matches.len()
     }
 
+    pub fn get_match(&self, id: u64) -> Option<&MatchRecord> {
+        self.matches.iter().find(|record| record.id == id)
+    }
+
+    pub fn delete_match(&mut self, id: u64) -> Result<MatchRecord> {
+        let index = self
+            .matches
+            .iter()
+            .position(|record| record.id == id)
+            .ok_or_else(|| anyhow::anyhow!("match introuvable"))?;
+
+        if self.matches[index].tournament_id.is_some() {
+            bail!("impossible de supprimer un match lié à un tournoi");
+        }
+
+        let record = self.matches.remove(index);
+
+        // Les parties en cours n'ont pas encore impacté l'ELO.
+        if record.status == MatchStatus::InProgress || record.outcome.is_none() {
+            return Ok(record);
+        }
+
+        let outcome = record
+            .outcome
+            .expect("outcome présent pour un match terminé");
+        let key1 = normalize_name(&record.player1);
+        let key2 = normalize_name(&record.player2);
+
+        {
+            let p1 = self
+                .players
+                .get_mut(&key1)
+                .with_context(|| format!("joueur introuvable : {}", record.player1))?;
+            p1.rating = record.player1_old;
+            adjust_player_match_count(p1, outcome.score_for_player1(), -1);
+        }
+
+        {
+            let score2 = match outcome.score_for_player1() {
+                crate::elo::MatchScore::Win => crate::elo::MatchScore::Loss,
+                crate::elo::MatchScore::Draw => crate::elo::MatchScore::Draw,
+                crate::elo::MatchScore::Loss => crate::elo::MatchScore::Win,
+            };
+            let p2 = self
+                .players
+                .get_mut(&key2)
+                .with_context(|| format!("joueur introuvable : {}", record.player2))?;
+            p2.rating = record.player2_old;
+            adjust_player_match_count(p2, score2, -1);
+        }
+
+        Ok(record)
+    }
+
+    pub fn start_match(
+        &mut self,
+        player1: &str,
+        player2: &str,
+        player1_army_id: u32,
+        player2_army_id: u32,
+        created_by: &str,
+        player1_secondary_slugs: Vec<String>,
+        player2_secondary_slugs: Vec<String>,
+    ) -> Result<MatchRecord> {
+        if normalize_name(player1) == normalize_name(player2) {
+            bail!("un joueur ne peut pas jouer contre lui-même");
+        }
+        if player1_secondary_slugs.len() != 3 || player2_secondary_slugs.len() != 3 {
+            bail!("chaque joueur doit recevoir exactement 3 objectifs secondaires");
+        }
+        let key1 = normalize_name(player1);
+        let key2 = normalize_name(player2);
+        if !self.players.contains_key(&key1) {
+            bail!("joueur introuvable : {}", player1);
+        }
+        if !self.players.contains_key(&key2) {
+            bail!("joueur introuvable : {}", player2);
+        }
+
+        let rating1 = self.players.get(&key1).unwrap().rating;
+        let rating2 = self.players.get(&key2).unwrap().rating;
+        let next_id = self
+            .matches
+            .iter()
+            .map(|record| record.id)
+            .max()
+            .unwrap_or(0)
+            + 1;
+
+        let record = MatchRecord {
+            id: next_id,
+            player1: self.players.get(&key1).unwrap().name.clone(),
+            player2: self.players.get(&key2).unwrap().name.clone(),
+            status: MatchStatus::InProgress,
+            outcome: None,
+            player1_old: rating1,
+            player1_new: rating1,
+            player2_old: rating2,
+            player2_new: rating2,
+            player1_objectives: 0,
+            player1_survivors: 0,
+            player2_objectives: 0,
+            player2_survivors: 0,
+            player1_army_id: Some(player1_army_id),
+            player2_army_id: Some(player2_army_id),
+            scenario_id: None,
+            scenario_other: None,
+            scenario_name: None,
+            tournament_id: None,
+            tournament_phase: None,
+            tournament_name: None,
+            player1_report: None,
+            player2_report: None,
+            player1_army_list_code: None,
+            player2_army_list_code: None,
+            player1_secondary_slugs: Some(player1_secondary_slugs),
+            player2_secondary_slugs: Some(player2_secondary_slugs),
+            secondary_pool_slugs: None,
+            player1_chosen_secondary: None,
+            player2_chosen_secondary: None,
+            lieutenant_winner: None,
+            lieutenant_winner_choice: None,
+            lieutenant_other_choice: None,
+            partie_step: Some("scenario".to_string()),
+            created_by: Some(created_by.to_string()),
+            recorded_at: now_unix(),
+        };
+
+        self.matches.insert(0, record.clone());
+        Ok(record)
+    }
+
+    pub fn update_in_progress_match(
+        &mut self,
+        id: u64,
+        update: InProgressMatchUpdate,
+    ) -> Result<MatchRecord> {
+        let record = self
+            .matches
+            .iter_mut()
+            .find(|record| record.id == id)
+            .ok_or_else(|| anyhow::anyhow!("match introuvable"))?;
+
+        if record.status != MatchStatus::InProgress {
+            bail!("ce match n'est plus en cours");
+        }
+
+        if let Some(scenario_id) = update.scenario_id {
+            record.scenario_id = Some(scenario_id);
+            record.scenario_other = None;
+        }
+        if let Some(scenario_other) = update.scenario_other {
+            let trimmed = scenario_other.trim().to_string();
+            if trimmed.is_empty() {
+                record.scenario_other = None;
+            } else {
+                record.scenario_other = Some(trimmed);
+                record.scenario_id = None;
+            }
+        }
+        if let Some(scenario_name) = update.scenario_name {
+            record.scenario_name = scenario_name;
+        }
+        if update.clear_secondary_draws {
+            let p1_len = record.player1_secondary_slugs.as_ref().map(|s| s.len());
+            let p2_len = record.player2_secondary_slugs.as_ref().map(|s| s.len());
+            // Ne pas effacer un draft Combat de l'Esprit déjà figé (souvent ≠ 3 cartes).
+            let looks_like_initial_draw =
+                matches!((p1_len, p2_len), (None, None) | (Some(3), Some(3)));
+            if looks_like_initial_draw {
+                record.player1_secondary_slugs = None;
+                record.player2_secondary_slugs = None;
+                record.player1_chosen_secondary = None;
+                record.player2_chosen_secondary = None;
+                record.secondary_pool_slugs = None;
+            }
+        }
+        if let Some(slugs) = update.player1_secondary_slugs {
+            if record.player1_secondary_slugs.is_some() {
+                bail!("les secondaires du joueur 1 sont déjà figés");
+            }
+            record.player1_secondary_slugs = Some(slugs);
+        }
+        if let Some(slugs) = update.player2_secondary_slugs {
+            if record.player2_secondary_slugs.is_some() {
+                bail!("les secondaires du joueur 2 sont déjà figés");
+            }
+            record.player2_secondary_slugs = Some(slugs);
+        }
+        if let Some(slugs) = update.secondary_pool_slugs {
+            if record.secondary_pool_slugs.is_some() {
+                bail!("le deck de secondaires est déjà figé");
+            }
+            record.secondary_pool_slugs = Some(slugs);
+        }
+        if let Some(chosen) = update.player1_chosen_secondary {
+            record.player1_chosen_secondary = chosen;
+        }
+        if let Some(chosen) = update.player2_chosen_secondary {
+            record.player2_chosen_secondary = chosen;
+        }
+        if let Some(winner) = update.lieutenant_winner {
+            record.lieutenant_winner = Some(winner);
+        }
+        if let Some(choice) = update.lieutenant_winner_choice {
+            record.lieutenant_winner_choice = Some(choice);
+        }
+        if let Some(choice) = update.lieutenant_other_choice {
+            record.lieutenant_other_choice = Some(choice);
+        }
+        if let Some(step) = update.partie_step {
+            record.partie_step = Some(step);
+        }
+
+        Ok(record.clone())
+    }
+
+    pub fn complete_match(
+        &mut self,
+        id: u64,
+        outcome: MatchOutcome,
+        k_factor: f64,
+        scores: MatchScores,
+    ) -> Result<MatchRecord> {
+        let scores = scores.validate()?;
+        let index = self
+            .matches
+            .iter()
+            .position(|record| record.id == id)
+            .ok_or_else(|| anyhow::anyhow!("match introuvable"))?;
+
+        if self.matches[index].status != MatchStatus::InProgress {
+            bail!("ce match n'est pas en cours");
+        }
+
+        let key1 = normalize_name(&self.matches[index].player1.clone());
+        let key2 = normalize_name(&self.matches[index].player2.clone());
+
+        let update = {
+            let old1 = self.players.get(&key1).unwrap().rating;
+            let old2 = self.players.get(&key2).unwrap().rating;
+            let score1 = outcome.score_for_player1();
+            let (new1, new2) = crate::elo::update_ratings(old1, old2, score1, k_factor);
+            let score2 = match score1 {
+                crate::elo::MatchScore::Win => crate::elo::MatchScore::Loss,
+                crate::elo::MatchScore::Draw => crate::elo::MatchScore::Draw,
+                crate::elo::MatchScore::Loss => crate::elo::MatchScore::Win,
+            };
+            let p1 = self.players.get_mut(&key1).unwrap();
+            p1.rating = new1;
+            p1.record_match(score1);
+            let p2 = self.players.get_mut(&key2).unwrap();
+            p2.rating = new2;
+            p2.record_match(score2);
+            crate::player::RatingUpdate {
+                player1_old: old1,
+                player1_new: new1,
+                player2_old: old2,
+                player2_new: new2,
+            }
+        };
+
+        let record = &mut self.matches[index];
+        record.status = MatchStatus::Completed;
+        record.outcome = Some(outcome);
+        record.player1_old = update.player1_old;
+        record.player1_new = update.player1_new;
+        record.player2_old = update.player2_old;
+        record.player2_new = update.player2_new;
+        record.player1_objectives = scores.player1_objectives;
+        record.player1_survivors = scores.player1_survivors;
+        record.player2_objectives = scores.player2_objectives;
+        record.player2_survivors = scores.player2_survivors;
+        record.partie_step = Some("resultat".to_string());
+        record.recorded_at = now_unix();
+
+        Ok(record.clone())
+    }
+
+    pub fn in_progress_matches(&self) -> Vec<&MatchRecord> {
+        self.matches
+            .iter()
+            .filter(|record| record.status == MatchStatus::InProgress)
+            .collect()
+    }
+
+    pub fn in_progress_matches_for_player(&self, player_name: &str) -> Vec<&MatchRecord> {
+        let key = normalize_name(player_name);
+        self.matches
+            .iter()
+            .filter(|record| {
+                record.status == MatchStatus::InProgress
+                    && (normalize_name(&record.player1) == key
+                        || normalize_name(&record.player2) == key)
+            })
+            .collect()
+    }
+
+    pub fn update_match_report(
+        &mut self,
+        id: u64,
+        player_name: &str,
+        body_md: &str,
+    ) -> Result<MatchRecord> {
+        let key = normalize_name(player_name);
+        let now = now_unix();
+        let next_report_id = self.next_report_id();
+        let record = self
+            .matches
+            .iter_mut()
+            .find(|record| record.id == id)
+            .ok_or_else(|| anyhow::anyhow!("match introuvable"))?;
+
+        let report = |existing: &Option<MatchReport>| MatchReport {
+            id: existing.as_ref().map(|r| r.id).unwrap_or(next_report_id),
+            body_md: body_md.to_string(),
+            created_at: existing.as_ref().map(|r| r.created_at).unwrap_or(now),
+            updated_at: now,
+        };
+
+        if normalize_name(&record.player1) == key {
+            record.player1_report = Some(report(&record.player1_report));
+        } else if normalize_name(&record.player2) == key {
+            record.player2_report = Some(report(&record.player2_report));
+        } else {
+            bail!("ce joueur ne participe pas à ce match");
+        }
+
+        Ok(record.clone())
+    }
+
+    fn next_report_id(&self) -> i64 {
+        self.matches
+            .iter()
+            .flat_map(|record| {
+                [
+                    record.player1_report.as_ref().map(|r| r.id),
+                    record.player2_report.as_ref().map(|r| r.id),
+                ]
+            })
+            .flatten()
+            .max()
+            .unwrap_or(0)
+            + 1
+    }
+
+    pub fn update_match_army_list(
+        &mut self,
+        id: u64,
+        player_name: &str,
+        army_list_code: &str,
+        army_id: Option<u32>,
+    ) -> Result<MatchRecord> {
+        let key = normalize_name(player_name);
+        let code = normalize_army_list_code(army_list_code);
+        let record = self
+            .matches
+            .iter_mut()
+            .find(|record| record.id == id)
+            .ok_or_else(|| anyhow::anyhow!("match introuvable"))?;
+
+        if normalize_name(&record.player1) == key {
+            record.player1_army_list_code = code;
+            if let Some(army_id) = army_id {
+                record.player1_army_id = Some(army_id);
+            }
+        } else if normalize_name(&record.player2) == key {
+            record.player2_army_list_code = code;
+            if let Some(army_id) = army_id {
+                record.player2_army_id = Some(army_id);
+            }
+        } else {
+            bail!("ce joueur ne participe pas à ce match");
+        }
+
+        Ok(record.clone())
+    }
+
     pub fn recent_matches_page(&self, limit: usize, offset: usize) -> Vec<&MatchRecord> {
         self.matches
             .iter()
@@ -523,6 +986,12 @@ impl Leaderboard {
         let mut stats: HashMap<u32, ArmyMatchStats> = HashMap::new();
 
         for record in &self.matches {
+            if record.status != MatchStatus::Completed {
+                continue;
+            }
+            let Some(outcome) = record.outcome else {
+                continue;
+            };
             if let Some(army_id) = record.player1_army_id {
                 let entry = stats.entry(army_id).or_insert(ArmyMatchStats {
                     army_id,
@@ -530,7 +999,7 @@ impl Leaderboard {
                     draws: 0,
                     losses: 0,
                 });
-                match record.outcome {
+                match outcome {
                     MatchOutcome::Player1Win => entry.wins += 1,
                     MatchOutcome::Player2Win => entry.losses += 1,
                     MatchOutcome::Draw => entry.draws += 1,
@@ -544,7 +1013,7 @@ impl Leaderboard {
                     draws: 0,
                     losses: 0,
                 });
-                match record.outcome {
+                match outcome {
                     MatchOutcome::Player1Win => entry.losses += 1,
                     MatchOutcome::Player2Win => entry.wins += 1,
                     MatchOutcome::Draw => entry.draws += 1,
@@ -601,25 +1070,37 @@ fn outcome_to_str(outcome: MatchOutcome) -> &'static str {
     }
 }
 
+fn outcome_option_to_str(outcome: Option<MatchOutcome>) -> String {
+    outcome
+        .map(outcome_to_str)
+        .unwrap_or("")
+        .to_string()
+}
+
 fn row_to_match(row: &rusqlite::Row<'_>) -> rusqlite::Result<MatchRecord> {
-    let outcome_str: String = row.get(3)?;
-    let outcome = match outcome_str.as_str() {
-        "player1_win" => MatchOutcome::Player1Win,
-        "player2_win" => MatchOutcome::Player2Win,
-        "draw" => MatchOutcome::Draw,
-        _ => {
+    let outcome_raw: Option<String> = row.get(3)?;
+    let outcome = match outcome_raw.as_deref() {
+        Some("player1_win") => Some(MatchOutcome::Player1Win),
+        Some("player2_win") => Some(MatchOutcome::Player2Win),
+        Some("draw") => Some(MatchOutcome::Draw),
+        None | Some("") => None,
+        Some(other) => {
             return Err(rusqlite::Error::InvalidColumnType(
                 3,
-                outcome_str,
+                other.to_string(),
                 rusqlite::types::Type::Text,
             ));
         }
     };
 
+    let status_raw: Option<String> = row.get(20)?;
+    let status = MatchStatus::parse(status_raw.as_deref().unwrap_or("completed"));
+
     Ok(MatchRecord {
         id: row.get(0)?,
         player1: row.get(1)?,
         player2: row.get(2)?,
+        status,
         outcome,
         player1_old: row.get(4)?,
         player1_new: row.get(5)?,
@@ -637,8 +1118,108 @@ fn row_to_match(row: &rusqlite::Row<'_>) -> rusqlite::Result<MatchRecord> {
         tournament_id: row.get(17)?,
         tournament_phase: row.get(18)?,
         tournament_name: row.get(19)?,
-        recorded_at: row.get(20)?,
+        player1_report: None,
+        player2_report: None,
+        player1_secondary_slugs: decode_slug_list(row.get(21)?),
+        player2_secondary_slugs: decode_slug_list(row.get(22)?),
+        player1_chosen_secondary: row.get(23)?,
+        player2_chosen_secondary: row.get(24)?,
+        lieutenant_winner: row.get(25)?,
+        lieutenant_winner_choice: row.get(26)?,
+        lieutenant_other_choice: row.get(27)?,
+        partie_step: row.get(28)?,
+        created_by: row.get(29)?,
+        player1_army_list_code: row.get(30)?,
+        player2_army_list_code: row.get(31)?,
+        recorded_at: row.get(32)?,
+        secondary_pool_slugs: decode_slug_list(row.get(33)?),
     })
+}
+
+fn attach_match_reports(conn: &Connection, matches: &mut [MatchRecord]) -> Result<()> {
+    let mut stmt = conn.prepare(
+        "
+        SELECT id, match_id, player_name, body_md, created_at, updated_at
+        FROM match_reports
+        ",
+    )?;
+    let rows = stmt.query_map([], |row| {
+        Ok((
+            row.get::<_, i64>(0)?,
+            row.get::<_, u64>(1)?,
+            row.get::<_, String>(2)?,
+            row.get::<_, String>(3)?,
+            row.get::<_, u64>(4)?,
+            row.get::<_, u64>(5)?,
+        ))
+    })?;
+
+    for row in rows {
+        let (id, match_id, player_name, body_md, created_at, updated_at) = row?;
+        let Some(record) = matches.iter_mut().find(|record| record.id == match_id) else {
+            continue;
+        };
+        let report = MatchReport {
+            id,
+            body_md,
+            created_at,
+            updated_at,
+        };
+        if normalize_name(&record.player1) == normalize_name(&player_name) {
+            record.player1_report = Some(report);
+        } else if normalize_name(&record.player2) == normalize_name(&player_name) {
+            record.player2_report = Some(report);
+        }
+    }
+
+    Ok(())
+}
+
+fn normalize_army_list_code(raw: &str) -> Option<String> {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+
+    const PREFIXES: &[&str] = &[
+        "https://infinitytheuniverse.com/army/list/",
+        "http://infinitytheuniverse.com/army/list/",
+        "https://www.infinitytheuniverse.com/army/list/",
+        "http://www.infinitytheuniverse.com/army/list/",
+    ];
+
+    let mut code = trimmed;
+    for prefix in PREFIXES {
+        if let Some(rest) = code.strip_prefix(prefix) {
+            code = rest;
+            break;
+        }
+    }
+
+    let code = code.trim().trim_start_matches('/');
+    if code.is_empty() {
+        None
+    } else {
+        Some(code.to_string())
+    }
+}
+
+fn adjust_player_match_count(
+    player: &mut Player,
+    score: crate::elo::MatchScore,
+    delta: i32,
+) {
+    match score {
+        crate::elo::MatchScore::Win => {
+            player.wins = (player.wins as i32 + delta).max(0) as u32;
+        }
+        crate::elo::MatchScore::Draw => {
+            player.draws = (player.draws as i32 + delta).max(0) as u32;
+        }
+        crate::elo::MatchScore::Loss => {
+            player.losses = (player.losses as i32 + delta).max(0) as u32;
+        }
+    }
 }
 
 pub fn normalize_name(name: &str) -> String {
@@ -1117,11 +1698,13 @@ pub fn recompute_elo_from_matches(
         }
     }
 
-    let match_rows: Vec<(i64, String, String, String)> = {
+    let match_rows: Vec<(i64, String, String, Option<String>)> = {
         let mut stmt = conn.prepare(
             "
             SELECT id, player1, player2, outcome
             FROM matches
+            WHERE outcome IS NOT NULL
+              AND (status IS NULL OR status = 'completed')
             ORDER BY recorded_at ASC, id ASC
             ",
         )?;
@@ -1130,7 +1713,7 @@ pub fn recompute_elo_from_matches(
                 row.get::<_, i64>(0)?,
                 row.get::<_, String>(1)?,
                 row.get::<_, String>(2)?,
-                row.get::<_, String>(3)?,
+                row.get::<_, Option<String>>(3)?,
             ))
         })?;
         rows.collect::<Result<Vec<_>, _>>()?
@@ -1138,6 +1721,9 @@ pub fn recompute_elo_from_matches(
 
     let tx = conn.unchecked_transaction()?;
     for (match_id, player1, player2, outcome_raw) in match_rows {
+        let Some(outcome_raw) = outcome_raw else {
+            continue;
+        };
         let outcome = match outcome_raw.as_str() {
             "player1_win" => MatchOutcome::Player1Win,
             "player2_win" => MatchOutcome::Player2Win,

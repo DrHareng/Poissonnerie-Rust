@@ -6,7 +6,7 @@ use axum::{
     extract::{Path, Query, State},
     http::{HeaderValue, Method, StatusCode},
     response::{IntoResponse, Redirect, Response},
-    routing::{get, post},
+    routing::{get, patch, post},
     Json, Router,
 };
 use serde::{Deserialize, Serialize};
@@ -63,6 +63,55 @@ pub struct PlayerProfileResponse {
 struct AddPlayerRequest {
     name: String,
     discord_username: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct StartMatchRequest {
+    player1: String,
+    player2: String,
+    player1_army_id: u32,
+    player2_army_id: u32,
+    player1_secondary_slugs: Vec<String>,
+    player2_secondary_slugs: Vec<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct UpdateMatchProgressRequest {
+    #[serde(default)]
+    scenario_id: Option<i64>,
+    #[serde(default)]
+    scenario_other: Option<String>,
+    #[serde(default)]
+    player1_secondary_slugs: Option<Vec<String>>,
+    #[serde(default)]
+    player2_secondary_slugs: Option<Vec<String>>,
+    #[serde(default)]
+    secondary_pool_slugs: Option<Vec<String>>,
+    #[serde(default)]
+    player1_chosen_secondary: Option<String>,
+    #[serde(default)]
+    player2_chosen_secondary: Option<String>,
+    #[serde(default)]
+    lieutenant_winner: Option<String>,
+    #[serde(default)]
+    lieutenant_winner_choice: Option<String>,
+    #[serde(default)]
+    lieutenant_other_choice: Option<String>,
+    #[serde(default)]
+    partie_step: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct CompleteMatchRequest {
+    outcome: MatchOutcome,
+    #[serde(default)]
+    player1_objectives: u8,
+    #[serde(default)]
+    player1_survivors: u16,
+    #[serde(default)]
+    player2_objectives: u8,
+    #[serde(default)]
+    player2_survivors: u16,
 }
 
 #[derive(Debug, Deserialize)]
@@ -195,6 +244,15 @@ pub fn router(state: AppState) -> Result<Router> {
         .route("/api/players/{name}", get(get_player))
         .route("/api/players/{name}/matches", get(get_player_matches))
         .route("/api/matches", get(list_matches).post(record_match))
+        .route("/api/matches/start", post(start_match))
+        .route("/api/matches/mine/in-progress", get(list_my_in_progress_matches))
+        .route(
+            "/api/matches/{id}",
+            get(get_match).delete(delete_match).patch(update_match_progress),
+        )
+        .route("/api/matches/{id}/complete", post(complete_match))
+        .route("/api/matches/{id}/report", patch(update_match_report))
+        .route("/api/matches/{id}/army-list", patch(update_match_army_list))
         .route("/api/health", get(health))
         .merge(tournament_api::tournament_routes())
         .layer(cors_layer())
@@ -770,6 +828,333 @@ async fn record_match(
         .map_err(|error| ApiError::bad_request(error.to_string()))?;
 
     Ok(Json(record))
+}
+
+async fn get_match(
+    State(state): State<AppState>,
+    Path(id): Path<u64>,
+) -> Result<Json<crate::display_name::EnrichedMatchRecord>, ApiError> {
+    let board = state.board.lock().unwrap();
+    let record = board
+        .get_match(id)
+        .ok_or_else(|| ApiError::bad_request("match introuvable"))?
+        .clone();
+    let resolver = crate::display_name::PlayerDisplayResolver::new(&board, state.users.as_ref());
+    Ok(Json(resolver.enrich_match(record)))
+}
+
+async fn start_match(
+    State(state): State<AppState>,
+    session: Session,
+    Json(payload): Json<StartMatchRequest>,
+) -> Result<(StatusCode, Json<crate::display_name::EnrichedMatchRecord>), ApiError> {
+    let user = require_user(&state, &session).await?;
+    let created_by = {
+        let board = state.board.lock().unwrap();
+        board
+            .get_player_by_discord_username(&user.username)
+            .ok_or_else(|| {
+                ApiError::unauthorized("un profil joueur Poissonnerie est requis pour démarrer une partie")
+            })?
+            .name
+            .clone()
+    };
+
+    state
+        .armies
+        .validate_selectable_id(payload.player1_army_id)
+        .map_err(|error| ApiError::bad_request(error.to_string()))?;
+    state
+        .armies
+        .validate_selectable_id(payload.player2_army_id)
+        .map_err(|error| ApiError::bad_request(error.to_string()))?;
+
+    if payload.player1_secondary_slugs.len() != 3 || payload.player2_secondary_slugs.len() != 3 {
+        return Err(ApiError::bad_request(
+            "chaque joueur doit recevoir exactement 3 objectifs secondaires",
+        ));
+    }
+
+    let mut board = state.board.lock().unwrap();
+    if crate::normalize_name(&payload.player1) != crate::normalize_name(&created_by) {
+        return Err(ApiError::bad_request(
+            "le joueur 1 doit être votre profil connecté",
+        ));
+    }
+    let record = board
+        .start_match(
+            &payload.player1,
+            &payload.player2,
+            payload.player1_army_id,
+            payload.player2_army_id,
+            &created_by,
+            payload.player1_secondary_slugs,
+            payload.player2_secondary_slugs,
+        )
+        .map_err(|error| ApiError::bad_request(error.to_string()))?;
+    board
+        .save(&state.db_path)
+        .map_err(|error| ApiError::bad_request(error.to_string()))?;
+
+    let resolver = crate::display_name::PlayerDisplayResolver::new(&board, state.users.as_ref());
+    Ok((StatusCode::CREATED, Json(resolver.enrich_match(record))))
+}
+
+async fn update_match_progress(
+    State(state): State<AppState>,
+    session: Session,
+    Path(id): Path<u64>,
+    Json(payload): Json<UpdateMatchProgressRequest>,
+) -> Result<Json<crate::display_name::EnrichedMatchRecord>, ApiError> {
+    let user = require_user(&state, &session).await?;
+    ensure_match_participant(&state, &user, id)?;
+
+    let scenario_name = if let Some(scenario_id) = payload.scenario_id {
+        Some(
+            state
+                .scenarios
+                .get(scenario_id)
+                .map_err(|error| ApiError::bad_request(error.to_string()))?
+                .map(|scenario| scenario.name),
+        )
+    } else if let Some(other) = payload.scenario_other.as_ref() {
+        let trimmed = other.trim();
+        if trimmed.is_empty() {
+            None
+        } else {
+            Some(Some(trimmed.to_string()))
+        }
+    } else {
+        None
+    };
+
+    let clear_secondaries_for_combat_esprit = payload
+        .scenario_id
+        .and_then(|id| state.scenarios.get(id).ok().flatten())
+        .and_then(|scenario| scenario.slug)
+        .as_deref()
+        == Some("le-combat-de-lesprit");
+
+    let update = crate::store::InProgressMatchUpdate {
+        scenario_id: payload.scenario_id,
+        scenario_other: payload.scenario_other,
+        scenario_name,
+        player1_secondary_slugs: payload.player1_secondary_slugs,
+        player2_secondary_slugs: payload.player2_secondary_slugs,
+        secondary_pool_slugs: payload.secondary_pool_slugs,
+        player1_chosen_secondary: payload
+            .player1_chosen_secondary
+            .map(Some),
+        player2_chosen_secondary: payload
+            .player2_chosen_secondary
+            .map(Some),
+        lieutenant_winner: payload.lieutenant_winner,
+        lieutenant_winner_choice: payload.lieutenant_winner_choice,
+        lieutenant_other_choice: payload.lieutenant_other_choice,
+        partie_step: payload.partie_step,
+        clear_secondary_draws: clear_secondaries_for_combat_esprit,
+    };
+
+    let mut board = state.board.lock().unwrap();
+    let record = board
+        .update_in_progress_match(id, update)
+        .map_err(|error| ApiError::bad_request(error.to_string()))?;
+    board
+        .save(&state.db_path)
+        .map_err(|error| ApiError::bad_request(error.to_string()))?;
+
+    let resolver = crate::display_name::PlayerDisplayResolver::new(&board, state.users.as_ref());
+    Ok(Json(resolver.enrich_match(record)))
+}
+
+async fn complete_match(
+    State(state): State<AppState>,
+    session: Session,
+    Path(id): Path<u64>,
+    Json(payload): Json<CompleteMatchRequest>,
+) -> Result<Json<crate::display_name::EnrichedMatchRecord>, ApiError> {
+    let user = require_user(&state, &session).await?;
+    ensure_match_participant(&state, &user, id)?;
+
+    let scores = MatchScores {
+        player1_objectives: payload.player1_objectives,
+        player1_survivors: payload.player1_survivors,
+        player2_objectives: payload.player2_objectives,
+        player2_survivors: payload.player2_survivors,
+    };
+
+    let mut board = state.board.lock().unwrap();
+    let record = board
+        .complete_match(id, payload.outcome, state.k_factor, scores)
+        .map_err(|error| ApiError::bad_request(error.to_string()))?;
+    board
+        .save(&state.db_path)
+        .map_err(|error| ApiError::bad_request(error.to_string()))?;
+
+    let resolver = crate::display_name::PlayerDisplayResolver::new(&board, state.users.as_ref());
+    Ok(Json(resolver.enrich_match(record)))
+}
+
+async fn list_my_in_progress_matches(
+    State(state): State<AppState>,
+    session: Session,
+) -> Result<Json<Vec<crate::display_name::EnrichedMatchRecord>>, ApiError> {
+    let user = require_user(&state, &session).await?;
+    let board = state.board.lock().unwrap();
+    let resolver = crate::display_name::PlayerDisplayResolver::new(&board, state.users.as_ref());
+
+    let matches = if user.is_admin {
+        board
+            .in_progress_matches()
+            .into_iter()
+            .cloned()
+            .map(|record| resolver.enrich_match(record))
+            .collect()
+    } else {
+        let player = board
+            .get_player_by_discord_username(&user.username)
+            .ok_or_else(|| {
+                ApiError::unauthorized("un profil joueur Poissonnerie est requis")
+            })?;
+        board
+            .in_progress_matches_for_player(&player.name)
+            .into_iter()
+            .cloned()
+            .map(|record| resolver.enrich_match(record))
+            .collect()
+    };
+
+    Ok(Json(matches))
+}
+
+fn ensure_match_participant(
+    state: &AppState,
+    user: &User,
+    match_id: u64,
+) -> Result<(), ApiError> {
+    if user.is_admin {
+        return Ok(());
+    }
+    let board = state.board.lock().unwrap();
+    let player = board
+        .get_player_by_discord_username(&user.username)
+        .ok_or_else(|| ApiError::unauthorized("profil joueur requis"))?;
+    let record = board
+        .get_match(match_id)
+        .ok_or_else(|| ApiError::bad_request("match introuvable"))?;
+    let key = crate::normalize_name(&player.name);
+    if crate::normalize_name(&record.player1) != key
+        && crate::normalize_name(&record.player2) != key
+    {
+        return Err(ApiError::unauthorized(
+            "vous ne participez pas à cette partie",
+        ));
+    }
+    Ok(())
+}
+
+async fn delete_match(
+    State(state): State<AppState>,
+    session: Session,
+    Path(id): Path<u64>,
+) -> Result<StatusCode, ApiError> {
+    require_admin(&state, &session).await?;
+
+    let mut board = state.board.lock().unwrap();
+    board
+        .delete_match(id)
+        .map_err(|error| ApiError::bad_request(error.to_string()))?;
+    board
+        .save(&state.db_path)
+        .map_err(|error| ApiError::bad_request(error.to_string()))?;
+
+    Ok(StatusCode::NO_CONTENT)
+}
+
+#[derive(Debug, Deserialize)]
+struct UpdateMatchReportRequest {
+    body_md: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct UpdateMatchArmyListRequest {
+    army_list_code: String,
+    #[serde(default)]
+    army_id: Option<u32>,
+}
+
+async fn update_match_report(
+    State(state): State<AppState>,
+    session: Session,
+    Path(id): Path<u64>,
+    Json(payload): Json<UpdateMatchReportRequest>,
+) -> Result<Json<crate::display_name::EnrichedMatchRecord>, ApiError> {
+    let user = require_user(&state, &session).await?;
+    let player = {
+        let board = state.board.lock().unwrap();
+        board
+            .get_player_by_discord_username(&user.username)
+            .ok_or_else(|| {
+                ApiError::unauthorized("un profil joueur Poissonnerie est requis pour publier un CR")
+            })?
+            .clone()
+    };
+
+    let body_md = payload.body_md.trim();
+    if body_md.is_empty() {
+        return Err(ApiError::bad_request("le compte rendu ne peut pas être vide"));
+    }
+
+    let mut board = state.board.lock().unwrap();
+    board
+        .update_match_report(id, &player.name, body_md)
+        .map_err(|error| ApiError::bad_request(error.to_string()))?;
+    board
+        .save(&state.db_path)
+        .map_err(|error| ApiError::bad_request(error.to_string()))?;
+
+    let record = board.get_match(id).unwrap().clone();
+    let resolver = crate::display_name::PlayerDisplayResolver::new(&board, state.users.as_ref());
+    Ok(Json(resolver.enrich_match(record)))
+}
+
+async fn update_match_army_list(
+    State(state): State<AppState>,
+    session: Session,
+    Path(id): Path<u64>,
+    Json(payload): Json<UpdateMatchArmyListRequest>,
+) -> Result<Json<crate::display_name::EnrichedMatchRecord>, ApiError> {
+    let user = require_user(&state, &session).await?;
+    let player = {
+        let board = state.board.lock().unwrap();
+        board
+            .get_player_by_discord_username(&user.username)
+            .ok_or_else(|| {
+                ApiError::unauthorized(
+                    "un profil joueur Poissonnerie est requis pour enregistrer une liste",
+                )
+            })?
+            .clone()
+    };
+
+    if let Some(army_id) = payload.army_id {
+        state
+            .armies
+            .validate_selectable_id(army_id)
+            .map_err(|error| ApiError::bad_request(error.to_string()))?;
+    }
+
+    let mut board = state.board.lock().unwrap();
+    board
+        .update_match_army_list(id, &player.name, &payload.army_list_code, payload.army_id)
+        .map_err(|error| ApiError::bad_request(error.to_string()))?;
+    board
+        .save(&state.db_path)
+        .map_err(|error| ApiError::bad_request(error.to_string()))?;
+
+    let record = board.get_match(id).unwrap().clone();
+    let resolver = crate::display_name::PlayerDisplayResolver::new(&board, state.users.as_ref());
+    Ok(Json(resolver.enrich_match(record)))
 }
 
 pub fn default_state() -> anyhow::Result<AppState> {

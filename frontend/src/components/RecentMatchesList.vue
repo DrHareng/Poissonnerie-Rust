@@ -1,10 +1,12 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import { ChevronLeft, ChevronRight, History } from '@lucide/vue'
+import { useRouter } from 'vue-router'
+import { ChevronLeft, ChevronRight, Eye, History } from '@lucide/vue'
 import type { MatchRecord } from '@/types/elo'
 import MatchResultBadges from '@/components/MatchResultBadges.vue'
 import MatchContextCell from '@/components/MatchContextCell.vue'
 import ArmyLogo from '@/components/ArmyLogo.vue'
+import ArmyListQuickActions from '@/components/ArmyListQuickActions.vue'
 import PlayerLink from '@/components/PlayerLink.vue'
 import { formatMatchRecordedDate } from '@/lib/tournamentMatchDisplay'
 import { Button } from '@/components/ui/button'
@@ -37,6 +39,8 @@ const emit = defineEmits<{
   pageChange: [page: number]
 }>()
 
+const router = useRouter()
+
 const pageStart = computed(() => {
   if (!props.total || props.total === 0) return 0
   return ((props.page ?? 1) - 1) * (props.pageSize ?? 5) + 1
@@ -51,6 +55,10 @@ function goToPage(nextPage: number) {
   if (!props.totalPages) return
   if (nextPage < 1 || nextPage > props.totalPages) return
   emit('pageChange', nextPage)
+}
+
+function openMatch(id: number) {
+  router.push({ name: 'match', params: { id: String(id) } })
 }
 </script>
 
@@ -96,6 +104,9 @@ function goToPage(nextPage: number) {
               <TableHead class="w-10" aria-hidden="true" />
               <TableHead>Joueur 2</TableHead>
               <TableHead>Contexte</TableHead>
+              <TableHead class="w-12 text-right">
+                <span class="sr-only">Actions</span>
+              </TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -109,14 +120,26 @@ function goToPage(nextPage: number) {
                   :display-name="match.player1_display_name"
                 />
               </TableCell>
-              <TableCell class="w-10 px-2">
-                <ArmyLogo :army-id="match.player1_army_id" />
+              <TableCell class="px-2">
+                <div class="flex items-center gap-1">
+                  <ArmyLogo :army-id="match.player1_army_id" />
+                  <ArmyListQuickActions
+                    :code="match.player1_army_list_code"
+                    icon-only
+                  />
+                </div>
               </TableCell>
               <TableCell>
                 <MatchResultBadges :match="match" />
               </TableCell>
-              <TableCell class="w-10 px-2">
-                <ArmyLogo :army-id="match.player2_army_id" />
+              <TableCell class="px-2">
+                <div class="flex items-center gap-1">
+                  <ArmyLogo :army-id="match.player2_army_id" />
+                  <ArmyListQuickActions
+                    :code="match.player2_army_list_code"
+                    icon-only
+                  />
+                </div>
               </TableCell>
               <TableCell>
                 <PlayerLink
@@ -126,6 +149,18 @@ function goToPage(nextPage: number) {
               </TableCell>
               <TableCell>
                 <MatchContextCell :match="match" />
+              </TableCell>
+              <TableCell class="text-right">
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon-sm"
+                  :title="`Voir le match #${match.id}`"
+                  :aria-label="`Voir le match #${match.id}`"
+                  @click="openMatch(match.id)"
+                >
+                  <Eye class="size-4" />
+                </Button>
               </TableCell>
             </TableRow>
           </TableBody>

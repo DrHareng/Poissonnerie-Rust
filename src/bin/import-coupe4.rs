@@ -303,11 +303,12 @@ fn rebuild_leaderboard_from_matches(db_path: &Path) -> Result<()> {
             id: row.get(0)?,
             player1: row.get(1)?,
             player2: row.get(2)?,
-            outcome: match row.get::<_, String>(3)?.as_str() {
+            status: poissonnerie_elo::MatchStatus::Completed,
+            outcome: Some(match row.get::<_, String>(3)?.as_str() {
                 "player1_win" => MatchOutcome::Player1Win,
                 "player2_win" => MatchOutcome::Player2Win,
                 _ => MatchOutcome::Draw,
-            },
+            }),
             player1_old: row.get(4)?,
             player1_new: row.get(5)?,
             player2_old: row.get(6)?,
@@ -324,12 +325,29 @@ fn rebuild_leaderboard_from_matches(db_path: &Path) -> Result<()> {
             tournament_id: row.get(16)?,
             tournament_phase: row.get(17)?,
             tournament_name: None,
+            player1_report: None,
+            player2_report: None,
+            player1_army_list_code: None,
+            player2_army_list_code: None,
+            player1_secondary_slugs: None,
+            player2_secondary_slugs: None,
+            secondary_pool_slugs: None,
+            player1_chosen_secondary: None,
+            player2_chosen_secondary: None,
+            lieutenant_winner: None,
+            lieutenant_winner_choice: None,
+            lieutenant_other_choice: None,
+            partie_step: None,
+            created_by: None,
             recorded_at: row.get(18)?,
         })
     })?;
 
     for row in rows {
         let record = row?;
+        let Some(outcome) = record.outcome else {
+            continue;
+        };
         let update = RatingUpdate {
             player1_old: record.player1_old,
             player1_new: record.player1_new,
@@ -345,7 +363,7 @@ fn rebuild_leaderboard_from_matches(db_path: &Path) -> Result<()> {
         board.apply_match_update(
             &record.player1,
             &record.player2,
-            record.outcome,
+            outcome,
             update,
             scores,
             record.player1_army_id,

@@ -26,12 +26,47 @@ impl MatchScores {
     }
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum MatchStatus {
+    InProgress,
+    #[default]
+    Completed,
+}
+
+impl MatchStatus {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            MatchStatus::InProgress => "in_progress",
+            MatchStatus::Completed => "completed",
+        }
+    }
+
+    pub fn parse(value: &str) -> Self {
+        match value {
+            "in_progress" => MatchStatus::InProgress,
+            _ => MatchStatus::Completed,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct MatchReport {
+    pub id: i64,
+    pub body_md: String,
+    pub created_at: u64,
+    pub updated_at: u64,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct MatchRecord {
     pub id: u64,
     pub player1: String,
     pub player2: String,
-    pub outcome: MatchOutcome,
+    #[serde(default)]
+    pub status: MatchStatus,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub outcome: Option<MatchOutcome>,
     pub player1_old: f64,
     pub player1_new: f64,
     pub player2_old: f64,
@@ -62,6 +97,38 @@ pub struct MatchRecord {
     pub tournament_phase: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tournament_name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub player1_report: Option<MatchReport>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub player2_report: Option<MatchReport>,
+    /// Code de liste Infinity Army (segment d'URL après `/army/list/`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub player1_army_list_code: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub player2_army_list_code: Option<String>,
+    /// Slugs des 3 secondaires tirés (JSON array).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub player1_secondary_slugs: Option<Vec<String>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub player2_secondary_slugs: Option<Vec<String>>,
+    /// Deck figé Combat de l'Esprit (8 emplacements, ordre stable).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub secondary_pool_slugs: Option<Vec<String>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub player1_chosen_secondary: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub player2_chosen_secondary: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub lieutenant_winner: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub lieutenant_winner_choice: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub lieutenant_other_choice: Option<String>,
+    /// Étape courante du wizard (`joueurs`, `scenario`, …).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub partie_step: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub created_by: Option<String>,
     pub recorded_at: u64,
 }
 
@@ -87,7 +154,8 @@ impl MatchRecord {
             id,
             player1,
             player2,
-            outcome,
+            status: MatchStatus::Completed,
+            outcome: Some(outcome),
             player1_old: update.player1_old,
             player1_new: update.player1_new,
             player2_old: update.player2_old,
@@ -104,6 +172,20 @@ impl MatchRecord {
             tournament_id,
             tournament_phase,
             tournament_name,
+            player1_report: None,
+            player2_report: None,
+            player1_army_list_code: None,
+            player2_army_list_code: None,
+            player1_secondary_slugs: None,
+            player2_secondary_slugs: None,
+            secondary_pool_slugs: None,
+            player1_chosen_secondary: None,
+            player2_chosen_secondary: None,
+            lieutenant_winner: None,
+            lieutenant_winner_choice: None,
+            lieutenant_other_choice: None,
+            partie_step: None,
+            created_by: None,
             recorded_at,
         }
     }
@@ -116,6 +198,17 @@ pub fn now_unix() -> u64 {
         .duration_since(UNIX_EPOCH)
         .map(|duration| duration.as_secs())
         .unwrap_or(0)
+}
+
+pub fn encode_slug_list(slugs: Option<&[String]>) -> Option<String> {
+    slugs.map(|items| serde_json::to_string(items).unwrap_or_else(|_| "[]".to_string()))
+}
+
+pub fn decode_slug_list(raw: Option<String>) -> Option<Vec<String>> {
+    let Some(raw) = raw.filter(|value| !value.trim().is_empty()) else {
+        return None;
+    };
+    serde_json::from_str(&raw).ok()
 }
 
 #[cfg(test)]

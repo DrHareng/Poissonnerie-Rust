@@ -189,6 +189,88 @@ pub fn migrate(conn: &Connection) -> Result<()> {
         conn.execute("ALTER TABLE matches ADD COLUMN tournament_phase TEXT", [])?;
     }
 
+    if !column_exists(conn, "matches", "player1_report_md")? {
+        conn.execute("ALTER TABLE matches ADD COLUMN player1_report_md TEXT", [])?;
+    }
+
+    if !column_exists(conn, "matches", "player2_report_md")? {
+        conn.execute("ALTER TABLE matches ADD COLUMN player2_report_md TEXT", [])?;
+    }
+
+    if !column_exists(conn, "matches", "player1_army_list_code")? {
+        conn.execute(
+            "ALTER TABLE matches ADD COLUMN player1_army_list_code TEXT",
+            [],
+        )?;
+    }
+    if !column_exists(conn, "matches", "player2_army_list_code")? {
+        conn.execute(
+            "ALTER TABLE matches ADD COLUMN player2_army_list_code TEXT",
+            [],
+        )?;
+    }
+
+    if !column_exists(conn, "matches", "status")? {
+        conn.execute(
+            "ALTER TABLE matches ADD COLUMN status TEXT NOT NULL DEFAULT 'completed'",
+            [],
+        )?;
+    }
+
+    if !column_exists(conn, "matches", "player1_secondary_slugs")? {
+        conn.execute(
+            "ALTER TABLE matches ADD COLUMN player1_secondary_slugs TEXT",
+            [],
+        )?;
+    }
+    if !column_exists(conn, "matches", "player2_secondary_slugs")? {
+        conn.execute(
+            "ALTER TABLE matches ADD COLUMN player2_secondary_slugs TEXT",
+            [],
+        )?;
+    }
+    if !column_exists(conn, "matches", "player1_chosen_secondary")? {
+        conn.execute(
+            "ALTER TABLE matches ADD COLUMN player1_chosen_secondary TEXT",
+            [],
+        )?;
+    }
+    if !column_exists(conn, "matches", "player2_chosen_secondary")? {
+        conn.execute(
+            "ALTER TABLE matches ADD COLUMN player2_chosen_secondary TEXT",
+            [],
+        )?;
+    }
+    if !column_exists(conn, "matches", "secondary_pool_slugs")? {
+        conn.execute(
+            "ALTER TABLE matches ADD COLUMN secondary_pool_slugs TEXT",
+            [],
+        )?;
+    }
+    if !column_exists(conn, "matches", "lieutenant_winner")? {
+        conn.execute("ALTER TABLE matches ADD COLUMN lieutenant_winner TEXT", [])?;
+    }
+    if !column_exists(conn, "matches", "lieutenant_winner_choice")? {
+        conn.execute(
+            "ALTER TABLE matches ADD COLUMN lieutenant_winner_choice TEXT",
+            [],
+        )?;
+    }
+    if !column_exists(conn, "matches", "lieutenant_other_choice")? {
+        conn.execute(
+            "ALTER TABLE matches ADD COLUMN lieutenant_other_choice TEXT",
+            [],
+        )?;
+    }
+    if !column_exists(conn, "matches", "partie_step")? {
+        conn.execute("ALTER TABLE matches ADD COLUMN partie_step TEXT", [])?;
+    }
+    if !column_exists(conn, "matches", "created_by")? {
+        conn.execute("ALTER TABLE matches ADD COLUMN created_by TEXT", [])?;
+    }
+
+    migrate_match_reports(conn)?;
+
     if column_exists(conn, "matches", "tournament_id")?
         && column_exists(conn, "matches", "tournament_phase")?
     {
@@ -543,6 +625,52 @@ fn migrate_scenario_pack_schema(conn: &Connection) -> Result<()> {
     crate::scenario_pack::seed_default_pack_if_needed(conn)?;
     crate::scenario_pack::sync_map_filenames(conn)?;
     crate::scenario_pack::sync_exclusion_rule_links(conn)?;
+
+    Ok(())
+}
+
+fn migrate_match_reports(conn: &Connection) -> Result<()> {
+    conn.execute_batch(
+        "
+        CREATE TABLE IF NOT EXISTS match_reports (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            match_id INTEGER NOT NULL,
+            player_name TEXT NOT NULL,
+            body_md TEXT NOT NULL,
+            created_at INTEGER NOT NULL,
+            updated_at INTEGER NOT NULL,
+            UNIQUE(match_id, player_name)
+        );
+        CREATE INDEX IF NOT EXISTS idx_match_reports_match_id
+            ON match_reports(match_id);
+        ",
+    )?;
+
+    // Migration one-shot depuis les anciennes colonnes matches.player*_report_md.
+    if column_exists(conn, "matches", "player1_report_md")? {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs() as i64)
+            .unwrap_or(0);
+        conn.execute(
+            "
+            INSERT OR IGNORE INTO match_reports (match_id, player_name, body_md, created_at, updated_at)
+            SELECT id, player1, player1_report_md, ?1, ?1
+            FROM matches
+            WHERE player1_report_md IS NOT NULL AND trim(player1_report_md) != ''
+            ",
+            rusqlite::params![now],
+        )?;
+        conn.execute(
+            "
+            INSERT OR IGNORE INTO match_reports (match_id, player_name, body_md, created_at, updated_at)
+            SELECT id, player2, player2_report_md, ?1, ?1
+            FROM matches
+            WHERE player2_report_md IS NOT NULL AND trim(player2_report_md) != ''
+            ",
+            rusqlite::params![now],
+        )?;
+    }
 
     Ok(())
 }

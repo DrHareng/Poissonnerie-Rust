@@ -1,18 +1,60 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, ref, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { toast } from 'vue-sonner'
-import { Plus } from '@lucide/vue'
-import { fetchRanking, fetchRecentMatches } from '@/lib/api'
+import { Eye, Play, Plus, Trash2 } from '@lucide/vue'
+import {
+  deleteMatch,
+  fetchRanking,
+  fetchRecentMatches,
+} from '@/lib/api'
 import type { MatchRecord, RankedPlayer } from '@/types/elo'
 import RecentMatchesList from '@/components/RecentMatchesList.vue'
 import RecordMatchCard from '@/components/RecordMatchCard.vue'
+import ArmyLogo from '@/components/ArmyLogo.vue'
+import PlayerLink from '@/components/PlayerLink.vue'
+import MatchContextCell from '@/components/MatchContextCell.vue'
 import { useAuth } from '@/composables/useAuth'
+import { useMyInProgressMatches, inProgressMenuLabel } from '@/composables/useMyInProgressMatches'
+import { PARTIE_STEP_LABELS, type PartieStep } from '@/composables/usePartieFlow'
+import { formatMatchRecordedDate } from '@/lib/tournamentMatchDisplay'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
+import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from '@/components/ui/card'
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/components/ui/table'
 
 const PAGE_SIZE = 5
 
-const { isAuthenticated, login } = useAuth()
+const router = useRouter()
+const route = useRoute()
+const { isAuthenticated, isAdmin, login } = useAuth()
+const {
+  allMatches,
+  myMatches,
+  loading: loadingInProgress,
+  refresh: refreshInProgress,
+} = useMyInProgressMatches()
+
+const inProgress = computed(() =>
+  isAdmin.value ? allMatches.value : myMatches.value,
+)
+const deletingId = ref<number | null>(null)
+const apiOnline = ref(true)
+const showForm = ref(false)
 
 const players = ref<RankedPlayer[]>([])
 const matches = ref<MatchRecord[]>([])
@@ -20,10 +62,27 @@ const totalMatches = ref(0)
 const page = ref(1)
 const loadingPlayers = ref(true)
 const loadingMatches = ref(true)
-const apiOnline = ref(true)
-const showForm = ref(false)
 
 const totalPages = computed(() => Math.max(1, Math.ceil(totalMatches.value / PAGE_SIZE)))
+
+const inProgressTitle = computed(() => {
+  const count = inProgress.value.length
+  if (isAdmin.value) {
+    return count <= 1 ? `${count} partie en cours` : `${count} parties en cours`
+  }
+  return inProgressMenuLabel(count)
+})
+
+const inProgressDescription = computed(() =>
+  isAdmin.value
+    ? 'Toutes les parties non terminées. Vous pouvez les supprimer en cas de bug.'
+    : 'Reprenez une partie commencée via l’assistant.',
+)
+
+function stepLabel(step: string | null | undefined): string {
+  if (!step) return 'En cours'
+  return PARTIE_STEP_LABELS[step as PartieStep] ?? step
+}
 
 async function refreshPlayers() {
   loadingPlayers.value = true
@@ -54,7 +113,7 @@ async function refreshMatches() {
 }
 
 async function refreshAll() {
-  await Promise.all([refreshPlayers(), refreshMatches()])
+  await Promise.all([refreshPlayers(), refreshMatches(), refreshInProgress()])
 }
 
 function onPageChange(nextPage: number) {
@@ -80,9 +139,49 @@ function openForm() {
   showForm.value = true
 }
 
-watch(page, refreshMatches)
+function resumePartie(id: number) {
+  router.push({ name: 'partie-resume', params: { id: String(id) } })
+}
 
-onMounted(refreshAll)
+function openMatch(id: number) {
+  router.push({ name: 'match', params: { id: String(id) } })
+}
+
+async function onDeleteInProgress(id: number) {
+  if (!isAdmin.value) return
+  if (!window.confirm('Supprimer cette partie en cours ?')) return
+
+  deletingId.value = id
+  try {
+    await deleteMatch(id)
+    toast.success('Partie supprimée')
+    await Promise.all([refreshInProgress(), refreshMatches()])
+  } catch (error) {
+    toast.error(error instanceof Error ? error.message : 'Suppression impossible')
+  } finally {
+    deletingId.value = null
+  }
+}
+
+async function scrollToHash() {
+  const hash = route.hash
+  if (!hash) return
+  await nextTick()
+  document.querySelector(hash)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+}
+
+watch(page, refreshMatches)
+watch(() => route.hash, scrollToHash)
+watch(loadingInProgress, (loading) => {
+  if (!loading && route.hash === '#parties-en-cours') {
+    void scrollToHash()
+  }
+})
+
+onMounted(async () => {
+  await refreshAll()
+  await scrollToHash()
+})
 </script>
 
 <template>
@@ -118,6 +217,108 @@ onMounted(refreshAll)
       @recorded="onRecorded"
       @cancel="onCancel"
     />
+
+    <Card
+      v-if="isAuthenticated"
+      id="parties-en-cours"
+      class="neon-panel scroll-mt-24"
+    >
+      <CardHeader>
+        <CardTitle class="flex items-center gap-2">
+          <Play class="size-5 text-primary" />
+          {{ inProgressTitle }}
+        </CardTitle>
+        <CardDescription>
+          {{ inProgressDescription }}
+        </CardDescription>
+      </CardHeader>
+      <CardContent>
+        <div v-if="loadingInProgress" class="text-sm text-muted-foreground">
+          Chargement…
+        </div>
+        <p v-else-if="inProgress.length === 0" class="text-sm text-muted-foreground">
+          Aucune partie en cours.
+        </p>
+        <Table v-else>
+          <TableHeader>
+            <TableRow>
+              <TableHead>Match</TableHead>
+              <TableHead>Adversaires</TableHead>
+              <TableHead class="hidden md:table-cell">Contexte</TableHead>
+              <TableHead class="hidden sm:table-cell">Étape</TableHead>
+              <TableHead class="w-36 text-right">Actions</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            <TableRow v-for="item in inProgress" :key="item.id">
+              <TableCell class="tabular-nums">
+                #{{ item.id }}
+                <div class="text-xs text-muted-foreground">
+                  {{ formatMatchRecordedDate(item.recorded_at) ?? '—' }}
+                </div>
+              </TableCell>
+              <TableCell>
+                <div class="flex flex-col gap-1">
+                  <div class="flex items-center gap-2">
+                    <ArmyLogo :army-id="item.player1_army_id" />
+                    <PlayerLink
+                      :name="item.player1"
+                      :display-name="item.player1_display_name"
+                    />
+                  </div>
+                  <div class="flex items-center gap-2">
+                    <ArmyLogo :army-id="item.player2_army_id" />
+                    <PlayerLink
+                      :name="item.player2"
+                      :display-name="item.player2_display_name"
+                    />
+                  </div>
+                </div>
+              </TableCell>
+              <TableCell class="hidden md:table-cell">
+                <MatchContextCell :match="item" />
+              </TableCell>
+              <TableCell class="hidden sm:table-cell">
+                <Badge variant="secondary">{{ stepLabel(item.partie_step) }}</Badge>
+              </TableCell>
+              <TableCell class="text-right">
+                <div class="inline-flex gap-1">
+                  <Button
+                    type="button"
+                    size="icon"
+                    variant="outline"
+                    title="Reprendre"
+                    @click="resumePartie(item.id)"
+                  >
+                    <Play class="size-4" />
+                  </Button>
+                  <Button
+                    type="button"
+                    size="icon"
+                    variant="ghost"
+                    title="Voir le match"
+                    @click="openMatch(item.id)"
+                  >
+                    <Eye class="size-4" />
+                  </Button>
+                  <Button
+                    v-if="isAdmin"
+                    type="button"
+                    size="icon"
+                    variant="destructive"
+                    title="Supprimer"
+                    :disabled="deletingId === item.id"
+                    @click="onDeleteInProgress(item.id)"
+                  >
+                    <Trash2 class="size-4" />
+                  </Button>
+                </div>
+              </TableCell>
+            </TableRow>
+          </TableBody>
+        </Table>
+      </CardContent>
+    </Card>
 
     <RecentMatchesList
       :matches="matches"

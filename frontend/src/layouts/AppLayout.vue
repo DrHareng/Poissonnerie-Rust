@@ -3,6 +3,7 @@ import { ref, watch } from 'vue'
 import { RouterView, useRoute } from 'vue-router'
 import TopBar from '@/components/TopBar.vue'
 import { Toaster } from '@/components/ui/sonner'
+import { useAppSidePanelHost } from '@/composables/useAppSidePanel'
 
 const SIDE_IMAGES = ['/brand/side_01.png', '/brand/side_02.png', '/brand/side_03.png'] as const
 
@@ -12,10 +13,14 @@ function pickSideImage() {
 
 const route = useRoute()
 const sideImage = ref(pickSideImage())
+const { customSideActive } = useAppSidePanelHost()
 
-watch(() => route.path, () => {
-  sideImage.value = pickSideImage()
-})
+watch(
+  () => route.path,
+  () => {
+    sideImage.value = pickSideImage()
+  },
+)
 </script>
 
 <template>
@@ -28,8 +33,18 @@ watch(() => route.path, () => {
       <TopBar />
 
       <div class="poissonnerie-body">
-        <aside class="poissonnerie-side-panel" aria-hidden="true">
+        <aside
+          class="poissonnerie-side-panel"
+          :class="{ 'poissonnerie-side-panel--custom': customSideActive }"
+          :aria-hidden="customSideActive ? undefined : true"
+        >
+          <div
+            id="app-side-panel"
+            class="poissonnerie-side-slot"
+            :class="{ hidden: !customSideActive }"
+          />
           <img
+            v-show="!customSideActive"
             :src="sideImage"
             alt=""
             class="poissonnerie-side-image"

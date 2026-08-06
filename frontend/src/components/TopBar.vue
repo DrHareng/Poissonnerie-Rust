@@ -2,7 +2,6 @@
 import { computed } from 'vue'
 import { useRoute } from 'vue-router'
 import {
-  BarChart3,
   ChevronDown,
   Eye,
   LogIn,
@@ -26,6 +25,7 @@ import {
 } from 'reka-ui'
 import { useAuth } from '@/composables/useAuth'
 import { useAdminEditMode } from '@/composables/useAdminEditMode'
+import { useMyInProgressMatches } from '@/composables/useMyInProgressMatches'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 
@@ -33,6 +33,8 @@ const route = useRoute()
 const { user, player, isAuthenticated, hasPlayer, loading, login, logout } =
   useAuth()
 const { isAdmin, isEditMode, setEditMode } = useAdminEditMode()
+const { menuLabel: inProgressMenuLabel, menuRoute: inProgressRoute } =
+  useMyInProgressMatches()
 
 const links = [
   { to: '/classement', label: 'Classement', icon: Trophy },
@@ -57,13 +59,7 @@ const playerPageRoute = computed(() =>
     : null,
 )
 
-const profileRoute = computed(() =>
-  playerPageRoute.value ? { ...playerPageRoute.value, hash: '#profil' } : null,
-)
-
-const statsRoute = computed(() =>
-  playerPageRoute.value ? { ...playerPageRoute.value, hash: '#stats' } : null,
-)
+const profileRoute = computed(() => playerPageRoute.value)
 
 const menuItemClass = cn(
   'relative flex w-full cursor-default select-none items-center gap-2 rounded-md px-2 py-1.5 text-sm outline-none',
@@ -181,14 +177,14 @@ async function handleLogout() {
                     Mon profil
                   </RouterLink>
                 </DropdownMenuItem>
-                <DropdownMenuItem v-if="statsRoute" as-child>
-                  <RouterLink :to="statsRoute" :class="menuItemClass">
-                    <BarChart3 class="size-4" />
-                    Mes stats
+                <DropdownMenuItem v-if="inProgressRoute" as-child>
+                  <RouterLink :to="inProgressRoute" :class="menuItemClass">
+                    <Play class="size-4" />
+                    {{ inProgressMenuLabel }}
                   </RouterLink>
                 </DropdownMenuItem>
                 <DropdownMenuSeparator
-                  v-if="hasPlayer"
+                  v-if="hasPlayer || inProgressRoute"
                   class="topbar-user-menu-separator"
                 />
                 <DropdownMenuItem :class="menuItemClass" @select="handleLogout">
