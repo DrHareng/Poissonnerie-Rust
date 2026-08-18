@@ -103,6 +103,7 @@ export interface MatchRecord extends RatingUpdate, MatchScores {
   player2_army_id?: number | null
   scenario_id?: number | null
   scenario_other?: string | null
+  scenario_url?: string | null
   scenario_name?: string | null
   tournament_id?: number | null
   tournament_phase?: string | null
@@ -121,6 +122,8 @@ export interface MatchRecord extends RatingUpdate, MatchScores {
   lieutenant_other_choice?: string | null
   partie_step?: string | null
   created_by?: string | null
+  /** false = match amical (pas d'impact ELO). Défaut true pour l'historique. */
+  counts_for_elo?: boolean
   recorded_at: number
 }
 
@@ -206,6 +209,7 @@ export type TournamentMatchStatus = 'scheduled' | 'submitted' | 'confirmed'
 export interface Tournament {
   id: number
   name: string
+  description: string
   status: TournamentStatus
   pool_count: number
   bracket_format: BracketFormat
@@ -227,6 +231,22 @@ export interface TournamentRegistration {
   reviewed_at?: number | null
   reviewed_by?: number | null
   army_id?: number | null
+  army_list_1?: string | null
+  army_list_2?: string | null
+  bracket_list_1?: string | null
+  bracket_list_2?: string | null
+  has_army_lists?: boolean
+  has_bracket_lists?: boolean
+  has_army_list_2?: boolean
+  has_bracket_list_2?: boolean
+}
+
+export interface TournamentScenarioSlot {
+  kind: string
+  slot: string
+  scenario_id: number
+  scenario_name: string
+  scenario_slug?: string
 }
 
 export interface PoolPlayer {
@@ -277,6 +297,8 @@ export interface TournamentMatch {
   scenario_name?: string | null
   player1_army_id?: number | null
   player2_army_id?: number | null
+  player1_army_list_code?: string | null
+  player2_army_list_code?: string | null
   played_at?: number | null
 }
 
@@ -285,10 +307,13 @@ export interface TournamentDetail extends Tournament {
   players: unknown[]
   pools: Pool[]
   matches: TournamentMatch[]
-  approved_count: number
+  registered_count: number
   waitlist_count: number
   display_status: string
   top_four?: TournamentTopFourEntry[]
+  pool_scenarios?: TournamentScenarioSlot[]
+  bracket_scenario_pool?: TournamentScenarioSlot[]
+  bracket_scenarios?: TournamentScenarioSlot[]
 }
 
 export interface TournamentTopFourEntry {
@@ -299,11 +324,12 @@ export interface TournamentTopFourEntry {
 }
 
 export interface TournamentListEntry extends Tournament {
-  approved_count: number
+  registered_count: number
   waitlist_count: number
   display_status: string
   top_four?: TournamentTopFourEntry[]
   bracket_matches?: TournamentMatch[]
+  pool_scenarios?: TournamentScenarioSlot[]
 }
 
 export interface PlayerTournamentResult {

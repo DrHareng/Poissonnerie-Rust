@@ -2,6 +2,7 @@ pub mod display_name;
 pub mod import_coupe;
 pub mod api;
 pub mod army;
+pub mod army_list;
 pub mod auth;
 pub mod elo;
 pub mod match_record;
@@ -30,7 +31,7 @@ pub use store::{
 };
 pub use tournament::{
     BracketFormat, PlayerTournamentResult, Pool, Tournament, TournamentDetail,
-    TournamentMatch, TournamentRegistration, TournamentStatus,
+    TournamentMatch, TournamentRegistration, TournamentScenarioSlot, TournamentStatus,
 };
 pub use tournament_store::TournamentStore;
 pub use user::User;

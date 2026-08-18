@@ -5,7 +5,9 @@ import { toast } from 'vue-sonner'
 import { fetchArmyRanking } from '@/lib/api'
 import type { RankedArmy } from '@/types/elo'
 import ArmyRankingTable from '@/components/ArmyRankingTable.vue'
+import PageTitleTabs from '@/components/PageTitleTabs.vue'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
+import { classementTabs } from '@/lib/pageTitleTabs'
 
 const router = useRouter()
 
@@ -39,8 +41,12 @@ onMounted(refreshRanking)
 
 <template>
   <div class="page-stack">
+    <PageTitleTabs
+      :tabs="classementTabs"
+      aria-label="Sections du classement"
+    />
+
     <section class="page-header">
-      <h1 class="page-title">Sectorielles</h1>
       <p class="page-description">
         Classement des factions jouées dans les parties enregistrées (win rate ou nombre de parties).
       </p>

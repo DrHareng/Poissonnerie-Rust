@@ -20,6 +20,7 @@ tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 tower-http = { version = "0.6", features = ["cors"] }
 tower-sessions = "0.14"
 urlencoding = "2"
+rand = { version = "0.9", features = ["std", "std_rng"] }
 
 [lib]
 name = "poissonnerie_elo"

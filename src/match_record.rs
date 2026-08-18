@@ -88,6 +88,9 @@ pub struct MatchRecord {
     /// Texte libre si le scénario n'est pas choisi dans le catalogue.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub scenario_other: Option<String>,
+    /// URL facultative pour un scénario saisi librement.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub scenario_url: Option<String>,
     /// Libellé d'affichage (nom catalogue ou texte libre).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub scenario_name: Option<String>,
@@ -129,7 +132,14 @@ pub struct MatchRecord {
     pub partie_step: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub created_by: Option<String>,
+    /// Si faux : match amical (pas d'impact ELO / W-D-L).
+    #[serde(default = "default_counts_for_elo")]
+    pub counts_for_elo: bool,
     pub recorded_at: u64,
+}
+
+fn default_counts_for_elo() -> bool {
+    true
 }
 
 impl MatchRecord {
@@ -168,6 +178,7 @@ impl MatchRecord {
             player2_army_id,
             scenario_id,
             scenario_other,
+            scenario_url: None,
             scenario_name,
             tournament_id,
             tournament_phase,
@@ -186,6 +197,7 @@ impl MatchRecord {
             lieutenant_other_choice: None,
             partie_step: None,
             created_by: None,
+            counts_for_elo: true,
             recorded_at,
         }
     }

@@ -7,6 +7,8 @@ import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import { Label } from '@/components/ui/label'
 
+export type MatchEloMode = 'friendly' | 'ranked'
+
 const props = defineProps<{
   players: RankedPlayer[]
   armies: Army[]
@@ -17,11 +19,20 @@ const props = defineProps<{
   initialPlayer2?: string
   initialArmy1?: number
   initialArmy2?: number
+  initialEloMode?: MatchEloMode
 }>()
 
 const emit = defineEmits<{
   back: []
-  next: [payload: { player1: string; army1: number; player2: string; army2: number }]
+  next: [
+    payload: {
+      player1: string
+      army1: number
+      player2: string
+      army2: number
+      counts_for_elo: boolean
+    },
+  ]
 }>()
 
 const player1 = ref<string | undefined>(props.lockedPlayer1Name ?? props.initialPlayer1)
@@ -32,16 +43,13 @@ const army1 = ref<string | undefined>(
 const army2 = ref<string | undefined>(
   props.initialArmy2 != null ? String(props.initialArmy2) : undefined,
 )
+const eloMode = ref<MatchEloMode>(props.initialEloMode ?? 'friendly')
 
 const playerOptions = computed(() =>
   props.players.map((player) => ({
     label: `${player.display_name} (${Math.round(player.rating)})`,
     value: player.name,
   })),
-)
-
-const player1Options = computed(() =>
-  playerOptions.value.filter((option) => option.value !== player2.value),
 )
 
 const player2Options = computed(() =>
@@ -57,6 +65,18 @@ const canContinue = computed(
 const lockedPlayer1 = computed(() =>
   props.players.find((player) => player.name === props.lockedPlayer1Name) ?? null,
 )
+
+const eloModeHint = computed(() =>
+  eloMode.value === 'ranked'
+    ? 'Le score ELO des joueurs sera impacté par le résultat de cette partie.'
+    : 'Le score ELO des joueurs ne sera pas impacté.',
+)
+
+function eloModeButtonClass(mode: MatchEloMode) {
+  return eloMode.value === mode
+    ? 'border-primary bg-primary! text-primary-foreground hover:bg-primary/90'
+    : 'border-border bg-black text-white hover:text-primary'
+}
 
 watch(
   () => props.lockedPlayer1Name,
@@ -83,6 +103,7 @@ function submit() {
     army1: Number(army1.value),
     player2: player2.value,
     army2: Number(army2.value),
+    counts_for_elo: eloMode.value === 'ranked',
   })
 }
 </script>
@@ -99,6 +120,41 @@ function submit() {
         Démarrer une partie exige un compte Discord lié à un joueur Poissonnerie.
       </AlertDescription>
     </Alert>
+
+    <div class="grid gap-2">
+      <Label>Type de partie</Label>
+      <div class="flex flex-wrap items-center gap-3">
+        <div
+          class="flex items-center gap-0"
+          role="group"
+          aria-label="Type de partie"
+        >
+          <Button
+            type="button"
+            size="xs"
+            variant="outline"
+            :class="['rounded-r-none', eloModeButtonClass('friendly')]"
+            :aria-pressed="eloMode === 'friendly'"
+            @click="eloMode = 'friendly'"
+          >
+            Match amical
+          </Button>
+          <Button
+            type="button"
+            size="xs"
+            variant="outline"
+            :class="['rounded-l-none border-l-0', eloModeButtonClass('ranked')]"
+            :aria-pressed="eloMode === 'ranked'"
+            @click="eloMode = 'ranked'"
+          >
+            Match classé
+          </Button>
+        </div>
+        <p class="text-sm text-muted-foreground">
+          {{ eloModeHint }}
+        </p>
+      </div>
+    </div>
 
     <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
       <section class="player-match-panel">

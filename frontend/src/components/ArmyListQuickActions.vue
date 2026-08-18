@@ -13,13 +13,14 @@ const props = withDefaults(
   { iconOnly: false },
 )
 
+const normalized = computed(() => normalizeArmyListCode(props.code ?? ''))
+
 const buttonSize = computed(() => (props.iconOnly ? 'icon-sm' : 'sm'))
 
 async function copyCode() {
-  const code = normalizeArmyListCode(props.code ?? '')
-  if (!code) return
+  if (!normalized.value) return
   try {
-    await navigator.clipboard.writeText(code)
+    await navigator.clipboard.writeText(normalized.value)
     toast.success('Code copié')
   } catch {
     toast.error('Impossible de copier le code')
@@ -27,14 +28,16 @@ async function copyCode() {
 }
 
 function openArmy() {
-  const code = normalizeArmyListCode(props.code ?? '')
-  if (!code) return
-  window.open(armyListUrl(code), '_blank', 'noopener,noreferrer')
+  if (!normalized.value) return
+  window.open(armyListUrl(normalized.value), '_blank', 'noopener,noreferrer')
 }
 </script>
 
 <template>
-  <div v-if="code?.trim()" class="inline-flex items-center gap-0.5">
+  <div
+    v-if="normalized"
+    class="inline-flex shrink-0 items-center gap-0.5"
+  >
     <Button
       type="button"
       :size="buttonSize"

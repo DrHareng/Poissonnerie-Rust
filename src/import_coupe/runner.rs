@@ -99,7 +99,14 @@ pub fn run_import(args: &ImportCoupeArgs, config: &CoupeConfig) -> Result<()> {
     store.open_registration(tid)?;
     for name in &data.inscriptions {
         let army_id = resolve_army_id(name, &data, &army_by_name);
-        store.admin_register(tid, name, ADMIN_ID, army_id)?;
+        store.admin_register(
+            tid,
+            name,
+            ADMIN_ID,
+            army_id,
+            &format!("import-list1-{name}"),
+            &format!("import-list2-{name}"),
+        )?;
     }
     store.close_registration(tid)?;
 
@@ -540,6 +547,8 @@ fn submit_pool_score(
             player2_survivors: p2_surv,
             player1_army_id: None,
             player2_army_id: None,
+            player1_list_slot: None,
+            player2_list_slot: None,
             scenario_id: None,
             scenario_other: line.scenario.clone(),
         },
@@ -618,6 +627,8 @@ fn submit_bracket_line(
             player2_survivors: p2_surv,
             player1_army_id: None,
             player2_army_id: None,
+            player1_list_slot: None,
+            player2_list_slot: None,
             scenario_id: None,
             scenario_other: line.scenario.clone(),
         },
@@ -682,6 +693,8 @@ fn apply_to_board(board: &mut Leaderboard, tm: &TournamentMatch) -> Result<()> {
         Some(tm.tournament_id),
         Some(tm.phase.as_str().to_string()),
         None,
+        tm.player1_army_list_code.clone(),
+        tm.player2_army_list_code.clone(),
     )?;
     Ok(())
 }
@@ -758,6 +771,7 @@ fn rebuild_leaderboard_from_matches(db_path: &Path) -> Result<()> {
             scenario_id: row.get(14)?,
             scenario_other: scenario_other.clone(),
             scenario_name: scenario_other,
+            scenario_url: None,
             tournament_id: row.get(16)?,
             tournament_phase: row.get(17)?,
             tournament_name: None,
@@ -775,6 +789,7 @@ fn rebuild_leaderboard_from_matches(db_path: &Path) -> Result<()> {
             lieutenant_other_choice: None,
             partie_step: None,
             created_by: None,
+            counts_for_elo: true,
             recorded_at: row.get(18)?,
         })
     })?;
@@ -810,6 +825,8 @@ fn rebuild_leaderboard_from_matches(db_path: &Path) -> Result<()> {
             record.tournament_id,
             record.tournament_phase,
             record.tournament_name,
+            record.player1_army_list_code,
+            record.player2_army_list_code,
         )?;
     }
 

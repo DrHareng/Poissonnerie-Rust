@@ -1,11 +1,19 @@
 import type { TournamentTopFourEntry } from '@/types/elo'
 
-export function formatRegistrationSummary(approved: number, waitlist: number) {
-  const base = `${approved} inscrit${approved > 1 ? 's' : ''}`
+export function formatRegistrationSummary(
+  registered: number,
+  waitlist: number,
+  capacity = 24,
+) {
+  const base = `${registered}/${capacity} inscrit${registered > 1 ? 's' : ''}`
   if (waitlist > 0) {
     return `${base} (+${waitlist} en liste d'attente)`
   }
   return base
+}
+
+export function tournamentRegistrationCapacity(poolCount: number) {
+  return poolCount >= 8 ? 48 : 24
 }
 
 export interface TopFourDisplayRow {

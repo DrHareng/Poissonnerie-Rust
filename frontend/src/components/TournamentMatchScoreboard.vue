@@ -13,11 +13,15 @@ defineProps<{
   form?: TournamentMatchForm
   player1ArmyId?: number
   player2ArmyId?: number
+  compact?: boolean
 }>()
 </script>
 
 <template>
-  <div class="tournament-match-scoreboard">
+  <div
+    class="tournament-match-scoreboard"
+    :class="{ 'tournament-match-scoreboard--compact': compact }"
+  >
     <section
       class="player-match-panel"
       :class="{ 'player-match-panel--inline': mode === 'scores' || mode === 'players' }"

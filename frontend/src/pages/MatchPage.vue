@@ -30,8 +30,12 @@ import { useAuth } from '@/composables/useAuth'
 import { COMBAT_ESPRIT_SLUG, draftStepBadges } from '@/lib/combatEspritDraft'
 import { secondaryImageSrc } from '@/lib/secondaryImages'
 import { choiceLabel } from '@/lib/lieutenantRoll'
+import { casualMatchContextLabel, matchCountsForElo } from '@/lib/matchElo'
 import { formatMatchRecordedDate } from '@/lib/tournamentMatchDisplay'
 import { phaseLabel } from '@/lib/tournamentPhase'
+import { matchsTabs } from '@/lib/pageTitleTabs'
+import { externalHref } from '@/lib/utils'
+import PageTitleTabs from '@/components/PageTitleTabs.vue'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import {
@@ -105,6 +109,12 @@ const matchDateLabel = computed(
 
 const tournamentPhaseText = computed(() => phaseLabel(match.value?.tournament_phase))
 
+const showsElo = computed(() => matchCountsForElo(match.value?.counts_for_elo))
+
+const casualContextLabel = computed(() =>
+  casualMatchContextLabel(match.value?.counts_for_elo),
+)
+
 const lieutenantLines = computed(() => {
   const record = match.value
   if (
@@ -177,6 +187,17 @@ function canEditReport(playerName: string): boolean {
         sensitivity: 'accent',
       }) === 0,
   )
+}
+
+function canEditArmyList(playerName: string): boolean {
+  if (match.value?.tournament_id != null) return false
+  return canEditReport(playerName)
+}
+
+const isTournamentMatch = computed(() => match.value?.tournament_id != null)
+
+function armyListHidden(code: string | null | undefined) {
+  return isTournamentMatch.value && !code?.trim()
 }
 
 function eloDelta(oldRating: number, newRating: number): string {
@@ -277,13 +298,12 @@ async function persistPlayer2ArmyList(code: string, armyId?: number | null) {
 async function onDelete() {
   if (!match.value || !isAdmin.value) return
   const inProgress = match.value.status === 'in_progress'
-  if (
-    !window.confirm(
-      inProgress
-        ? 'Supprimer cette partie en cours ?'
-        : 'Supprimer ce match ? Les classements ELO et victoires/défaites seront annulés.',
-    )
-  ) {
+  const deleteMessage = inProgress
+    ? 'Supprimer cette partie en cours ?'
+    : showsElo.value
+      ? 'Supprimer ce match ? Les classements ELO et victoires/défaites seront annulés.'
+      : 'Supprimer ce match amical ?'
+  if (!window.confirm(deleteMessage)) {
     return
   }
 
@@ -304,13 +324,16 @@ onMounted(loadMatch)
 
 <template>
   <div class="page-stack">
+    <PageTitleTabs
+      :tabs="matchsTabs"
+      aria-label="Sections des matchs"
+      :current="{ label: `Match #${matchId}` }"
+    />
+
     <section class="page-header">
       <div class="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
-        <div class="space-y-2">
-          <h1 class="page-title">Match #{{ matchId }}</h1>
-          <p v-if="match" class="page-description">{{ matchupLabel }}</p>
-        </div>
-        <div class="flex flex-wrap items-center gap-2">
+        <p v-if="match" class="page-description">{{ matchupLabel }}</p>
+        <div class="flex flex-wrap items-center gap-2 sm:ml-auto">
           <Button
             v-if="canResume"
             type="button"
@@ -376,7 +399,7 @@ onMounted(loadMatch)
             </template>
             <template v-else>
               <span aria-hidden="true">·</span>
-              <span>Match libre</span>
+              <span>{{ casualContextLabel }}</span>
             </template>
           </CardDescription>
         </CardHeader>
@@ -397,10 +420,17 @@ onMounted(loadMatch)
                   class="text-lg font-semibold"
                 />
               </div>
+              <p
+                v-if="armyListHidden(match.player1_army_list_code)"
+                class="text-sm text-muted-foreground italic"
+              >
+                Liste secrète jusqu’à la fin du tournoi
+              </p>
               <MatchArmyListCard
+                v-else
                 :code="match.player1_army_list_code"
                 :current-army-id="match.player1_army_id"
-                :can-edit="canEditReport(match.player1)"
+                :can-edit="canEditArmyList(match.player1)"
                 :persist="persistPlayer1ArmyList"
               />
               <CombatEspritPlayerHand
@@ -444,7 +474,7 @@ onMounted(loadMatch)
                 </p>
               </div>
               <p
-                v-if="match.status !== 'in_progress'"
+                v-if="match.status !== 'in_progress' && showsElo"
                 class="text-xs text-muted-foreground"
               >
                 ELO {{ Math.round(match.player1_old) }}
@@ -466,6 +496,15 @@ onMounted(loadMatch)
                 >
                   {{ scenarioLabel }}
                 </RouterLink>
+                <a
+                  v-else-if="scenarioLabel && match.scenario_url"
+                  :href="externalHref(match.scenario_url)"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  class="ml-1 font-medium text-primary hover:underline"
+                >
+                  {{ scenarioLabel }}
+                </a>
                 <span v-else-if="scenarioLabel" class="ml-1 font-medium">
                   {{ scenarioLabel }}
                 </span>
@@ -499,10 +538,17 @@ onMounted(loadMatch)
                   class="text-lg font-semibold"
                 />
               </div>
+              <p
+                v-if="armyListHidden(match.player2_army_list_code)"
+                class="text-sm text-muted-foreground italic"
+              >
+                Liste secrète jusqu’à la fin du tournoi
+              </p>
               <MatchArmyListCard
+                v-else
                 :code="match.player2_army_list_code"
                 :current-army-id="match.player2_army_id"
-                :can-edit="canEditReport(match.player2)"
+                :can-edit="canEditArmyList(match.player2)"
                 :persist="persistPlayer2ArmyList"
               />
               <CombatEspritPlayerHand
@@ -546,7 +592,7 @@ onMounted(loadMatch)
                 </p>
               </div>
               <p
-                v-if="match.status !== 'in_progress'"
+                v-if="match.status !== 'in_progress' && showsElo"
                 class="text-xs text-muted-foreground"
               >
                 ELO {{ Math.round(match.player2_old) }}

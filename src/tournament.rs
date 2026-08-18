@@ -6,7 +6,10 @@ use crate::player::MatchOutcome;
 pub const MAX_POOL_SIZE: usize = 6;
 pub const POOLS_FOUR_CAPACITY: usize = 24;
 pub const POOLS_EIGHT_CAPACITY: usize = 48;
+/// Historique : seuil avant bascule 8 poules (désactivée — on reste à 24 + waitlist).
 pub const WAITLIST_THRESHOLD: usize = 32;
+pub const POOL_SCENARIO_LETTERS: &[char] = &['A', 'B', 'C', 'D', 'E'];
+pub const BRACKET_SCENARIO_COUNT: usize = 4;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -181,6 +184,8 @@ impl TournamentMatchStatus {
 pub struct Tournament {
     pub id: i64,
     pub name: String,
+    #[serde(default)]
+    pub description: String,
     pub status: TournamentStatus,
     pub pool_count: u8,
     pub bracket_format: BracketFormat,
@@ -205,6 +210,36 @@ pub struct TournamentRegistration {
     pub reviewed_by: Option<i64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub army_id: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub army_list_1: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub army_list_2: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bracket_list_1: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bracket_list_2: Option<String>,
+    /// Liste 1 d'inscription renseignée (sans révéler le code).
+    #[serde(default)]
+    pub has_army_lists: bool,
+    /// Liste 1 d'arbre renseignée (sans révéler le code).
+    #[serde(default)]
+    pub has_bracket_lists: bool,
+    #[serde(default)]
+    pub has_army_list_2: bool,
+    #[serde(default)]
+    pub has_bracket_list_2: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct TournamentScenarioSlot {
+    /// `pool`, `bracket_pool` (4 scénarios choisis) ou `bracket` (assignés aux tours).
+    pub kind: String,
+    /// Lettre A–E (poules), index 0–3 (bracket_pool), ou phase (`round_of_16`, …).
+    pub slot: String,
+    pub scenario_id: i64,
+    pub scenario_name: String,
+    #[serde(default)]
+    pub scenario_slug: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -339,6 +374,10 @@ pub struct TournamentMatch {
     pub scenario_name: Option<String>,
     pub player1_army_id: Option<u32>,
     pub player2_army_id: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub player1_army_list_code: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub player2_army_list_code: Option<String>,
     pub played_at: Option<u64>,
 }
 
@@ -367,7 +406,8 @@ pub struct TournamentTopFourEntry {
 pub struct TournamentListEntry {
     #[serde(flatten)]
     pub tournament: Tournament,
-    pub approved_count: u32,
+    /// Inscrits comptant pour la capacité (pending + approved).
+    pub registered_count: u32,
     pub waitlist_count: u32,
     pub display_status: String,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -375,6 +415,9 @@ pub struct TournamentListEntry {
     /// Matchs d'arbre (hors poules), pour le mini-rendu dans la liste.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub bracket_matches: Vec<TournamentMatch>,
+    /// Scénarios de poules (pour affichage sous la description).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub pool_scenarios: Vec<TournamentScenarioSlot>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -385,11 +428,18 @@ pub struct TournamentDetail {
     pub players: Vec<TournamentPlayerSnapshot>,
     pub pools: Vec<Pool>,
     pub matches: Vec<TournamentMatch>,
-    pub approved_count: u32,
+    /// Inscrits comptant pour la capacité (pending + approved).
+    pub registered_count: u32,
     pub waitlist_count: u32,
     pub display_status: String,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub top_four: Vec<TournamentTopFourEntry>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub pool_scenarios: Vec<TournamentScenarioSlot>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub bracket_scenario_pool: Vec<TournamentScenarioSlot>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub bracket_scenarios: Vec<TournamentScenarioSlot>,
 }
 
 pub fn tournament_points(
@@ -573,6 +623,124 @@ pub fn pool_round_robin_pairs(player_count: usize) -> Vec<(usize, usize)> {
     pairs
 }
 
+/// Lettre de mission pour un match entre deux slots (0-based) d'une poule.
+/// Matrice Excel Coupe : 4 joueurs = A/B/C ; 5–6 joueurs = A–E.
+pub fn pool_scenario_letter(player_count: usize, slot_a: usize, slot_b: usize) -> Option<char> {
+    if slot_a == slot_b || slot_a >= player_count || slot_b >= player_count {
+        return None;
+    }
+    let (lo, hi) = if slot_a < slot_b {
+        (slot_a, slot_b)
+    } else {
+        (slot_b, slot_a)
+    };
+
+    match player_count {
+        4 => match (lo, hi) {
+            (0, 1) => Some('A'),
+            (0, 2) => Some('B'),
+            (0, 3) => Some('C'),
+            (1, 2) => Some('C'),
+            (1, 3) => Some('B'),
+            (2, 3) => Some('A'),
+            _ => None,
+        },
+        5 | 6 => match (lo, hi) {
+            (0, 1) => Some('A'),
+            (0, 2) => Some('B'),
+            (0, 3) => Some('C'),
+            (0, 4) => Some('D'),
+            (0, 5) => Some('E'),
+            (1, 2) => Some('E'),
+            (1, 3) => Some('D'),
+            (1, 4) => Some('B'),
+            (1, 5) => Some('C'),
+            (2, 3) => Some('A'),
+            (2, 4) => Some('C'),
+            (2, 5) => Some('D'),
+            (3, 4) => Some('E'),
+            (3, 5) => Some('B'),
+            (4, 5) => Some('A'),
+            _ => None,
+        },
+        n if n >= 2 && n <= 3 => {
+            // Petites poules : cycle A/B/C.
+            let letters = ['A', 'B', 'C'];
+            let idx = lo * n + hi;
+            Some(letters[idx % letters.len()])
+        }
+        _ => None,
+    }
+}
+
+/// Répartit les joueurs en poules : top 1–4 séparés, top 5–8 séparés, reste au sort.
+/// L'ordre dans chaque poule = slot scénario (mélangé).
+pub fn draw_seeded_pools(players: &[(String, f64)], pool_count: usize) -> Vec<Vec<String>> {
+    use rand::seq::SliceRandom;
+
+    let mut ranked = players.to_vec();
+    ranked.sort_by(|left, right| {
+        right
+            .1
+            .partial_cmp(&left.1)
+            .unwrap_or(std::cmp::Ordering::Equal)
+            .then_with(|| left.0.cmp(&right.0))
+    });
+
+    let mut pools: Vec<Vec<String>> = (0..pool_count).map(|_| Vec::new()).collect();
+    let mut rng = rand::rng();
+
+    let take_named = |ranked: &mut Vec<(String, f64)>, n: usize| -> Vec<String> {
+        let count = n.min(ranked.len());
+        ranked.drain(..count).map(|(name, _)| name).collect()
+    };
+
+    let mut top = take_named(&mut ranked, pool_count.min(4));
+    top.shuffle(&mut rng);
+    for (index, name) in top.into_iter().enumerate() {
+        pools[index % pool_count].push(name);
+    }
+
+    let mut mid = take_named(&mut ranked, pool_count.min(4));
+    mid.shuffle(&mut rng);
+    for (index, name) in mid.into_iter().enumerate() {
+        pools[index % pool_count].push(name);
+    }
+
+    let mut rest: Vec<String> = ranked.into_iter().map(|(name, _)| name).collect();
+    rest.shuffle(&mut rng);
+    for name in rest {
+        let target = pools
+            .iter()
+            .enumerate()
+            .min_by_key(|(_, pool)| pool.len())
+            .map(|(index, _)| index)
+            .unwrap_or(0);
+        pools[target].push(name);
+    }
+
+    for pool in &mut pools {
+        pool.shuffle(&mut rng);
+    }
+
+    pools
+}
+
+/// Phases d'arbre qui reçoivent chacune un scénario (format Coupe 10).
+pub fn bracket_scenario_phases(format: BracketFormat) -> Vec<TournamentPhase> {
+    match format {
+        BracketFormat::QuartersDirect => {
+            vec![TournamentPhase::Quarter, TournamentPhase::Semi, TournamentPhase::Final]
+        }
+        BracketFormat::RoundOf16 | BracketFormat::RoundOf16Full => vec![
+            TournamentPhase::RoundOf16,
+            TournamentPhase::Quarter,
+            TournamentPhase::Semi,
+            TournamentPhase::Final,
+        ],
+    }
+}
+
 pub fn compute_display_status(
     tournament: &Tournament,
     matches: &[TournamentMatch],
@@ -740,15 +908,21 @@ pub fn enrich_top_four_armies(
 }
 
 pub fn registration_counts(registrations: &[TournamentRegistration]) -> (u32, u32) {
-    let approved = registrations
+    // Compte les places « prises » : inscrits en cours (pending) + validés.
+    let registered = registrations
         .iter()
-        .filter(|r| r.status == RegistrationStatus::Approved)
+        .filter(|r| {
+            matches!(
+                r.status,
+                RegistrationStatus::Pending | RegistrationStatus::Approved
+            )
+        })
         .count() as u32;
     let waitlist = registrations
         .iter()
         .filter(|r| r.status == RegistrationStatus::Waitlisted)
         .count() as u32;
-    (approved, waitlist)
+    (registered, waitlist)
 }
 
 #[cfg(test)]
@@ -847,6 +1021,8 @@ mod tests {
             scenario_name: None,
             player1_army_id: None,
             player2_army_id: None,
+            player1_army_list_code: None,
+            player2_army_list_code: None,
             played_at: None,
         };
 
@@ -889,6 +1065,58 @@ mod tests {
         assert_eq!(slots[3].player1, "2B");
         assert_eq!(slots[3].player2, "3C");
         assert_eq!(slots[3].quarter_player1, "1D");
+    }
+
+    #[test]
+    fn pool_scenario_letter_four_players_matrix() {
+        assert_eq!(pool_scenario_letter(4, 0, 1), Some('A'));
+        assert_eq!(pool_scenario_letter(4, 0, 2), Some('B'));
+        assert_eq!(pool_scenario_letter(4, 0, 3), Some('C'));
+        assert_eq!(pool_scenario_letter(4, 1, 2), Some('C'));
+        assert_eq!(pool_scenario_letter(4, 1, 3), Some('B'));
+        assert_eq!(pool_scenario_letter(4, 2, 3), Some('A'));
+        // Distinct from the 6-player top-left corner (which would be E for 1vs2→ wait 2vs3).
+        assert_ne!(pool_scenario_letter(4, 1, 2), pool_scenario_letter(6, 1, 2));
+    }
+
+    #[test]
+    fn pool_scenario_letter_six_extends_five() {
+        assert_eq!(pool_scenario_letter(5, 0, 1), Some('A'));
+        assert_eq!(pool_scenario_letter(5, 1, 2), Some('E'));
+        assert_eq!(pool_scenario_letter(5, 3, 4), Some('E'));
+        assert_eq!(pool_scenario_letter(6, 0, 5), Some('E'));
+        assert_eq!(pool_scenario_letter(6, 4, 5), Some('A'));
+        assert_eq!(pool_scenario_letter(6, 1, 2), pool_scenario_letter(5, 1, 2));
+    }
+
+    #[test]
+    fn draw_seeded_pools_separates_top_eight() {
+        let players: Vec<(String, f64)> = (1..=24)
+            .map(|n| (format!("P{n}"), 2000.0 - n as f64))
+            .collect();
+        let pools = draw_seeded_pools(&players, 4);
+        assert_eq!(pools.len(), 4);
+        assert_eq!(pools.iter().map(|p| p.len()).sum::<usize>(), 24);
+
+        let top4: Vec<String> = (1..=4).map(|n| format!("P{n}")).collect();
+        let top8: Vec<String> = (5..=8).map(|n| format!("P{n}")).collect();
+        for name in &top4 {
+            let count = pools.iter().filter(|p| p.contains(name)).count();
+            assert_eq!(count, 1, "{name} should appear once");
+        }
+        // One top-4 per pool
+        for pool in &pools {
+            assert_eq!(
+                pool.iter().filter(|n| top4.contains(n)).count(),
+                1,
+                "exactly one top-4 in {pool:?}"
+            );
+            assert_eq!(
+                pool.iter().filter(|n| top8.contains(n)).count(),
+                1,
+                "exactly one top 5-8 in {pool:?}"
+            );
+        }
     }
 
     #[test]
@@ -937,6 +1165,8 @@ mod tests {
                 scenario_name: None,
                 player1_army_id: None,
                 player2_army_id: None,
+                player1_army_list_code: None,
+                player2_army_list_code: None,
                 played_at: None,
             },
         ];
@@ -984,6 +1214,8 @@ mod tests {
                 scenario_name: None,
                 player1_army_id: None,
                 player2_army_id: None,
+                player1_army_list_code: None,
+                player2_army_list_code: None,
                 played_at: None,
             },
             TournamentMatch {
@@ -1022,6 +1254,8 @@ mod tests {
                 scenario_name: None,
                 player1_army_id: None,
                 player2_army_id: None,
+                player1_army_list_code: None,
+                player2_army_list_code: None,
                 played_at: None,
             },
         ];

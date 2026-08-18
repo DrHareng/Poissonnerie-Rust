@@ -388,36 +388,33 @@ watch(activeTab, (tab) => {
     <template v-else-if="page">
       <div class="tournament-tab-panels page-panel-scroll">
         <template v-if="activeTab === 'liste'">
-          <div class="flex flex-wrap items-center justify-between gap-3">
-            <nav
-              class="tournament-tabs scenario-subtabs"
-              aria-label="Scénarios du pack"
+          <nav
+            class="tournament-tabs scenario-subtabs"
+            aria-label="Scénarios du pack"
+          >
+            <button
+              v-for="scenario in page.scenarios"
+              :key="scenario.id"
+              type="button"
+              class="tournament-tab"
+              :class="{
+                'tournament-tab--active':
+                  selectedScenarioSlug === scenario.slug,
+              }"
+              @click="setSelectedScenario(scenario.slug)"
             >
-              <button
-                v-for="scenario in page.scenarios"
-                :key="scenario.id"
-                type="button"
-                class="tournament-tab"
-                :class="{
-                  'tournament-tab--active':
-                    selectedScenarioSlug === scenario.slug,
-                }"
-                @click="setSelectedScenario(scenario.slug)"
-              >
-                {{ scenario.name }}
-              </button>
-            </nav>
-            <Button
-              variant="outline"
-              size="sm"
-              class="shrink-0"
+              {{ scenario.name }}
+            </button>
+            <button
+              type="button"
+              class="tournament-tab scenario-draw-tab"
               :disabled="page.scenarios.length === 0"
               @click="drawScenario"
             >
               <Dices class="size-4" />
               Tirer au sort
-            </Button>
-          </div>
+            </button>
+          </nav>
 
           <ScenarioDetailView
             v-if="selectedScenarioSlug"

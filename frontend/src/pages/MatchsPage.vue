@@ -2,21 +2,18 @@
 import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { toast } from 'vue-sonner'
-import { Eye, Play, Plus, Trash2 } from '@lucide/vue'
-import {
-  deleteMatch,
-  fetchRanking,
-  fetchRecentMatches,
-} from '@/lib/api'
-import type { MatchRecord, RankedPlayer } from '@/types/elo'
+import { Eye, Play, Trash2 } from '@lucide/vue'
+import { deleteMatch, fetchRecentMatches } from '@/lib/api'
+import type { MatchRecord } from '@/types/elo'
 import RecentMatchesList from '@/components/RecentMatchesList.vue'
-import RecordMatchCard from '@/components/RecordMatchCard.vue'
 import ArmyLogo from '@/components/ArmyLogo.vue'
 import PlayerLink from '@/components/PlayerLink.vue'
 import MatchContextCell from '@/components/MatchContextCell.vue'
+import PageTitleTabs from '@/components/PageTitleTabs.vue'
 import { useAuth } from '@/composables/useAuth'
 import { useMyInProgressMatches, inProgressMenuLabel } from '@/composables/useMyInProgressMatches'
 import { PARTIE_STEP_LABELS, type PartieStep } from '@/composables/usePartieFlow'
+import { matchsTabs } from '@/lib/pageTitleTabs'
 import { formatMatchRecordedDate } from '@/lib/tournamentMatchDisplay'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
@@ -41,7 +38,7 @@ const PAGE_SIZE = 5
 
 const router = useRouter()
 const route = useRoute()
-const { isAuthenticated, isAdmin, login } = useAuth()
+const { isAuthenticated, isAdmin } = useAuth()
 const {
   allMatches,
   myMatches,
@@ -54,13 +51,10 @@ const inProgress = computed(() =>
 )
 const deletingId = ref<number | null>(null)
 const apiOnline = ref(true)
-const showForm = ref(false)
 
-const players = ref<RankedPlayer[]>([])
 const matches = ref<MatchRecord[]>([])
 const totalMatches = ref(0)
 const page = ref(1)
-const loadingPlayers = ref(true)
 const loadingMatches = ref(true)
 
 const totalPages = computed(() => Math.max(1, Math.ceil(totalMatches.value / PAGE_SIZE)))
@@ -84,19 +78,6 @@ function stepLabel(step: string | null | undefined): string {
   return PARTIE_STEP_LABELS[step as PartieStep] ?? step
 }
 
-async function refreshPlayers() {
-  loadingPlayers.value = true
-  try {
-    players.value = await fetchRanking()
-    apiOnline.value = true
-  } catch (error) {
-    apiOnline.value = false
-    toast.error(error instanceof Error ? error.message : 'Impossible de charger les joueurs')
-  } finally {
-    loadingPlayers.value = false
-  }
-}
-
 async function refreshMatches() {
   loadingMatches.value = true
   try {
@@ -113,30 +94,11 @@ async function refreshMatches() {
 }
 
 async function refreshAll() {
-  await Promise.all([refreshPlayers(), refreshMatches(), refreshInProgress()])
+  await Promise.all([refreshMatches(), refreshInProgress()])
 }
 
 function onPageChange(nextPage: number) {
   page.value = nextPage
-}
-
-function onRecorded() {
-  showForm.value = false
-  page.value = 1
-  refreshAll()
-}
-
-function onCancel() {
-  showForm.value = false
-}
-
-function openForm() {
-  if (!isAuthenticated.value) {
-    toast.error('Connectez-vous avec Discord pour saisir un résultat.')
-    login()
-    return
-  }
-  showForm.value = true
 }
 
 function resumePartie(id: number) {
@@ -186,19 +148,15 @@ onMounted(async () => {
 
 <template>
   <div class="page-stack">
+    <PageTitleTabs
+      :tabs="matchsTabs"
+      aria-label="Sections des matchs"
+    />
+
     <section class="page-header">
-      <div class="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
-        <div class="space-y-2">
-          <h1 class="page-title">Matchs</h1>
-          <p class="page-description">
-            Consultez les résultats enregistrés.
-          </p>
-        </div>
-        <Button v-if="!showForm" @click="openForm">
-          <Plus class="size-4" />
-          Saisir un résultat
-        </Button>
-      </div>
+      <p class="page-description">
+        Consultez les résultats enregistrés.
+      </p>
     </section>
 
     <Alert v-if="!apiOnline" variant="destructive" class="neon-panel-accent">
@@ -209,14 +167,6 @@ onMounted(async () => {
         puis rechargez la page.
       </AlertDescription>
     </Alert>
-
-    <RecordMatchCard
-      v-if="showForm"
-      :players="players"
-      :loading="loadingPlayers"
-      @recorded="onRecorded"
-      @cancel="onCancel"
-    />
 
     <Card
       v-if="isAuthenticated"

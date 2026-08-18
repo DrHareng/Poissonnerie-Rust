@@ -1,4 +1,5 @@
 import { createRouter, createWebHistory } from 'vue-router'
+import AccueilPage from '@/pages/AccueilPage.vue'
 import ClassementPage from '@/pages/ClassementPage.vue'
 import JoueurPage from '@/pages/JoueurPage.vue'
 import MatchsPage from '@/pages/MatchsPage.vue'
@@ -20,7 +21,12 @@ export const router = createRouter({
     return { top: 0 }
   },
   routes: [
-    { path: '/', redirect: '/classement' },
+    {
+      path: '/',
+      name: 'accueil',
+      component: AccueilPage,
+      meta: { title: 'Accueil' },
+    },
     {
       path: '/classement',
       name: 'classement',

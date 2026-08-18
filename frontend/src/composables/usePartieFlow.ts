@@ -17,6 +17,8 @@ export interface PartieScenario {
   slug?: string
   name?: string
   other?: string
+  /** URL facultative (scénario saisi librement). */
+  url?: string
 }
 
 export interface PartiePlayerSlot {
@@ -66,7 +68,16 @@ export function usePartieFlow() {
     player2Survivors: 0,
   })
 
-  const stepIndex = computed(() => STEPS.indexOf(step.value))
+  /** Scénario libre (nom tapé) : pas d'objectifs secondaires. */
+  const skipsSecondaries = computed(() => scenario.value?.mode === 'other')
+
+  const activeSteps = computed((): PartieStep[] =>
+    skipsSecondaries.value
+      ? STEPS.filter((item) => item !== 'secondaires')
+      : [...STEPS],
+  )
+
+  const stepIndex = computed(() => activeSteps.value.indexOf(step.value))
 
   const resolvedOutcome = computed((): MatchOutcome => {
     const obj1 = clampObjectives(scores.value.player1Objectives)
@@ -115,6 +126,16 @@ export function usePartieFlow() {
 
   function setScenario(value: PartieScenario) {
     scenario.value = value
+    if (value.mode === 'other') {
+      secondariesPlayer1.value = []
+      secondariesPlayer2.value = []
+      secondaryPool.value = []
+      chosenSecondaryPlayer1.value = null
+      chosenSecondaryPlayer2.value = null
+      if (step.value === 'secondaires') {
+        step.value = 'lieutenant'
+      }
+    }
   }
 
   function setSecondaries(
@@ -136,20 +157,26 @@ export function usePartieFlow() {
   }
 
   function goTo(next: PartieStep) {
+    if (skipsSecondaries.value && next === 'secondaires') {
+      step.value = 'lieutenant'
+      return
+    }
     step.value = next
   }
 
   function nextStep() {
-    const index = stepIndex.value
-    if (index < STEPS.length - 1) {
-      step.value = STEPS[index + 1]!
+    const steps = activeSteps.value
+    const index = steps.indexOf(step.value)
+    if (index >= 0 && index < steps.length - 1) {
+      step.value = steps[index + 1]!
     }
   }
 
   function prevStep() {
-    const index = stepIndex.value
+    const steps = activeSteps.value
+    const index = steps.indexOf(step.value)
     if (index > 0) {
-      step.value = STEPS[index - 1]!
+      step.value = steps[index - 1]!
     }
   }
 
@@ -175,13 +202,15 @@ export function usePartieFlow() {
 
   function scenarioPayload():
     | { scenario_id: number }
-    | { scenario_other: string }
+    | { scenario_other: string; scenario_url?: string }
     | undefined {
     const current = scenario.value
     if (!current) return undefined
     if (current.mode === 'other') {
       const other = current.other?.trim()
-      return other ? { scenario_other: other } : undefined
+      if (!other) return undefined
+      const url = current.url?.trim()
+      return url ? { scenario_other: other, scenario_url: url } : { scenario_other: other }
     }
     if (current.id != null) {
       return { scenario_id: current.id }
@@ -205,6 +234,8 @@ export function usePartieFlow() {
     scores,
     resolvedOutcome,
     STEPS,
+    activeSteps,
+    skipsSecondaries,
     clampObjectives,
     clampSurvivors,
     canAdvanceFromJoueurs,

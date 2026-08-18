@@ -1,10 +1,31 @@
 <script setup lang="ts">
+import { computed } from 'vue'
 import type { MatchRecord } from '@/types/elo'
 import { Badge } from '@/components/ui/badge'
 
 const props = defineProps<{
   match: MatchRecord
+  /** Largeur mini commune des badges score (en `ch`), partagée sur une colonne. */
+  badgeMinCh?: number
 }>()
+
+const badgeStyle = computed(() =>
+  props.badgeMinCh != null
+    ? { minWidth: `${props.badgeMinCh}ch` }
+    : undefined,
+)
+
+const pairStyle = computed(() =>
+  props.badgeMinCh != null
+    ? { width: `calc(${props.badgeMinCh * 2}ch + 0.25rem)` }
+    : undefined,
+)
+
+const inProgressStyle = computed(() =>
+  props.badgeMinCh != null
+    ? { minWidth: `calc(${props.badgeMinCh * 2}ch + 0.25rem)` }
+    : undefined,
+)
 
 function badgeVariant(
   match: MatchRecord,
@@ -33,15 +54,37 @@ function scoreLabel(objectives: number, survivors: number) {
 <template>
   <div
     v-if="match.status === 'in_progress' || !match.outcome"
-    class="mx-auto text-center"
+    class="mx-auto flex justify-center text-center"
+    :style="pairStyle"
   >
-    <Badge variant="secondary">En cours</Badge>
+    <Badge
+      variant="secondary"
+      class="justify-center tabular-nums"
+      :style="inProgressStyle"
+    >
+      En cours
+    </Badge>
   </div>
-  <div v-else class="mx-auto grid w-36 grid-cols-2 gap-2">
-    <Badge :variant="badgeVariant(match, 'player1')" class="justify-self-end tabular-nums">
+  <div
+    v-else
+    class="mx-auto grid grid-cols-2 gap-1"
+    :class="badgeMinCh == null ? 'w-36 gap-2' : undefined"
+    :style="pairStyle"
+  >
+    <Badge
+      :variant="badgeVariant(match, 'player1')"
+      class="justify-center tabular-nums"
+      :class="badgeMinCh == null ? 'justify-self-end' : undefined"
+      :style="badgeStyle"
+    >
       {{ scoreLabel(match.player1_objectives, match.player1_survivors) }}
     </Badge>
-    <Badge :variant="badgeVariant(match, 'player2')" class="justify-self-start tabular-nums">
+    <Badge
+      :variant="badgeVariant(match, 'player2')"
+      class="justify-center tabular-nums"
+      :class="badgeMinCh == null ? 'justify-self-start' : undefined"
+      :style="badgeStyle"
+    >
       {{ scoreLabel(match.player2_objectives, match.player2_survivors) }}
     </Badge>
   </div>

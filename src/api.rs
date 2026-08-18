@@ -20,6 +20,7 @@ use crate::{
     ArmyStore, Leaderboard, MatchOutcome, MatchRecord, MatchScores, Player, TournamentStore, User,
     UserStore, DEFAULT_K_FACTOR,
 };
+use crate::tournament::TournamentStatus;
 use crate::user::{LocalProfileUpdate, UiPrefsUpdate, UserResponse};
 
 const SESSION_INACTIVITY_DAYS: i64 = 30;
@@ -73,6 +74,9 @@ struct StartMatchRequest {
     player2_army_id: u32,
     player1_secondary_slugs: Vec<String>,
     player2_secondary_slugs: Vec<String>,
+    /// `true` = match classé (impact ELO). Défaut : amical.
+    #[serde(default)]
+    counts_for_elo: bool,
 }
 
 #[derive(Debug, Deserialize)]
@@ -81,6 +85,8 @@ struct UpdateMatchProgressRequest {
     scenario_id: Option<i64>,
     #[serde(default)]
     scenario_other: Option<String>,
+    #[serde(default)]
+    scenario_url: Option<String>,
     #[serde(default)]
     player1_secondary_slugs: Option<Vec<String>>,
     #[serde(default)]
@@ -604,19 +610,73 @@ async fn get_army_matches(
     Ok(Json(matches))
 }
 
+async fn viewer_player_name(state: &AppState, session: &Session) -> Option<String> {
+    let user = auth::current_user(state.users.as_ref(), session)
+        .await
+        .ok()
+        .flatten()?;
+    let board = state.board.lock().unwrap();
+    board
+        .get_player_by_discord_username(&user.username)
+        .map(|player| player.name.clone())
+}
+
+fn mask_tournament_elo_lists(
+    state: &AppState,
+    record: &mut MatchRecord,
+    viewer_player: Option<&str>,
+) {
+    let Some(tournament_id) = record.tournament_id else {
+        return;
+    };
+    let status = state
+        .tournaments
+        .get(tournament_id)
+        .ok()
+        .flatten()
+        .map(|t| t.status);
+    if status == Some(TournamentStatus::Completed) {
+        return;
+    }
+    // Match Elo = résultat déjà validé ; visible seulement aux 2 joueurs tant que le tournoi n'est pas fini.
+    let is_participant = viewer_player.is_some_and(|name| {
+        crate::store::normalize_name(name) == crate::store::normalize_name(&record.player1)
+            || crate::store::normalize_name(name) == crate::store::normalize_name(&record.player2)
+    });
+    if !is_participant {
+        record.player1_army_list_code = None;
+        record.player2_army_list_code = None;
+    }
+}
+
 async fn list_matches(
     State(state): State<AppState>,
+    session: Session,
     Query(query): Query<MatchListQuery>,
 ) -> Json<MatchListResponse> {
-    let board = state.board.lock().unwrap();
-    let resolver = crate::display_name::PlayerDisplayResolver::new(&board, state.users.as_ref());
+    let viewer = viewer_player_name(&state, &session).await;
     let limit = query.limit.clamp(1, 100);
     let offset = query.offset;
-    let total = board.match_count();
-    let matches = board
-        .recent_matches_page(limit, offset)
+
+    let (total, mut records) = {
+        let board = state.board.lock().unwrap();
+        let total = board.match_count();
+        let records: Vec<_> = board
+            .recent_matches_page(limit, offset)
+            .into_iter()
+            .cloned()
+            .collect();
+        (total, records)
+    };
+
+    for record in &mut records {
+        mask_tournament_elo_lists(&state, record, viewer.as_deref());
+    }
+
+    let board = state.board.lock().unwrap();
+    let resolver = crate::display_name::PlayerDisplayResolver::new(&board, state.users.as_ref());
+    let matches = records
         .into_iter()
-        .cloned()
         .map(|record| resolver.enrich_match(record))
         .collect();
     Json(MatchListResponse {
@@ -702,17 +762,28 @@ fn build_player_profile(
 
 async fn get_player_matches(
     State(state): State<AppState>,
+    session: Session,
     Path(name): Path<String>,
     Query(query): Query<MatchListQuery>,
 ) -> Result<Json<Vec<crate::display_name::EnrichedMatchRecord>>, ApiError> {
+    let viewer = viewer_player_name(&state, &session).await;
+    let limit = query.limit.clamp(1, 500);
+    let mut records = {
+        let board = state.board.lock().unwrap();
+        board
+            .player_matches(&name, limit)
+            .map_err(|error| ApiError::bad_request(error.to_string()))?
+            .into_iter()
+            .cloned()
+            .collect::<Vec<_>>()
+    };
+    for record in &mut records {
+        mask_tournament_elo_lists(&state, record, viewer.as_deref());
+    }
     let board = state.board.lock().unwrap();
     let resolver = crate::display_name::PlayerDisplayResolver::new(&board, state.users.as_ref());
-    let limit = query.limit.clamp(1, 500);
-    let matches = board
-        .player_matches(&name, limit)
-        .map_err(|error| ApiError::bad_request(error.to_string()))?
+    let matches = records
         .into_iter()
-        .cloned()
         .map(|record| resolver.enrich_match(record))
         .collect();
     Ok(Json(matches))
@@ -832,13 +903,19 @@ async fn record_match(
 
 async fn get_match(
     State(state): State<AppState>,
+    session: Session,
     Path(id): Path<u64>,
 ) -> Result<Json<crate::display_name::EnrichedMatchRecord>, ApiError> {
+    let viewer = viewer_player_name(&state, &session).await;
+    let mut record = {
+        let board = state.board.lock().unwrap();
+        board
+            .get_match(id)
+            .ok_or_else(|| ApiError::bad_request("match introuvable"))?
+            .clone()
+    };
+    mask_tournament_elo_lists(&state, &mut record, viewer.as_deref());
     let board = state.board.lock().unwrap();
-    let record = board
-        .get_match(id)
-        .ok_or_else(|| ApiError::bad_request("match introuvable"))?
-        .clone();
     let resolver = crate::display_name::PlayerDisplayResolver::new(&board, state.users.as_ref());
     Ok(Json(resolver.enrich_match(record)))
 }
@@ -890,6 +967,7 @@ async fn start_match(
             &created_by,
             payload.player1_secondary_slugs,
             payload.player2_secondary_slugs,
+            payload.counts_for_elo,
         )
         .map_err(|error| ApiError::bad_request(error.to_string()))?;
     board
@@ -939,6 +1017,7 @@ async fn update_match_progress(
         scenario_id: payload.scenario_id,
         scenario_other: payload.scenario_other,
         scenario_name,
+        scenario_url: payload.scenario_url,
         player1_secondary_slugs: payload.player1_secondary_slugs,
         player2_secondary_slugs: payload.player2_secondary_slugs,
         secondary_pool_slugs: payload.secondary_pool_slugs,

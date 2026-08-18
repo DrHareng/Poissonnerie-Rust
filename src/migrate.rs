@@ -61,6 +61,7 @@ pub fn migrate(conn: &Connection) -> Result<()> {
         CREATE TABLE IF NOT EXISTS tournaments (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             name TEXT NOT NULL,
+            description TEXT NOT NULL DEFAULT '',
             status TEXT NOT NULL DEFAULT 'draft',
             pool_count INTEGER NOT NULL DEFAULT 4,
             bracket_format TEXT NOT NULL DEFAULT 'quarters_direct',
@@ -146,6 +147,8 @@ pub fn migrate(conn: &Connection) -> Result<()> {
             scenario_other TEXT,
             player1_army_id INTEGER,
             player2_army_id INTEGER,
+            player1_army_list_code TEXT,
+            player2_army_list_code TEXT,
             played_at INTEGER
         );
 
@@ -269,6 +272,13 @@ pub fn migrate(conn: &Connection) -> Result<()> {
         conn.execute("ALTER TABLE matches ADD COLUMN created_by TEXT", [])?;
     }
 
+    if !column_exists(conn, "tournament_matches", "is_unplayed")? {
+        conn.execute(
+            "ALTER TABLE tournament_matches ADD COLUMN is_unplayed INTEGER NOT NULL DEFAULT 0",
+            [],
+        )?;
+    }
+
     migrate_match_reports(conn)?;
 
     if column_exists(conn, "matches", "tournament_id")?
@@ -388,12 +398,73 @@ pub fn migrate(conn: &Connection) -> Result<()> {
         conn.execute("ALTER TABLE users ADD COLUMN army_sort_mode TEXT", [])?;
     }
 
-    if !column_exists(conn, "tournament_matches", "is_unplayed")? {
+    if !column_exists(conn, "matches", "counts_for_elo")? {
         conn.execute(
-            "ALTER TABLE tournament_matches ADD COLUMN is_unplayed INTEGER NOT NULL DEFAULT 0",
+            "ALTER TABLE matches ADD COLUMN counts_for_elo INTEGER NOT NULL DEFAULT 1",
             [],
         )?;
     }
+
+    if !column_exists(conn, "matches", "scenario_url")? {
+        conn.execute("ALTER TABLE matches ADD COLUMN scenario_url TEXT", [])?;
+    }
+
+    if !column_exists(conn, "tournaments", "description")? {
+        conn.execute(
+            "ALTER TABLE tournaments ADD COLUMN description TEXT NOT NULL DEFAULT ''",
+            [],
+        )?;
+    }
+
+    if !column_exists(conn, "tournament_matches", "player1_army_list_code")? {
+        conn.execute(
+            "ALTER TABLE tournament_matches ADD COLUMN player1_army_list_code TEXT",
+            [],
+        )?;
+    }
+    if !column_exists(conn, "tournament_matches", "player2_army_list_code")? {
+        conn.execute(
+            "ALTER TABLE tournament_matches ADD COLUMN player2_army_list_code TEXT",
+            [],
+        )?;
+    }
+
+    if !column_exists(conn, "tournament_registrations", "army_list_1")? {
+        conn.execute(
+            "ALTER TABLE tournament_registrations ADD COLUMN army_list_1 TEXT",
+            [],
+        )?;
+    }
+    if !column_exists(conn, "tournament_registrations", "army_list_2")? {
+        conn.execute(
+            "ALTER TABLE tournament_registrations ADD COLUMN army_list_2 TEXT",
+            [],
+        )?;
+    }
+    if !column_exists(conn, "tournament_registrations", "bracket_list_1")? {
+        conn.execute(
+            "ALTER TABLE tournament_registrations ADD COLUMN bracket_list_1 TEXT",
+            [],
+        )?;
+    }
+    if !column_exists(conn, "tournament_registrations", "bracket_list_2")? {
+        conn.execute(
+            "ALTER TABLE tournament_registrations ADD COLUMN bracket_list_2 TEXT",
+            [],
+        )?;
+    }
+
+    conn.execute_batch(
+        "
+        CREATE TABLE IF NOT EXISTS tournament_scenarios (
+            tournament_id INTEGER NOT NULL REFERENCES tournaments(id) ON DELETE CASCADE,
+            kind TEXT NOT NULL,
+            slot TEXT NOT NULL,
+            scenario_id INTEGER NOT NULL REFERENCES scenarios(id),
+            PRIMARY KEY (tournament_id, kind, slot)
+        );
+        ",
+    )?;
 
     conn.execute_batch(
         "
@@ -421,6 +492,8 @@ pub fn migrate(conn: &Connection) -> Result<()> {
     migrate_scenario_pack_schema(conn)?;
 
     backfill_matches_from_tournaments(conn)?;
+
+    normalize_stored_army_list_urls(conn)?;
 
     conn.execute_batch(
         "
@@ -670,6 +743,53 @@ fn migrate_match_reports(conn: &Connection) -> Result<()> {
             ",
             rusqlite::params![now],
         )?;
+    }
+
+    Ok(())
+}
+
+/// Retire le préfixe URL Army des codes déjà stockés (ne garde que le code).
+fn normalize_stored_army_list_urls(conn: &Connection) -> Result<()> {
+    use crate::army_list::normalize_army_list_code;
+
+    let targets: &[(&str, &str)] = &[
+        ("tournament_registrations", "army_list_1"),
+        ("tournament_registrations", "army_list_2"),
+        ("tournament_registrations", "bracket_list_1"),
+        ("tournament_registrations", "bracket_list_2"),
+        ("matches", "player1_army_list_code"),
+        ("matches", "player2_army_list_code"),
+        ("tournament_matches", "player1_army_list_code"),
+        ("tournament_matches", "player2_army_list_code"),
+    ];
+
+    for &(table, column) in targets {
+        if !column_exists(conn, table, column)? {
+            continue;
+        }
+        let sql = format!(
+            "SELECT rowid, {column} FROM {table}
+             WHERE {column} IS NOT NULL
+               AND ({column} LIKE '%army/list/%' OR {column} LIKE '%army/infinity/list/%')"
+        );
+        let mut stmt = conn.prepare(&sql)?;
+        let rows = stmt
+            .query_map([], |row| {
+                Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+        for (rowid, raw) in rows {
+            let Some(normalized) = normalize_army_list_code(&raw) else {
+                continue;
+            };
+            if normalized == raw {
+                continue;
+            }
+            conn.execute(
+                &format!("UPDATE {table} SET {column} = ?1 WHERE rowid = ?2"),
+                rusqlite::params![normalized, rowid],
+            )?;
+        }
     }
 
     Ok(())

@@ -38,6 +38,7 @@ const selectedSlug = ref<string | undefined>(
   props.initial?.mode === 'other' ? undefined : props.initial?.slug,
 )
 const otherName = ref(props.initial?.mode === 'other' ? (props.initial.other ?? '') : '')
+const otherUrl = ref(props.initial?.mode === 'other' ? (props.initial.url ?? '') : '')
 const scenarioDetail = ref<ScenarioDetail | null>(null)
 const detailLoading = ref(false)
 const mapFailed = ref(false)
@@ -74,6 +75,7 @@ const ruleGlossary = computed(() => {
 watch(selectedSlug, async (value) => {
   if (value) {
     otherName.value = ''
+    otherUrl.value = ''
   }
   mapFailed.value = false
   scenarioDetail.value = null
@@ -96,6 +98,13 @@ watch(otherName, (value) => {
   }
 })
 
+watch(otherUrl, (value) => {
+  if (value.trim()) {
+    selectedSlug.value = undefined
+    scenarioDetail.value = null
+  }
+})
+
 function drawScenario() {
   if (props.scenarios.length === 0) return
   const pick = props.scenarios[Math.floor(Math.random() * props.scenarios.length)]!
@@ -107,10 +116,12 @@ function submit() {
 
   const other = otherName.value.trim()
   if (other) {
+    const url = otherUrl.value.trim()
     emit('next', {
       mode: 'other',
       other,
       name: other,
+      ...(url ? { url } : {}),
     })
     return
   }
@@ -169,14 +180,26 @@ function submit() {
 
       <section class="player-match-panel">
         <p class="player-match-panel-title">Autre</p>
-        <div class="grid gap-2">
-          <Label for="scenario-other">Nom du scénario</Label>
-          <Input
-            id="scenario-other"
-            v-model="otherName"
-            placeholder="Ex. Mission maison"
-            autocomplete="off"
-          />
+        <div class="grid gap-3">
+          <div class="grid gap-2">
+            <Label for="scenario-other">Nom du scénario</Label>
+            <Input
+              id="scenario-other"
+              v-model="otherName"
+              placeholder="Ex. Mission maison"
+              autocomplete="off"
+            />
+          </div>
+          <div class="grid gap-2">
+            <Label for="scenario-other-url">URL (facultatif)</Label>
+            <Input
+              id="scenario-other-url"
+              v-model="otherUrl"
+              type="url"
+              placeholder="https://…"
+              autocomplete="off"
+            />
+          </div>
         </div>
       </section>
     </div>

@@ -15,10 +15,15 @@ const props = withDefaults(
     getForm: (match: TournamentMatch) => TournamentMatchForm
     canInteract: (match: TournamentMatch) => boolean
     playerArmyId: (match: TournamentMatch, slot: 'player1' | 'player2') => number | undefined
+    playerHasList2?: (match: TournamentMatch, slot: 'player1' | 'player2') => boolean
     statusLabel: (match: TournamentMatch) => string
     allowUnplayed?: boolean
+    listsReady?: (match: TournamentMatch) => boolean
+    listsReadyMessage?: (match: TournamentMatch) => string
   }>(),
-  { allowUnplayed: true },
+  {
+    allowUnplayed: true,
+  },
 )
 
 const emit = defineEmits<{
@@ -31,6 +36,17 @@ const emit = defineEmits<{
 
 const editingMatchId = ref<number | null>(null)
 const correctingMatchId = ref<number | null>(null)
+
+function hasList2(match: TournamentMatch, slot: 'player1' | 'player2') {
+  return props.playerHasList2?.(match, slot) ?? false
+}
+
+function listSlotReady(match: TournamentMatch) {
+  const form = props.getForm(match)
+  const ok1 = form.list1 === 1 || (form.list1 === 2 && hasList2(match, 'player1'))
+  const ok2 = form.list2 === 1 || (form.list2 === 2 && hasList2(match, 'player2'))
+  return ok1 && ok2
+}
 
 function hasBothPlayers(match: TournamentMatch) {
   return Boolean(match.player1 && match.player2)
@@ -232,6 +248,57 @@ watch(
                 :player1-army-id="playerArmyId(match, 'player1')"
                 :player2-army-id="playerArmyId(match, 'player2')"
               />
+              <div
+                v-if="correctingMatchId !== match.id && listsReady && !listsReady(match)"
+                class="text-sm text-amber-600 dark:text-amber-400"
+              >
+                {{ listsReadyMessage?.(match) || 'Listes d’arbre manquantes.' }}
+              </div>
+              <div
+                v-else-if="correctingMatchId !== match.id"
+                class="flex flex-wrap items-end gap-3"
+              >
+                <div class="grid gap-1">
+                  <span class="text-xs text-muted-foreground">
+                    {{ matchPlayerLabel(match, 'player1') }} — Liste
+                  </span>
+                  <select
+                    v-if="hasList2(match, 'player1')"
+                    v-model.number="getForm(match).list1"
+                    class="h-8 rounded-md border border-input bg-transparent px-2 text-sm"
+                  >
+                    <option :value="undefined" disabled>Choisir…</option>
+                    <option :value="1">Liste 1</option>
+                    <option :value="2">Liste 2</option>
+                  </select>
+                  <span
+                    v-else
+                    class="flex h-8 items-center text-sm text-muted-foreground"
+                  >
+                    Liste 1
+                  </span>
+                </div>
+                <div class="grid gap-1">
+                  <span class="text-xs text-muted-foreground">
+                    {{ matchPlayerLabel(match, 'player2') }} — Liste
+                  </span>
+                  <select
+                    v-if="hasList2(match, 'player2')"
+                    v-model.number="getForm(match).list2"
+                    class="h-8 rounded-md border border-input bg-transparent px-2 text-sm"
+                  >
+                    <option :value="undefined" disabled>Choisir…</option>
+                    <option :value="1">Liste 1</option>
+                    <option :value="2">Liste 2</option>
+                  </select>
+                  <span
+                    v-else
+                    class="flex h-8 items-center text-sm text-muted-foreground"
+                  >
+                    Liste 1
+                  </span>
+                </div>
+              </div>
               <div class="pool-match-edit-actions">
                 <template v-if="correctingMatchId === match.id">
                   <Button size="sm" @click="saveCorrection(match)">
@@ -242,7 +309,14 @@ watch(
                   </Button>
                 </template>
                 <template v-else>
-                  <Button size="sm" @click="emit('submit', match)">
+                  <Button
+                    size="sm"
+                    :disabled="
+                      (listsReady != null && !listsReady(match))
+                      || !listSlotReady(match)
+                    "
+                    @click="emit('submit', match)"
+                  >
                     Soumettre
                   </Button>
                   <Button

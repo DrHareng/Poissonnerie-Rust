@@ -4,10 +4,13 @@ import { useRouter } from 'vue-router'
 import { Plus, Medal } from '@lucide/vue'
 import { toast } from 'vue-sonner'
 import { createTournament, fetchTournaments } from '@/lib/api'
-import { formatRegistrationSummary } from '@/lib/tournamentDisplay'
+import { formatRegistrationSummary, tournamentRegistrationCapacity } from '@/lib/tournamentDisplay'
 import type { TournamentListEntry } from '@/types/elo'
 import { useAuth } from '@/composables/useAuth'
 import BracketTree from '@/components/BracketTree.vue'
+import MarkdownContent from '@/components/MarkdownContent.vue'
+import TournamentPoolScenarioLinks from '@/components/TournamentPoolScenarioLinks.vue'
+import PageTitleTabs from '@/components/PageTitleTabs.vue'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import {
@@ -19,6 +22,7 @@ import {
 } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { tournoisTabs } from '@/lib/pageTitleTabs'
 import {
   Select,
   SelectContent,
@@ -34,7 +38,7 @@ const tournaments = ref<TournamentListEntry[]>([])
 const loading = ref(true)
 const showCreate = ref(false)
 const newName = ref('')
-const newFormat = ref('quarters_direct')
+const newFormat = ref('round_of_16')
 const creating = ref(false)
 
 async function refresh() {
@@ -76,14 +80,16 @@ onMounted(refresh)
 
 <template>
   <div class="page-stack">
+    <PageTitleTabs
+      :tabs="tournoisTabs"
+      aria-label="Sections des tournois"
+    />
+
     <section class="page-header">
       <div class="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
-        <div class="space-y-2">
-          <h1 class="page-title">Tournois</h1>
-          <p class="page-description">
-            Phase de poules puis arbre éliminatoire.
-          </p>
-        </div>
+        <p class="page-description">
+          Phase de poules puis arbre éliminatoire.
+        </p>
         <Button v-if="isAdmin && !showCreate" @click="showCreate = true">
           <Plus class="size-4" />
           Nouveau tournoi
@@ -154,12 +160,31 @@ onMounted(refresh)
               <div class="min-w-0 space-y-1">
                 <p class="font-medium">{{ tournament.name }}</p>
                 <p class="text-sm text-muted-foreground">
-                  {{ formatRegistrationSummary(tournament.approved_count, tournament.waitlist_count) }}
+                  {{
+                    formatRegistrationSummary(
+                      tournament.registered_count,
+                      tournament.waitlist_count,
+                      tournamentRegistrationCapacity(tournament.pool_count),
+                    )
+                  }}
                 </p>
               </div>
               <Badge variant="outline" class="shrink-0">
                 {{ tournament.display_status }}
               </Badge>
+            </div>
+            <div
+              v-if="tournament.description?.trim()"
+              class="prose prose-sm max-w-none text-muted-foreground"
+            >
+              <MarkdownContent :source="tournament.description" />
+            </div>
+            <div
+              v-if="(tournament.pool_scenarios?.length ?? 0) > 0"
+              class="space-y-1"
+            >
+              <p class="text-xs font-medium text-muted-foreground">Scénarios de poules</p>
+              <TournamentPoolScenarioLinks :scenarios="tournament.pool_scenarios ?? []" />
             </div>
             <BracketTree
               v-if="tournament.bracket_matches?.length"

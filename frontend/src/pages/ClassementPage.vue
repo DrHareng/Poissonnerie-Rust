@@ -6,9 +6,11 @@ import { toast } from 'vue-sonner'
 import { fetchRanking } from '@/lib/api'
 import type { RankedPlayer } from '@/types/elo'
 import AddPlayerCard from '@/components/AddPlayerCard.vue'
+import PageTitleTabs from '@/components/PageTitleTabs.vue'
 import RankingTable from '@/components/RankingTable.vue'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { useAuth } from '@/composables/useAuth'
+import { classementTabs } from '@/lib/pageTitleTabs'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 
@@ -52,14 +54,16 @@ onMounted(refreshRanking)
 
 <template>
   <div class="page-stack">
+    <PageTitleTabs
+      :tabs="classementTabs"
+      aria-label="Sections du classement"
+    />
+
     <section class="page-header">
       <div class="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
-        <div class="space-y-2">
-          <h1 class="page-title">Classement</h1>
-          <p class="page-description">
-            Consultez le classement ELO et ajoutez de nouveaux participants.
-          </p>
-        </div>
+        <p class="page-description">
+          Consultez le classement ELO et ajoutez de nouveaux participants.
+        </p>
         <div class="flex flex-col gap-3 sm:flex-row sm:items-center shrink-0">
           <div class="relative w-full sm:w-64">
             <Search

@@ -198,6 +198,11 @@
     @apply flex min-h-0 min-w-0 flex-1 flex-col;
   }
 
+  /* Au-dessus du shell (isolate) et de la top bar */
+  .toaster-overlay {
+    z-index: 100000 !important;
+  }
+
   .topbar {
     @apply mb-6 flex shrink-0 flex-col gap-4 rounded-lg border border-primary/20 bg-card/70 p-4 backdrop-blur-md md:flex-row md:items-center md:justify-between;
     box-shadow: 0 0 30px oklch(0.8 0.14 195 / 15%);
@@ -475,9 +480,17 @@
     @apply rounded-lg border p-2.5;
   }
 
+  .tournament-match-card--compact {
+    @apply p-2;
+  }
+
   .tournament-match-meta {
     @apply mb-2 grid items-center gap-x-3 gap-y-0.5 text-xs text-muted-foreground;
     grid-template-columns: auto minmax(0, 1fr) auto minmax(0, auto);
+  }
+
+  .tournament-match-card--compact .tournament-match-meta {
+    grid-template-columns: auto minmax(0, 1fr) auto;
   }
 
   .tournament-match-meta-phase {
@@ -514,6 +527,26 @@
 
   .tournament-match-scoreboard {
     @apply grid w-full items-stretch gap-3 sm:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)];
+  }
+
+  .tournament-match-scoreboard--compact {
+    @apply grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] gap-1.5;
+  }
+
+  .tournament-match-scoreboard--compact .player-match-panel {
+    @apply gap-1.5 p-2;
+  }
+
+  .tournament-match-scoreboard--compact .tournament-match-vs {
+    @apply text-sm tracking-[0.12em];
+  }
+
+  .tournament-match-scoreboard--compact .tournament-match-scores {
+    @apply ml-0 w-full text-[11px] leading-tight;
+  }
+
+  .tournament-match-scoreboard--compact .player-match-panel--inline {
+    @apply flex-wrap;
   }
 
   .tournament-match-vs {
@@ -947,6 +980,14 @@
 
   .scenario-subtabs {
     @apply min-w-0 flex-1 flex-wrap overflow-x-visible;
+  }
+
+  .scenario-draw-tab {
+    @apply inline-flex items-center gap-1.5;
+  }
+
+  .scenario-draw-tab:disabled {
+    @apply pointer-events-none opacity-50;
   }
 
   .secondary-card-grid {

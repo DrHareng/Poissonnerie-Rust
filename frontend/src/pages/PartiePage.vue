@@ -41,6 +41,7 @@ import { COMBAT_ESPRIT_SLUG } from '@/lib/combatEspritDraft'
 import { secondaryImageSrc } from '@/lib/secondaryImages'
 import { shufflePick } from '@/lib/shufflePick'
 import { formatPartieMatchup } from '@/lib/tournamentMatchDisplay'
+import { externalHref } from '@/lib/utils'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import {
@@ -72,6 +73,7 @@ const {
   scores,
   resolvedOutcome,
   STEPS,
+  activeSteps,
   setMatchId,
   setJoueurs,
   setScenario,
@@ -233,6 +235,7 @@ function hydrateFromMatch(record: MatchRecord) {
             mode: 'other',
             other: record.scenario_other,
             name: record.scenario_name ?? record.scenario_other,
+            ...(record.scenario_url ? { url: record.scenario_url } : {}),
           }
         : {
             mode: 'list',
@@ -266,7 +269,9 @@ function hydrateFromMatch(record: MatchRecord) {
   }
 
   const resumeStep = (record.partie_step as PartieStep | null) ?? 'scenario'
-  if (STEPS.includes(resumeStep)) {
+  if (resumeStep === 'secondaires' && record.scenario_other && !record.scenario_id) {
+    goTo('lieutenant')
+  } else if (STEPS.includes(resumeStep)) {
     goTo(resumeStep)
   }
 }
@@ -330,6 +335,7 @@ async function onJoueursNext(payload: {
   army1: number
   player2: string
   army2: number
+  counts_for_elo: boolean
 }) {
   if (!isAuthenticated.value || !currentPlayer.value) {
     toast.error('Connectez-vous pour démarrer une partie.')
@@ -349,6 +355,7 @@ async function onJoueursNext(payload: {
         player2_army_id: payload.army2,
         player1_secondary_slugs: drawn.player1,
         player2_secondary_slugs: drawn.player2,
+        counts_for_elo: payload.counts_for_elo,
       })
       setMatchId(record.id)
       setJoueurs(player1Name, payload.army1, payload.player2, payload.army2)
@@ -372,20 +379,28 @@ async function onScenarioNext(value: Parameters<typeof setScenario>[0]) {
   if (!matchId.value) return
   saving.value = true
   try {
-    const isCombatEsprit = value.slug === COMBAT_ESPRIT_SLUG
+    const isCustomScenario = value.mode === 'other'
+    const isCombatEsprit = !isCustomScenario && value.slug === COMBAT_ESPRIT_SLUG
+    const nextPartieStep = isCustomScenario ? 'lieutenant' : 'secondaires'
     const body: Parameters<typeof updateMatchProgress>[1] = {
-      ...(value.mode === 'other'
-        ? { scenario_other: value.other }
+      ...(isCustomScenario
+        ? {
+            scenario_other: value.other,
+            scenario_url: value.url?.trim() || '',
+          }
         : { scenario_id: value.id }),
-      partie_step: 'secondaires',
+      partie_step: nextPartieStep,
     }
 
-    // Si on revient d’un Combat de l’Esprit (tirage effacé) vers un scénario normal,
-    // on retirer 3+3 et on les fige immédiatement.
-    if (
+    if (isCustomScenario) {
+      // Pas de secondaires pour un scénario saisi librement.
+      setSecondaries([], [])
+    } else if (
       !isCombatEsprit &&
       (secondariesPlayer1.value.length === 0 || secondariesPlayer2.value.length === 0)
     ) {
+      // Si on revient d’un Combat de l’Esprit (tirage effacé) vers un scénario normal,
+      // on retirer 3+3 et on les fige immédiatement.
       const drawn = drawSecondarySlugs()
       body.player1_secondary_slugs = drawn.player1
       body.player2_secondary_slugs = drawn.player2
@@ -401,7 +416,7 @@ async function onScenarioNext(value: Parameters<typeof setScenario>[0]) {
 
     await updateMatchProgress(matchId.value, body)
     setScenario(value)
-    nextStep()
+    goTo(nextPartieStep)
   } catch (error) {
     toast.error(error instanceof Error ? error.message : 'Impossible d’enregistrer le scénario')
   } finally {
@@ -630,20 +645,29 @@ onMounted(loadData)
           <CardHeader>
             <CardTitle>Ma mission</CardTitle>
           </CardHeader>
-          <CardContent>
+          <CardContent class="space-y-2">
             <p class="text-sm text-muted-foreground">
               {{
                 scenario?.name || scenario?.other || 'Scénario personnalisé'
               }}
               — détail du pack indisponible pour ce scénario.
             </p>
+            <a
+              v-if="scenario?.url"
+              :href="externalHref(scenario.url)"
+              target="_blank"
+              rel="noopener noreferrer"
+              class="inline-block text-sm font-medium text-primary hover:underline"
+            >
+              Voir le scénario
+            </a>
           </CardContent>
         </Card>
       </div>
     </template>
 
     <template v-else>
-      <PartieStepper class="shrink-0" :steps="STEPS" :current-index="stepIndex" />
+      <PartieStepper class="shrink-0" :steps="activeSteps" :current-index="stepIndex" />
 
       <div class="page-panel-scroll min-h-0 flex-1 overflow-y-auto">
         <Card class="neon-panel">

@@ -12,13 +12,22 @@ const FACTION_SLUG_RE = /^[a-z0-9]+(?:-[a-z0-9]+)*$/
 /** Extrait le code de liste depuis un code brut ou une URL Army complète. */
 export function normalizeArmyListCode(raw: string): string {
   let code = raw.trim()
-  for (const prefix of URL_PREFIXES) {
-    if (code.toLowerCase().startsWith(prefix)) {
-      code = code.slice(prefix.length)
+  const lower = code.toLowerCase()
+  for (const marker of ['army/list/', 'army/infinity/list/']) {
+    const idx = lower.indexOf(marker)
+    if (idx >= 0) {
+      code = code.slice(idx + marker.length)
       break
     }
   }
-  return code.replace(/^\/+/, '').trim()
+  code = code.split(/[?#]/)[0] ?? code
+  code = code.replace(/^\/+/, '').trim()
+  try {
+    code = decodeURIComponent(code)
+  } catch {
+    // code déjà décodé ou mal formé : on garde tel quel
+  }
+  return code.trim()
 }
 
 export function armyListUrl(code: string): string {

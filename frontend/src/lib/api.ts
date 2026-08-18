@@ -21,6 +21,7 @@ import type {
   TournamentListEntry,
   TournamentMatch,
   TournamentRegistration,
+  TournamentScenarioSlot,
 } from '@/types/elo'
 
 const defaultFetchOptions: RequestInit = {
@@ -217,6 +218,7 @@ export function startMatch(payload: {
   player2_army_id: number
   player1_secondary_slugs: string[]
   player2_secondary_slugs: string[]
+  counts_for_elo?: boolean
 }): Promise<MatchRecord> {
   return request<MatchRecord>('/api/matches/start', {
     method: 'POST',
@@ -229,6 +231,7 @@ export function updateMatchProgress(
   payload: {
     scenario_id?: number
     scenario_other?: string
+    scenario_url?: string
     player1_secondary_slugs?: string[]
     player2_secondary_slugs?: string[]
     secondary_pool_slugs?: string[]
@@ -389,6 +392,20 @@ export function createTournament(payload: {
   })
 }
 
+export function deleteTournament(id: number): Promise<void> {
+  return request<void>(`/api/tournaments/${id}`, { method: 'DELETE' })
+}
+
+export function updateTournamentDetails(
+  id: number,
+  payload: { name: string; description: string },
+): Promise<Tournament> {
+  return request<Tournament>(`/api/tournaments/${id}`, {
+    method: 'PATCH',
+    body: JSON.stringify(payload),
+  })
+}
+
 export function openTournamentRegistration(id: number): Promise<Tournament> {
   return request<Tournament>(`/api/tournaments/${id}/open-registration`, { method: 'POST' })
 }
@@ -397,24 +414,43 @@ export function closeTournamentRegistration(id: number): Promise<Tournament> {
   return request<Tournament>(`/api/tournaments/${id}/close-registration`, { method: 'POST' })
 }
 
-export function registerForTournament(
-  id: number,
-  army_id: number,
-): Promise<TournamentRegistration> {
+export function registerForTournament(id: number): Promise<TournamentRegistration> {
   return request<TournamentRegistration>(`/api/tournaments/${id}/register`, {
     method: 'POST',
-    body: JSON.stringify({ army_id }),
+    body: JSON.stringify({}),
   })
+}
+
+export function completeTournamentRegistrationLists(
+  id: number,
+  army_list_1: string,
+  army_list_2 = '',
+): Promise<TournamentRegistration> {
+  return request<TournamentRegistration>(`/api/tournaments/${id}/register/lists`, {
+    method: 'POST',
+    body: JSON.stringify({ army_list_1, army_list_2 }),
+  })
+}
+
+export function unregisterFromTournament(id: number): Promise<void> {
+  return request<void>(`/api/tournaments/${id}/unregister`, { method: 'POST' })
 }
 
 export function adminRegisterForTournament(
   id: number,
   player_name: string,
-  army_id: number,
+  army_list_1: string,
+  army_list_2 = '',
+  army_id?: number,
 ): Promise<TournamentRegistration> {
   return request<TournamentRegistration>(`/api/tournaments/${id}/registrations`, {
     method: 'POST',
-    body: JSON.stringify({ player_name, army_id }),
+    body: JSON.stringify({
+      player_name,
+      army_list_1,
+      army_list_2,
+      ...(army_id != null ? { army_id } : {}),
+    }),
   })
 }
 
@@ -440,6 +476,79 @@ export function setupTournamentPools(
   return request(`/api/tournaments/${id}/pools`, {
     method: 'POST',
     body: JSON.stringify({ pools }),
+  })
+}
+
+export function drawTournamentPools(id: number): Promise<unknown> {
+  return request(`/api/tournaments/${id}/draw-pools`, { method: 'POST' })
+}
+
+export function setPoolScenarios(
+  id: number,
+  scenario_ids: number[],
+): Promise<TournamentScenarioSlot[]> {
+  return request<TournamentScenarioSlot[]>(`/api/tournaments/${id}/pool-scenarios`, {
+    method: 'POST',
+    body: JSON.stringify({ scenario_ids }),
+  })
+}
+
+export function drawPoolScenarios(id: number): Promise<TournamentScenarioSlot[]> {
+  return request<TournamentScenarioSlot[]>(`/api/tournaments/${id}/pool-scenarios/draw`, {
+    method: 'POST',
+  })
+}
+
+export function rerollPoolScenario(
+  id: number,
+  slot: string,
+): Promise<TournamentScenarioSlot[]> {
+  return request<TournamentScenarioSlot[]>(`/api/tournaments/${id}/pool-scenarios/reroll`, {
+    method: 'POST',
+    body: JSON.stringify({ slot }),
+  })
+}
+
+export function setBracketScenarioPool(
+  id: number,
+  scenario_ids: number[],
+): Promise<TournamentScenarioSlot[]> {
+  return request<TournamentScenarioSlot[]>(`/api/tournaments/${id}/bracket-scenarios`, {
+    method: 'POST',
+    body: JSON.stringify({ scenario_ids }),
+  })
+}
+
+export function drawBracketScenarioPool(id: number): Promise<TournamentScenarioSlot[]> {
+  return request<TournamentScenarioSlot[]>(`/api/tournaments/${id}/bracket-scenarios/draw`, {
+    method: 'POST',
+  })
+}
+
+export function rerollBracketScenarioPoolSlot(
+  id: number,
+  slot: string,
+): Promise<TournamentScenarioSlot[]> {
+  return request<TournamentScenarioSlot[]>(`/api/tournaments/${id}/bracket-scenarios/reroll`, {
+    method: 'POST',
+    body: JSON.stringify({ slot }),
+  })
+}
+
+export function assignBracketScenarios(id: number): Promise<TournamentScenarioSlot[]> {
+  return request<TournamentScenarioSlot[]>(`/api/tournaments/${id}/bracket-scenarios/assign`, {
+    method: 'POST',
+  })
+}
+
+export function updateMyBracketLists(
+  id: number,
+  bracket_list_1: string,
+  bracket_list_2: string,
+): Promise<TournamentRegistration> {
+  return request<TournamentRegistration>(`/api/tournaments/${id}/bracket-lists`, {
+    method: 'POST',
+    body: JSON.stringify({ bracket_list_1, bracket_list_2 }),
   })
 }
 
@@ -481,6 +590,8 @@ export function submitTournamentMatch(
     player2_objectives: number
     player1_survivors?: number
     player2_survivors?: number
+    player1_list_slot: number
+    player2_list_slot: number
     scenario_id?: number
     scenario_other?: string
   },

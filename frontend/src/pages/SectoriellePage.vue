@@ -6,9 +6,12 @@ import { toast } from 'vue-sonner'
 import { fetchArmyMatches, fetchArmyStats } from '@/lib/api'
 import { pageTitle } from '@/lib/pageTitle'
 import { formatMatchRecordedDate } from '@/lib/tournamentMatchDisplay'
+import { matchCountsForElo } from '@/lib/matchElo'
+import { classementTabs } from '@/lib/pageTitleTabs'
 import type { MatchOutcome, MatchRecord, RankedArmy } from '@/types/elo'
 import MatchResultBadges from '@/components/MatchResultBadges.vue'
 import MatchContextCell from '@/components/MatchContextCell.vue'
+import PageTitleTabs from '@/components/PageTitleTabs.vue'
 import WinDrawLossBar from '@/components/WinDrawLossBar.vue'
 import ArmyLogo from '@/components/ArmyLogo.vue'
 import PlayerLink from '@/components/PlayerLink.vue'
@@ -157,15 +160,18 @@ onMounted(refresh)
     </div>
 
     <template v-else-if="army">
+      <PageTitleTabs
+        :tabs="classementTabs"
+        aria-label="Sections du classement"
+        :current="{ label: armyName }"
+      />
+
       <section class="page-header">
         <div class="flex items-center gap-3">
           <ArmyLogo :army-id="army.army_id" class="!size-10" />
-          <div>
-            <h1 class="page-title">{{ armyName }}</h1>
-            <p class="page-description">
-              Rang #{{ army.rank }} — {{ formatWinRate(army.win_rate) }} win rate
-            </p>
-          </div>
+          <p class="page-description">
+            Rang #{{ army.rank }} — {{ formatWinRate(army.win_rate) }} win rate
+          </p>
         </div>
       </section>
 
@@ -240,9 +246,12 @@ onMounted(refresh)
                   />
                 </TableCell>
                 <TableCell class="text-right tabular-nums">
-                  {{ Math.round(row.normalized.player1_old) }}
-                  →
-                  <span class="elo-score">{{ Math.round(row.normalized.player1_new) }}</span>
+                  <template v-if="matchCountsForElo(row.normalized.counts_for_elo)">
+                    {{ Math.round(row.normalized.player1_old) }}
+                    →
+                    <span class="elo-score">{{ Math.round(row.normalized.player1_new) }}</span>
+                  </template>
+                  <span v-else class="text-muted-foreground">—</span>
                 </TableCell>
               </TableRow>
             </TableBody>

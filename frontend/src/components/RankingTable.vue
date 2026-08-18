@@ -129,7 +129,11 @@ function armyTooltip(usage: PlayerArmyUsage) {
             </TableCell>
             <TableCell class="font-medium">
               {{ player.display_name }}
-              <span v-if="player.star_count" class="ml-1 text-amber-400" :title="`${player.star_count} victoire(s) en tournoi`">
+              <span
+                v-if="player.star_count"
+                class="ml-1 text-[0.7em] leading-none text-amber-400"
+                :title="`${player.star_count} victoire(s) en tournoi`"
+              >
                 {{ '⭐'.repeat(Math.min(player.star_count, 5)) }}
               </span>
             </TableCell>

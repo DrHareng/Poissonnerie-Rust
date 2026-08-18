@@ -124,14 +124,17 @@ async function confirmUpdateArmy() {
 <template>
   <div class="space-y-2">
     <div v-if="editing" class="grid gap-2">
-      <Input
-        v-model="draft"
-        placeholder="Code ou URL Infinity Army…"
-        autocomplete="off"
-        spellcheck="false"
-        class="text-xs"
-        :disabled="saving || !!pendingArmy"
-      />
+      <div class="flex flex-wrap items-center gap-2">
+        <Input
+          v-model="draft"
+          placeholder="Code ou URL Infinity Army…"
+          autocomplete="off"
+          spellcheck="false"
+          class="min-w-0 flex-1 text-xs"
+          :disabled="saving || !!pendingArmy"
+        />
+        <ArmyListQuickActions :code="draft" />
+      </div>
 
       <Alert v-if="pendingArmy" variant="destructive" class="neon-panel-accent">
         <AlertTitle>Sectorielle différente</AlertTitle>
@@ -179,6 +182,11 @@ async function confirmUpdateArmy() {
     <div v-else class="flex flex-wrap items-center gap-2">
       <span class="text-sm text-muted-foreground">Liste :</span>
       <template v-if="code?.trim()">
+        <Input
+          :model-value="code"
+          readonly
+          class="min-w-0 flex-1 text-xs"
+        />
         <ArmyListQuickActions :code="code" />
         <Button
           v-if="canEdit"

@@ -137,6 +137,17 @@ impl ArmyStore {
         Ok(None)
     }
 
+    pub fn get_by_slug(&self, slug: &str) -> Result<Option<Army>> {
+        let key = slug.trim().to_ascii_lowercase();
+        if key.is_empty() {
+            return Ok(None);
+        }
+        Ok(self
+            .list_selectable()?
+            .into_iter()
+            .find(|army| army.slug.eq_ignore_ascii_case(&key)))
+    }
+
     pub fn list_all(&self) -> Result<Vec<Army>> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(

@@ -6,20 +6,20 @@ use anyhow::{bail, Context, Result};
 use rusqlite::{params, Connection, OptionalExtension, Transaction};
 use serde::Deserialize;
 
+use crate::army_list::require_lists;
 use crate::match_record::now_unix;
 use crate::migrate::migrate;
 use crate::player::MatchOutcome;
 use crate::store::normalize_name;
 use crate::tournament::{
-    bracket_match_winner, compute_elo_deltas, compute_bracket_placements, enrich_top_four_armies,
-    placement_label,
-    pool_round_robin_pairs,
-    round_of_16_barrage_pairings, sort_pool_standings, tournament_points_for_player,
-    BracketFormat, PlayerTournamentResult, Pool, PoolPlayer, RegistrationStatus, Tournament,
-    TournamentDetail, TournamentListEntry, TournamentMatch, TournamentMatchStatus,
-    TournamentPhase, TournamentPlayerSnapshot, TournamentRegistration, TournamentStatus,
-    POOLS_EIGHT_CAPACITY, POOLS_FOUR_CAPACITY, WAITLIST_THRESHOLD, compute_display_status,
-    compute_top_four, registration_counts,
+    bracket_match_winner, bracket_scenario_phases, compute_elo_deltas, compute_bracket_placements,
+    draw_seeded_pools, enrich_top_four_armies, placement_label, pool_round_robin_pairs,
+    pool_scenario_letter, round_of_16_barrage_pairings, sort_pool_standings,
+    tournament_points_for_player, BracketFormat, PlayerTournamentResult, Pool, PoolPlayer,
+    RegistrationStatus, Tournament, TournamentDetail, TournamentListEntry, TournamentMatch,
+    TournamentMatchStatus, TournamentPhase, TournamentPlayerSnapshot, TournamentRegistration,
+    TournamentScenarioSlot, TournamentStatus, POOLS_EIGHT_CAPACITY, POOLS_FOUR_CAPACITY,
+    POOL_SCENARIO_LETTERS, compute_display_status, compute_top_four, registration_counts,
 };
 
 pub struct TournamentStore {
@@ -33,19 +33,63 @@ pub struct CreateTournamentRequest {
     pub bracket_format: String,
 }
 
+#[derive(Debug, Deserialize)]
+pub struct UpdateTournamentDetailsRequest {
+    pub name: String,
+    #[serde(default)]
+    pub description: String,
+}
+
 fn default_bracket_format() -> String {
-    "quarters_direct".into()
+    "round_of_16".into()
 }
 
 #[derive(Debug, Deserialize)]
 pub struct RegisterRequest {
-    pub army_id: u32,
+    // Inscription initiale sans listes (étape 1).
+}
+
+#[derive(Debug, Deserialize)]
+pub struct CompleteRegistrationListsRequest {
+    pub army_list_1: String,
+    #[serde(default)]
+    pub army_list_2: String,
 }
 
 #[derive(Debug, Deserialize)]
 pub struct AdminRegisterRequest {
     pub player_name: String,
-    pub army_id: u32,
+    /// Optionnel : déduit des codes de listes si absent.
+    #[serde(default)]
+    pub army_id: Option<u32>,
+    pub army_list_1: String,
+    #[serde(default)]
+    pub army_list_2: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct UpdateBracketListsRequest {
+    pub bracket_list_1: String,
+    #[serde(default)]
+    pub bracket_list_2: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct SetPoolScenariosRequest {
+    /// Exactement 5 IDs de scénarios (A–E).
+    pub scenario_ids: Vec<i64>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct RerollScenarioRequest {
+    /// Lettre A–E (poules) ou index 0–3 (bracket_pool).
+    pub slot: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct SetBracketScenarioPoolRequest {
+    /// Exactement 4 IDs (non encore assignés aux tours).
+    pub scenario_ids: Vec<i64>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -86,6 +130,11 @@ pub struct SubmitMatchRequest {
     pub player1_army_id: Option<u32>,
     #[serde(default)]
     pub player2_army_id: Option<u32>,
+    /// Slot 1 ou 2 parmi les listes d'inscription (poules) ou d'arbre.
+    #[serde(default)]
+    pub player1_list_slot: Option<u8>,
+    #[serde(default)]
+    pub player2_list_slot: Option<u8>,
     #[serde(default)]
     pub scenario_id: Option<i64>,
     #[serde(default)]
@@ -95,6 +144,42 @@ pub struct SubmitMatchRequest {
 #[derive(Debug, Deserialize)]
 pub struct ForfeitRequest {
     pub forfeit_player: String,
+}
+
+fn registration_list_for_slot(
+    registration: &TournamentRegistration,
+    phase: TournamentPhase,
+    slot: u8,
+) -> Result<String> {
+    let (list1, list2) = if phase == TournamentPhase::Pool {
+        (
+            registration.army_list_1.as_deref(),
+            registration.army_list_2.as_deref(),
+        )
+    } else {
+        (
+            registration.bracket_list_1.as_deref(),
+            registration.bracket_list_2.as_deref(),
+        )
+    };
+    let code = match slot {
+        1 => list1.filter(|s| !s.is_empty()),
+        2 => list2.filter(|s| !s.is_empty()),
+        _ => None,
+    }
+    .context(if phase == TournamentPhase::Pool {
+        "choisissez la liste 1 ou 2 d'inscription"
+    } else {
+        "choisissez la liste 1 ou 2 d'arbre"
+    })?;
+    Ok(code.to_string())
+}
+
+fn registration_has_bracket_lists(registration: &TournamentRegistration) -> bool {
+    registration
+        .bracket_list_1
+        .as_ref()
+        .is_some_and(|s| !s.trim().is_empty())
 }
 
 impl TournamentStore {
@@ -117,7 +202,7 @@ impl TournamentStore {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(
             "
-            SELECT id, name, status, pool_count, bracket_format,
+            SELECT id, name, description, status, pool_count, bracket_format,
                    created_at, started_at, pools_finalized_at, completed_at
             FROM tournaments
             ORDER BY id DESC
@@ -132,7 +217,7 @@ impl TournamentStore {
         let tournaments = {
             let mut stmt = conn.prepare(
                 "
-                SELECT id, name, status, pool_count, bracket_format,
+                SELECT id, name, description, status, pool_count, bracket_format,
                        created_at, started_at, pools_finalized_at, completed_at
                 FROM tournaments
                 ORDER BY id DESC
@@ -147,7 +232,7 @@ impl TournamentStore {
             .map(|tournament| {
                 let registrations = self.list_registrations_in_conn(&conn, tournament.id)?;
                 let matches = self.list_matches_in_conn(&conn, tournament.id)?;
-                let (approved_count, waitlist_count) = registration_counts(&registrations);
+                let (registered_count, waitlist_count) = registration_counts(&registrations);
                 let display_status = compute_display_status(&tournament, &matches);
                 let mut top_four = if tournament.status == TournamentStatus::Completed {
                     compute_top_four(&matches)
@@ -159,14 +244,16 @@ impl TournamentStore {
                     .into_iter()
                     .filter(|m| m.phase != TournamentPhase::Pool)
                     .collect();
+                let pool_scenarios = self.list_scenarios_in_conn(&conn, tournament.id, "pool")?;
 
                 Ok(TournamentListEntry {
                     tournament,
-                    approved_count,
+                    registered_count,
                     waitlist_count,
                     display_status,
                     top_four,
                     bracket_matches,
+                    pool_scenarios,
                 })
             })
             .collect()
@@ -195,6 +282,96 @@ impl TournamentStore {
             .context("tournoi introuvable après création")
     }
 
+    pub fn update_details(
+        &self,
+        tournament_id: i64,
+        request: &UpdateTournamentDetailsRequest,
+    ) -> Result<Tournament> {
+        let name = request.name.trim();
+        if name.is_empty() {
+            bail!("indiquez un nom de tournoi");
+        }
+        let description = request.description.trim();
+
+        let conn = self.conn.lock().unwrap();
+        self.ensure_tournament_exists(&conn, tournament_id)?;
+        let updated = conn.execute(
+            "
+            UPDATE tournaments
+            SET name = ?1, description = ?2
+            WHERE id = ?3
+            ",
+            params![name, description, tournament_id],
+        )?;
+        if updated == 0 {
+            bail!("tournoi introuvable");
+        }
+        self.get_in_conn(&conn, tournament_id)?
+            .context("tournoi introuvable après mise à jour")
+    }
+
+    /// Supprime un tournoi tant que la phase de poules n'a pas démarré
+    /// (`draft` / inscriptions ouvertes ou fermées).
+    pub fn delete(&self, tournament_id: i64) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+        let tournament = self
+            .get_in_conn(&conn, tournament_id)?
+            .context("tournoi introuvable")?;
+
+        match tournament.status {
+            TournamentStatus::Draft
+            | TournamentStatus::RegistrationOpen
+            | TournamentStatus::RegistrationClosed => {}
+            TournamentStatus::Started | TournamentStatus::Completed => {
+                bail!("impossible de supprimer un tournoi dont la phase de poules a démarré");
+            }
+        }
+
+        let tx = conn.unchecked_transaction()?;
+
+        tx.execute(
+            "UPDATE matches SET tournament_id = NULL, tournament_phase = NULL WHERE tournament_id = ?1",
+            params![tournament_id],
+        )?;
+        tx.execute(
+            "DELETE FROM tournament_scenarios WHERE tournament_id = ?1",
+            params![tournament_id],
+        )?;
+        tx.execute(
+            "DELETE FROM tournament_matches WHERE tournament_id = ?1",
+            params![tournament_id],
+        )?;
+        tx.execute(
+            "
+            DELETE FROM pool_players
+            WHERE pool_id IN (SELECT id FROM pools WHERE tournament_id = ?1)
+            ",
+            params![tournament_id],
+        )?;
+        tx.execute(
+            "DELETE FROM pools WHERE tournament_id = ?1",
+            params![tournament_id],
+        )?;
+        tx.execute(
+            "DELETE FROM tournament_players WHERE tournament_id = ?1",
+            params![tournament_id],
+        )?;
+        tx.execute(
+            "DELETE FROM tournament_registrations WHERE tournament_id = ?1",
+            params![tournament_id],
+        )?;
+        let deleted = tx.execute(
+            "DELETE FROM tournaments WHERE id = ?1",
+            params![tournament_id],
+        )?;
+        if deleted == 0 {
+            bail!("tournoi introuvable");
+        }
+
+        tx.commit()?;
+        Ok(())
+    }
+
     pub fn get(&self, id: i64) -> Result<Option<Tournament>> {
         let conn = self.conn.lock().unwrap();
         self.get_in_conn(&conn, id)
@@ -208,7 +385,7 @@ impl TournamentStore {
 
         let registrations = self.list_registrations_in_conn(&conn, id)?;
         let matches = self.list_matches_in_conn(&conn, id)?;
-        let (approved_count, waitlist_count) = registration_counts(&registrations);
+        let (registered_count, waitlist_count) = registration_counts(&registrations);
         let display_status = compute_display_status(&tournament, &matches);
         let mut top_four = if tournament.status == TournamentStatus::Completed {
             compute_top_four(&matches)
@@ -223,10 +400,13 @@ impl TournamentStore {
             pools: self.list_pools_in_conn(&conn, id)?,
             matches,
             tournament,
-            approved_count,
+            registered_count,
             waitlist_count,
             display_status,
             top_four,
+            pool_scenarios: self.list_scenarios_in_conn(&conn, id, "pool")?,
+            bracket_scenario_pool: self.list_scenarios_in_conn(&conn, id, "bracket_pool")?,
+            bracket_scenarios: self.list_scenarios_in_conn(&conn, id, "bracket")?,
         }))
     }
 
@@ -263,7 +443,6 @@ impl TournamentStore {
         tournament_id: i64,
         player_name: &str,
         user_id: i64,
-        army_id: u32,
     ) -> Result<TournamentRegistration> {
         let conn = self.conn.lock().unwrap();
         let tournament = self
@@ -282,8 +461,8 @@ impl TournamentStore {
         conn.execute(
             "
             INSERT INTO tournament_registrations
-                (tournament_id, player_name_key, player_name, user_id, status, requested_at, army_id)
-            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+                (tournament_id, player_name_key, player_name, user_id, status, requested_at)
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6)
             ",
             params![
                 tournament_id,
@@ -292,12 +471,153 @@ impl TournamentStore {
                 user_id,
                 RegistrationStatus::Pending.as_str(),
                 now,
-                army_id,
             ],
         )?;
         let reg_id = conn.last_insert_rowid();
         self.get_registration_in_conn(&conn, reg_id)?
             .context("inscription introuvable")
+    }
+
+    /// Étape 2 : saisir / modifier / supprimer les listes (liste 2 optionnelle).
+    /// Listes vides → suppression ; le statut repasse en attente des listes.
+    pub fn complete_registration_lists(
+        &self,
+        tournament_id: i64,
+        player_name: &str,
+        army_list_1: &str,
+        army_list_2: &str,
+        army_id: Option<u32>,
+    ) -> Result<TournamentRegistration> {
+        let conn = self.conn.lock().unwrap();
+        let tournament = self
+            .get_in_conn(&conn, tournament_id)?
+            .context("tournoi introuvable")?;
+        if tournament.status != TournamentStatus::RegistrationOpen
+            && tournament.status != TournamentStatus::RegistrationClosed
+        {
+            bail!("impossible de mettre à jour les listes pour ce tournoi");
+        }
+
+        let key = normalize_name(player_name);
+        let registration = self
+            .registration_for_player_in_conn(&conn, tournament_id, &key)?
+            .context("inscription introuvable")?;
+        if registration.status != RegistrationStatus::Pending
+            && registration.status != RegistrationStatus::Waitlisted
+            && registration.status != RegistrationStatus::Approved
+        {
+            bail!("cette inscription ne peut plus être modifiée");
+        }
+
+        let list1_opt = crate::army_list::normalize_army_list_code(army_list_1);
+        let list2_opt = crate::army_list::normalize_army_list_code(army_list_2);
+
+        if list1_opt.is_none() {
+            if list2_opt.is_some() {
+                bail!("indiquez la liste 1, ou laissez les deux listes vides pour les supprimer");
+            }
+            // Suppression des listes → en attente des listes.
+            conn.execute(
+                "
+                UPDATE tournament_registrations
+                SET army_id = NULL,
+                    army_list_1 = NULL,
+                    army_list_2 = NULL,
+                    status = ?1,
+                    reviewed_at = NULL,
+                    reviewed_by = NULL,
+                    waitlist_position = NULL
+                WHERE id = ?2
+                ",
+                params![RegistrationStatus::Pending.as_str(), registration.id],
+            )?;
+            return self
+                .get_registration_in_conn(&conn, registration.id)?
+                .context("inscription introuvable");
+        }
+
+        let (list1, list2) = require_lists(army_list_1, army_list_2)?;
+        let army_id = army_id.context("sectorielle manquante")?;
+        let list2_stored = list2.as_deref().unwrap_or("");
+        let lists_changed = registration.army_list_1.as_deref().unwrap_or("") != list1.as_str()
+            || registration.army_list_2.as_deref().unwrap_or("") != list2_stored
+            || registration.army_id != Some(army_id);
+
+        // Toute modification des listes exige une nouvelle validation orga.
+        let reset_to_pending = lists_changed
+            && matches!(
+                registration.status,
+                RegistrationStatus::Approved | RegistrationStatus::Waitlisted
+            );
+
+        if reset_to_pending {
+            conn.execute(
+                "
+                UPDATE tournament_registrations
+                SET army_id = ?1,
+                    army_list_1 = ?2,
+                    army_list_2 = ?3,
+                    status = ?4,
+                    reviewed_at = NULL,
+                    reviewed_by = NULL,
+                    waitlist_position = NULL
+                WHERE id = ?5
+                ",
+                params![
+                    army_id,
+                    list1,
+                    list2_stored,
+                    RegistrationStatus::Pending.as_str(),
+                    registration.id
+                ],
+            )?;
+        } else {
+            conn.execute(
+                "
+                UPDATE tournament_registrations
+                SET army_id = ?1, army_list_1 = ?2, army_list_2 = ?3
+                WHERE id = ?4
+                ",
+                params![army_id, list1, list2_stored, registration.id],
+            )?;
+        }
+        self.get_registration_in_conn(&conn, registration.id)?
+            .context("inscription introuvable")
+    }
+
+    /// Se désinscrire tant que le tournoi n'a pas démarré.
+    pub fn unregister(&self, tournament_id: i64, player_name: &str) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+        let tournament = self
+            .get_in_conn(&conn, tournament_id)?
+            .context("tournoi introuvable")?;
+        match tournament.status {
+            TournamentStatus::Draft
+            | TournamentStatus::RegistrationOpen
+            | TournamentStatus::RegistrationClosed => {}
+            _ => bail!("impossible de se désinscrire après le démarrage du tournoi"),
+        }
+
+        let key = normalize_name(player_name);
+        let registration = self
+            .registration_for_player_in_conn(&conn, tournament_id, &key)?
+            .context("inscription introuvable")?;
+
+        conn.execute(
+            "DELETE FROM tournament_registrations WHERE id = ?1",
+            params![registration.id],
+        )?;
+
+        let mut waitlisted = self.list_registrations_in_conn(&conn, tournament_id)?;
+        waitlisted.retain(|r| r.status == RegistrationStatus::Waitlisted);
+        waitlisted.sort_by_key(|r| r.waitlist_position.unwrap_or(u32::MAX));
+        for (index, reg) in waitlisted.iter().enumerate() {
+            conn.execute(
+                "UPDATE tournament_registrations SET waitlist_position = ?1 WHERE id = ?2",
+                params![(index + 1) as u32, reg.id],
+            )?;
+        }
+        Ok(())
     }
 
     pub fn admin_register(
@@ -306,7 +626,10 @@ impl TournamentStore {
         player_name: &str,
         admin_id: i64,
         army_id: u32,
+        army_list_1: &str,
+        army_list_2: &str,
     ) -> Result<TournamentRegistration> {
+        let (list1, list2) = require_lists(army_list_1, army_list_2)?;
         let conn = self.conn.lock().unwrap();
         let tournament = self
             .get_in_conn(&conn, tournament_id)?
@@ -327,8 +650,9 @@ impl TournamentStore {
         conn.execute(
             "
             INSERT INTO tournament_registrations
-                (tournament_id, player_name_key, player_name, status, requested_at, reviewed_at, reviewed_by, army_id)
-            VALUES (?1, ?2, ?3, ?4, ?5, ?5, ?6, ?7)
+                (tournament_id, player_name_key, player_name, status, requested_at,
+                 reviewed_at, reviewed_by, army_id, army_list_1, army_list_2)
+            VALUES (?1, ?2, ?3, ?4, ?5, ?5, ?6, ?7, ?8, ?9)
             ",
             params![
                 tournament_id,
@@ -338,10 +662,53 @@ impl TournamentStore {
                 now,
                 admin_id,
                 army_id,
+                list1,
+                list2.as_deref().unwrap_or(""),
             ],
         )?;
         let reg_id = conn.last_insert_rowid();
         self.review_registration_in_tx(&conn, reg_id, "approved", admin_id)
+    }
+
+    pub fn update_bracket_lists(
+        &self,
+        tournament_id: i64,
+        player_name: &str,
+        list1: &str,
+        list2: &str,
+    ) -> Result<TournamentRegistration> {
+        let (list1, list2) = require_lists(list1, list2)?;
+        let conn = self.conn.lock().unwrap();
+        let tournament = self
+            .get_in_conn(&conn, tournament_id)?
+            .context("tournoi introuvable")?;
+        if tournament.pools_finalized_at.is_none() {
+            bail!("les listes d'arbre sont disponibles après la finalisation des poules");
+        }
+        if tournament.status == TournamentStatus::Completed {
+            bail!("tournoi terminé");
+        }
+
+        let key = normalize_name(player_name);
+        let updated = conn.execute(
+            "
+            UPDATE tournament_registrations
+            SET bracket_list_1 = ?1, bracket_list_2 = ?2
+            WHERE tournament_id = ?3 AND player_name_key = ?4
+              AND status = 'approved'
+            ",
+            params![
+                list1,
+                list2.as_deref().unwrap_or(""),
+                tournament_id,
+                key
+            ],
+        )?;
+        if updated == 0 {
+            bail!("inscription validée introuvable");
+        }
+        self.registration_for_player_in_conn(&conn, tournament_id, &key)?
+            .context("inscription introuvable")
     }
 
     pub fn review_registration(
@@ -426,58 +793,37 @@ impl TournamentStore {
             |row| row.get(0),
         )?;
 
-        let total_active = approved_count + waitlisted_count;
+        if registration.army_list_1.as_ref().map(|s| s.is_empty()).unwrap_or(true) {
+            bail!("la liste 1 Army est requise pour valider l'inscription");
+        }
 
-        if tournament.pool_count == 4 {
-            if total_active >= WAITLIST_THRESHOLD as i64 {
-                bail!("le tournoi est complet (32 joueurs)");
-            }
+        if registration.army_id.is_none() {
+            bail!("sectorielle manquante pour valider l'inscription");
+        }
 
-            if approved_count >= POOLS_FOUR_CAPACITY as i64 {
-                let waitlist_position = waitlisted_count + 1;
-                conn.execute(
-                    "
-                    UPDATE tournament_registrations
-                    SET status = ?1, reviewed_at = ?2, reviewed_by = ?3, waitlist_position = ?4
-                    WHERE id = ?5
-                    ",
-                    params![
-                        RegistrationStatus::Waitlisted.as_str(),
-                        now,
-                        admin_id,
-                        waitlist_position,
-                        registration.id,
-                    ],
-                )?;
+        let capacity = if tournament.pool_count >= 8 {
+            POOLS_EIGHT_CAPACITY
+        } else {
+            POOLS_FOUR_CAPACITY
+        } as i64;
 
-                if total_active + 1 == WAITLIST_THRESHOLD as i64 {
-                    self.switch_to_eight_pools(conn, registration.tournament_id, now, admin_id)?;
-                }
-                return Ok(());
-            }
-
+        if approved_count >= capacity {
+            let waitlist_position = waitlisted_count + 1;
             conn.execute(
                 "
                 UPDATE tournament_registrations
-                SET status = ?1, reviewed_at = ?2, reviewed_by = ?3, waitlist_position = NULL
-                WHERE id = ?4
+                SET status = ?1, reviewed_at = ?2, reviewed_by = ?3, waitlist_position = ?4
+                WHERE id = ?5
                 ",
                 params![
-                    RegistrationStatus::Approved.as_str(),
+                    RegistrationStatus::Waitlisted.as_str(),
                     now,
                     admin_id,
+                    waitlist_position,
                     registration.id,
                 ],
             )?;
-
-            if total_active + 1 == WAITLIST_THRESHOLD as i64 {
-                self.switch_to_eight_pools(conn, registration.tournament_id, now, admin_id)?;
-            }
             return Ok(());
-        }
-
-        if approved_count >= POOLS_EIGHT_CAPACITY as i64 {
-            bail!("le tournoi est complet (48 joueurs)");
         }
 
         conn.execute(
@@ -491,39 +837,6 @@ impl TournamentStore {
                 now,
                 admin_id,
                 registration.id,
-            ],
-        )?;
-        Ok(())
-    }
-
-    fn switch_to_eight_pools(
-        &self,
-        conn: &Connection,
-        tournament_id: i64,
-        now: u64,
-        admin_id: i64,
-    ) -> Result<()> {
-        conn.execute(
-            "
-            UPDATE tournaments
-            SET pool_count = 8, bracket_format = ?1
-            WHERE id = ?2
-            ",
-            params![BracketFormat::RoundOf16Full.as_str(), tournament_id],
-        )?;
-
-        conn.execute(
-            "
-            UPDATE tournament_registrations
-            SET status = ?1, reviewed_at = ?2, reviewed_by = ?3, waitlist_position = NULL
-            WHERE tournament_id = ?4 AND status = ?5
-            ",
-            params![
-                RegistrationStatus::Approved.as_str(),
-                now,
-                admin_id,
-                tournament_id,
-                RegistrationStatus::Waitlisted.as_str(),
             ],
         )?;
         Ok(())
@@ -654,9 +967,225 @@ impl TournamentStore {
         self.list_pools_in_conn(&conn, tournament_id)
     }
 
+    pub fn draw_pools(&self, tournament_id: i64) -> Result<Vec<Pool>> {
+        let conn = self.conn.lock().unwrap();
+        let tournament = self
+            .get_in_conn(&conn, tournament_id)?
+            .context("tournoi introuvable")?;
+        if tournament.status != TournamentStatus::Started {
+            bail!("le tournoi n'est pas démarré");
+        }
+
+        let snapshots = self.list_snapshots_in_conn(&conn, tournament_id)?;
+        if snapshots.is_empty() {
+            bail!("aucun joueur démarré");
+        }
+
+        let ranked: Vec<(String, f64)> = snapshots
+            .into_iter()
+            .map(|s| (s.player_name, s.start_rating))
+            .collect();
+        let drawn = draw_seeded_pools(&ranked, tournament.pool_count as usize);
+        let letters = "ABCDEFGH";
+        let pools: Vec<PoolSetup> = drawn
+            .into_iter()
+            .enumerate()
+            .map(|(index, players)| PoolSetup {
+                name: format!("Poule {}", letters.chars().nth(index).unwrap_or('?')),
+                position: (index + 1) as u8,
+                players,
+            })
+            .collect();
+
+        drop(conn);
+        self.setup_pools(
+            tournament_id,
+            &SetupPoolsRequest { pools },
+        )
+    }
+
+    pub fn set_pool_scenarios(
+        &self,
+        tournament_id: i64,
+        scenario_ids: &[i64],
+    ) -> Result<Vec<TournamentScenarioSlot>> {
+        if scenario_ids.len() != POOL_SCENARIO_LETTERS.len() {
+            bail!("il faut exactement 5 scénarios (A–E)");
+        }
+        let slots = ["A", "B", "C", "D", "E"];
+        self.replace_scenario_kind(tournament_id, "pool", scenario_ids, &slots)
+    }
+
+    pub fn draw_pool_scenarios(
+        &self,
+        tournament_id: i64,
+    ) -> Result<Vec<TournamentScenarioSlot>> {
+        let ids = self.pick_random_scenario_ids(POOL_SCENARIO_LETTERS.len())?;
+        self.set_pool_scenarios(tournament_id, &ids)
+    }
+
+    pub fn reroll_pool_scenario(
+        &self,
+        tournament_id: i64,
+        letter: &str,
+    ) -> Result<Vec<TournamentScenarioSlot>> {
+        let letter = letter.trim().to_uppercase();
+        if !POOL_SCENARIO_LETTERS.iter().any(|c| c.to_string() == letter) {
+            bail!("lettre de scénario invalide");
+        }
+        let conn = self.conn.lock().unwrap();
+        self.ensure_tournament_exists(&conn, tournament_id)?;
+        let current = self.list_scenarios_in_conn(&conn, tournament_id, "pool")?;
+        let used: Vec<i64> = current.iter().map(|s| s.scenario_id).collect();
+        let new_id = self.pick_random_scenario_excluding(&conn, &used)?;
+        conn.execute(
+            "
+            INSERT INTO tournament_scenarios (tournament_id, kind, slot, scenario_id)
+            VALUES (?1, 'pool', ?2, ?3)
+            ON CONFLICT(tournament_id, kind, slot) DO UPDATE SET scenario_id = excluded.scenario_id
+            ",
+            params![tournament_id, letter, new_id],
+        )?;
+        self.list_scenarios_in_conn(&conn, tournament_id, "pool")
+    }
+
+    pub fn set_bracket_scenario_pool(
+        &self,
+        tournament_id: i64,
+        scenario_ids: &[i64],
+    ) -> Result<Vec<TournamentScenarioSlot>> {
+        let conn = self.conn.lock().unwrap();
+        let tournament = self
+            .get_in_conn(&conn, tournament_id)?
+            .context("tournoi introuvable")?;
+        if tournament.pools_finalized_at.is_none() {
+            bail!("finalisez les poules avant de choisir les scénarios d'arbre");
+        }
+        let expected = bracket_scenario_phases(tournament.bracket_format).len();
+        if scenario_ids.len() != expected {
+            bail!("il faut exactement {expected} scénarios pour l'arbre");
+        }
+        drop(conn);
+        let slots: Vec<String> = (0..expected).map(|i| i.to_string()).collect();
+        let slot_refs: Vec<&str> = slots.iter().map(String::as_str).collect();
+        // Clear any previous phase assignment when re-picking the pool.
+        {
+            let conn = self.conn.lock().unwrap();
+            conn.execute(
+                "DELETE FROM tournament_scenarios WHERE tournament_id = ?1 AND kind = 'bracket'",
+                params![tournament_id],
+            )?;
+        }
+        self.replace_scenario_kind(tournament_id, "bracket_pool", scenario_ids, &slot_refs)
+    }
+
+    pub fn draw_bracket_scenario_pool(
+        &self,
+        tournament_id: i64,
+    ) -> Result<Vec<TournamentScenarioSlot>> {
+        let conn = self.conn.lock().unwrap();
+        let tournament = self
+            .get_in_conn(&conn, tournament_id)?
+            .context("tournoi introuvable")?;
+        let count = bracket_scenario_phases(tournament.bracket_format).len();
+        drop(conn);
+        let ids = self.pick_random_scenario_ids(count)?;
+        self.set_bracket_scenario_pool(tournament_id, &ids)
+    }
+
+    pub fn reroll_bracket_scenario_pool_slot(
+        &self,
+        tournament_id: i64,
+        slot: &str,
+    ) -> Result<Vec<TournamentScenarioSlot>> {
+        let conn = self.conn.lock().unwrap();
+        let tournament = self
+            .get_in_conn(&conn, tournament_id)?
+            .context("tournoi introuvable")?;
+        let expected = bracket_scenario_phases(tournament.bracket_format).len();
+        let index: usize = slot
+            .parse()
+            .map_err(|_| anyhow::anyhow!("slot d'arbre invalide"))?;
+        if index >= expected {
+            bail!("slot d'arbre invalide");
+        }
+        let current = self.list_scenarios_in_conn(&conn, tournament_id, "bracket_pool")?;
+        let used: Vec<i64> = current.iter().map(|s| s.scenario_id).collect();
+        let new_id = self.pick_random_scenario_excluding(&conn, &used)?;
+        conn.execute(
+            "
+            INSERT INTO tournament_scenarios (tournament_id, kind, slot, scenario_id)
+            VALUES (?1, 'bracket_pool', ?2, ?3)
+            ON CONFLICT(tournament_id, kind, slot) DO UPDATE SET scenario_id = excluded.scenario_id
+            ",
+            params![tournament_id, index.to_string(), new_id],
+        )?;
+        // Invalidate prior phase assignment
+        conn.execute(
+            "DELETE FROM tournament_scenarios WHERE tournament_id = ?1 AND kind = 'bracket'",
+            params![tournament_id],
+        )?;
+        self.list_scenarios_in_conn(&conn, tournament_id, "bracket_pool")
+    }
+
+    /// Mélange le pool de 4 scénarios et les assigne aux tours d'arbre + matchs.
+    pub fn assign_bracket_scenarios(&self, tournament_id: i64) -> Result<Vec<TournamentScenarioSlot>> {
+        use rand::seq::SliceRandom;
+
+        let conn = self.conn.lock().unwrap();
+        let tournament = self
+            .get_in_conn(&conn, tournament_id)?
+            .context("tournoi introuvable")?;
+        let phases = bracket_scenario_phases(tournament.bracket_format);
+        let mut pool = self.list_scenarios_in_conn(&conn, tournament_id, "bracket_pool")?;
+        if pool.len() != phases.len() {
+            bail!(
+                "choisissez d'abord {} scénarios pour l'arbre",
+                phases.len()
+            );
+        }
+        pool.shuffle(&mut rand::rng());
+
+        let tx = conn.unchecked_transaction()?;
+        tx.execute(
+            "DELETE FROM tournament_scenarios WHERE tournament_id = ?1 AND kind = 'bracket'",
+            params![tournament_id],
+        )?;
+        for (phase, slot) in phases.iter().zip(pool.iter()) {
+            tx.execute(
+                "
+                INSERT INTO tournament_scenarios (tournament_id, kind, slot, scenario_id)
+                VALUES (?1, 'bracket', ?2, ?3)
+                ",
+                params![tournament_id, phase.as_str(), slot.scenario_id],
+            )?;
+            tx.execute(
+                "
+                UPDATE tournament_matches
+                SET scenario_id = ?1, scenario_other = NULL
+                WHERE tournament_id = ?2 AND phase = ?3
+                ",
+                params![slot.scenario_id, tournament_id, phase.as_str()],
+            )?;
+        }
+        tx.commit()?;
+        self.list_scenarios_in_conn(&conn, tournament_id, "bracket")
+    }
+
     pub fn generate_pool_matches(&self, tournament_id: i64) -> Result<Vec<TournamentMatch>> {
         let conn = self.conn.lock().unwrap();
         let pools = self.list_pools_in_conn(&conn, tournament_id)?;
+        let pool_scenarios = self.list_scenarios_in_conn(&conn, tournament_id, "pool")?;
+        if pool_scenarios.len() != POOL_SCENARIO_LETTERS.len() {
+            bail!("définissez les 5 scénarios de poule (A–E) avant de générer les matchs");
+        }
+        let letter_to_id: HashMap<char, i64> = pool_scenarios
+            .iter()
+            .filter_map(|s| {
+                let letter = s.slot.chars().next()?;
+                Some((letter, s.scenario_id))
+            })
+            .collect();
 
         let tx = conn.unchecked_transaction()?;
         tx.execute(
@@ -665,15 +1194,18 @@ impl TournamentStore {
         )?;
 
         for pool in &pools {
-            let pairs = pool_round_robin_pairs(pool.players.len());
+            let n = pool.players.len();
+            let pairs = pool_round_robin_pairs(n);
             for (i, j) in pairs {
                 let p1 = &pool.players[i];
                 let p2 = &pool.players[j];
+                let scenario_id = pool_scenario_letter(n, p1.seed as usize, p2.seed as usize)
+                    .and_then(|letter| letter_to_id.get(&letter).copied());
                 tx.execute(
                     "
                     INSERT INTO tournament_matches
-                        (tournament_id, phase, pool_id, player1, player2, status)
-                    VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+                        (tournament_id, phase, pool_id, player1, player2, status, scenario_id)
+                    VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
                     ",
                     params![
                         tournament_id,
@@ -682,6 +1214,7 @@ impl TournamentStore {
                         p1.player_name,
                         p2.player_name,
                         TournamentMatchStatus::Scheduled.as_str(),
+                        scenario_id,
                     ],
                 )?;
             }
@@ -727,6 +1260,32 @@ impl TournamentStore {
                 bail!("vous ne participez pas à ce match");
             }
         }
+
+        let reg1 = self
+            .registration_for_player_in_conn(&conn, tm.tournament_id, &normalize_name(&p1))?
+            .context("inscription du joueur 1 introuvable")?;
+        let reg2 = self
+            .registration_for_player_in_conn(&conn, tm.tournament_id, &normalize_name(&p2))?
+            .context("inscription du joueur 2 introuvable")?;
+
+        let (list1, list2) = match (request.player1_list_slot, request.player2_list_slot) {
+            (Some(slot1), Some(slot2)) => {
+                if tm.phase != TournamentPhase::Pool {
+                    if !registration_has_bracket_lists(&reg1) {
+                        bail!("le joueur 1 doit saisir sa liste d'arbre avant de jouer");
+                    }
+                    if !registration_has_bracket_lists(&reg2) {
+                        bail!("le joueur 2 doit saisir sa liste d'arbre avant de jouer");
+                    }
+                }
+                (
+                    Some(registration_list_for_slot(&reg1, tm.phase, slot1)?),
+                    Some(registration_list_for_slot(&reg2, tm.phase, slot2)?),
+                )
+            }
+            (None, None) if is_admin => (None, None),
+            _ => bail!("choisissez la liste de chaque joueur (1 ou 2)"),
+        };
 
         if request.player1_objectives > 10 || request.player2_objectives > 10 {
             bail!("objectifs invalides");
@@ -809,8 +1368,9 @@ impl TournamentStore {
                 confirmed_by_user_id = ?15, confirmed_at = ?16,
                 scenario_id = ?17, scenario_other = ?18,
                 player1_army_id = ?19, player2_army_id = ?20,
-                played_at = ?21
-            WHERE id = ?22
+                player1_army_list_code = ?21, player2_army_list_code = ?22,
+                played_at = ?23
+            WHERE id = ?24
             ",
             params![
                 request.player1_objectives,
@@ -837,6 +1397,8 @@ impl TournamentStore {
                 scenario_other,
                 player1_army_id,
                 player2_army_id,
+                list1,
+                list2,
                 now,
                 match_id,
             ],
@@ -1794,6 +2356,10 @@ impl TournamentStore {
         }
 
         tx.commit()?;
+        drop(conn);
+        // Assigne les scénarios d'arbre s'ils sont déjà choisis ; sinon l'orga pourra le faire après.
+        let _ = self.assign_bracket_scenarios(tournament_id);
+        let conn = self.conn.lock().unwrap();
         self.list_matches_in_conn(&conn, tournament_id)
     }
 
@@ -1837,6 +2403,9 @@ impl TournamentStore {
         }
 
         tx.commit()?;
+        drop(conn);
+        let _ = self.assign_bracket_scenarios(tournament_id);
+        let conn = self.conn.lock().unwrap();
         self.list_matches_in_conn(&conn, tournament_id)
     }
 
@@ -2377,7 +2946,7 @@ impl TournamentStore {
                AND tr.player_name_key = tp.player_name_key
                AND tr.status = 'approved'
             WHERE tp.player_name_key = ?1 AND t.status = 'completed'
-            ORDER BY t.completed_at DESC
+            ORDER BY t.id DESC
             ",
         )?;
         let rows = stmt.query_map(params![key], |row| {
@@ -2476,7 +3045,7 @@ impl TournamentStore {
     fn get_in_conn(&self, conn: &Connection, id: i64) -> Result<Option<Tournament>> {
         let mut stmt = conn.prepare(
             "
-            SELECT id, name, status, pool_count, bracket_format,
+            SELECT id, name, description, status, pool_count, bracket_format,
                    created_at, started_at, pools_finalized_at, completed_at
             FROM tournaments WHERE id = ?1
             ",
@@ -2496,7 +3065,8 @@ impl TournamentStore {
         let mut stmt = conn.prepare(
             "
             SELECT id, tournament_id, player_name, user_id, status,
-                   waitlist_position, requested_at, reviewed_at, reviewed_by, army_id
+                   waitlist_position, requested_at, reviewed_at, reviewed_by, army_id,
+                   army_list_1, army_list_2, bracket_list_1, bracket_list_2
             FROM tournament_registrations
             WHERE tournament_id = ?1
             ORDER BY requested_at ASC
@@ -2504,6 +3074,144 @@ impl TournamentStore {
         )?;
         let rows = stmt.query_map(params![tournament_id], row_to_registration)?;
         rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
+    }
+
+    fn ensure_tournament_exists(&self, conn: &Connection, tournament_id: i64) -> Result<()> {
+        if self.get_in_conn(conn, tournament_id)?.is_none() {
+            bail!("tournoi introuvable");
+        }
+        Ok(())
+    }
+
+    fn list_scenarios_in_conn(
+        &self,
+        conn: &Connection,
+        tournament_id: i64,
+        kind: &str,
+    ) -> Result<Vec<TournamentScenarioSlot>> {
+        let mut stmt = conn.prepare(
+            "
+            SELECT ts.kind, ts.slot, ts.scenario_id, s.name, COALESCE(s.slug, '')
+            FROM tournament_scenarios ts
+            JOIN scenarios s ON s.id = ts.scenario_id
+            WHERE ts.tournament_id = ?1 AND ts.kind = ?2
+            ORDER BY ts.slot
+            ",
+        )?;
+        let rows = stmt.query_map(params![tournament_id, kind], |row| {
+            Ok(TournamentScenarioSlot {
+                kind: row.get(0)?,
+                slot: row.get(1)?,
+                scenario_id: row.get(2)?,
+                scenario_name: row.get(3)?,
+                scenario_slug: row.get(4)?,
+            })
+        })?;
+        rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
+    }
+
+    fn replace_scenario_kind(
+        &self,
+        tournament_id: i64,
+        kind: &str,
+        scenario_ids: &[i64],
+        slots: &[&str],
+    ) -> Result<Vec<TournamentScenarioSlot>> {
+        if scenario_ids.len() != slots.len() {
+            bail!("nombre de scénarios incohérent");
+        }
+        let mut unique = scenario_ids.to_vec();
+        unique.sort_unstable();
+        unique.dedup();
+        if unique.len() != scenario_ids.len() {
+            bail!("les scénarios doivent être distincts");
+        }
+
+        let conn = self.conn.lock().unwrap();
+        self.ensure_tournament_exists(&conn, tournament_id)?;
+        for id in scenario_ids {
+            let exists: bool = conn.query_row(
+                "SELECT EXISTS(SELECT 1 FROM scenarios WHERE id = ?1)",
+                params![id],
+                |row| row.get(0),
+            )?;
+            if !exists {
+                bail!("scénario introuvable ({id})");
+            }
+        }
+
+        let tx = conn.unchecked_transaction()?;
+        tx.execute(
+            "DELETE FROM tournament_scenarios WHERE tournament_id = ?1 AND kind = ?2",
+            params![tournament_id, kind],
+        )?;
+        for (slot, scenario_id) in slots.iter().zip(scenario_ids.iter()) {
+            tx.execute(
+                "
+                INSERT INTO tournament_scenarios (tournament_id, kind, slot, scenario_id)
+                VALUES (?1, ?2, ?3, ?4)
+                ",
+                params![tournament_id, kind, *slot, scenario_id],
+            )?;
+        }
+        tx.commit()?;
+        self.list_scenarios_in_conn(&conn, tournament_id, kind)
+    }
+
+    fn pick_random_scenario_ids(&self, count: usize) -> Result<Vec<i64>> {
+        use rand::seq::SliceRandom;
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "
+            SELECT id FROM scenarios
+            WHERE pack_id IS NOT NULL
+            ORDER BY sort_order, id
+            ",
+        )?;
+        let mut ids: Vec<i64> = stmt
+            .query_map([], |row| row.get(0))?
+            .collect::<Result<Vec<_>, _>>()?;
+        if ids.len() < count {
+            bail!("pas assez de scénarios dans le catalogue ({})", ids.len());
+        }
+        ids.shuffle(&mut rand::rng());
+        ids.truncate(count);
+        Ok(ids)
+    }
+
+    fn pick_random_scenario_excluding(
+        &self,
+        conn: &Connection,
+        exclude: &[i64],
+    ) -> Result<i64> {
+        use rand::seq::SliceRandom;
+        let mut stmt = conn.prepare(
+            "
+            SELECT id FROM scenarios
+            WHERE pack_id IS NOT NULL
+            ORDER BY sort_order, id
+            ",
+        )?;
+        let mut ids: Vec<i64> = stmt
+            .query_map([], |row| row.get(0))?
+            .collect::<Result<Vec<_>, _>>()?
+            .into_iter()
+            .filter(|id| !exclude.contains(id))
+            .collect();
+        if ids.is_empty() {
+            // If everything is used, allow any pack scenario.
+            let mut all: Vec<i64> = conn
+                .prepare("SELECT id FROM scenarios WHERE pack_id IS NOT NULL")?
+                .query_map([], |row| row.get(0))?
+                .collect::<Result<Vec<_>, _>>()?;
+            all.shuffle(&mut rand::rng());
+            return all
+                .into_iter()
+                .next()
+                .context("aucun scénario disponible");
+        }
+        ids.shuffle(&mut rand::rng());
+        ids.into_iter().next().context("aucun scénario disponible")
     }
 
     fn list_snapshots_in_conn(
@@ -2633,7 +3341,8 @@ impl TournamentStore {
                    tm.confirmed_by_user_id, tm.confirmed_at,
                    tm.scenario_id, tm.scenario_other,
                    COALESCE(s.name, tm.scenario_other),
-                   tm.player1_army_id, tm.player2_army_id, tm.played_at, tm.is_unplayed
+                   tm.player1_army_id, tm.player2_army_id, tm.played_at, tm.is_unplayed,
+                   tm.player1_army_list_code, tm.player2_army_list_code
             FROM tournament_matches tm
             LEFT JOIN scenarios s ON s.id = tm.scenario_id
             WHERE tm.id = ?1
@@ -2674,7 +3383,8 @@ impl TournamentStore {
         let mut stmt = conn.prepare(
             "
             SELECT id, tournament_id, player_name, user_id, status,
-                   waitlist_position, requested_at, reviewed_at, reviewed_by, army_id
+                   waitlist_position, requested_at, reviewed_at, reviewed_by, army_id,
+                   army_list_1, army_list_2, bracket_list_1, bracket_list_2
             FROM tournament_registrations WHERE id = ?1
             ",
         )?;
@@ -2764,19 +3474,20 @@ fn parse_outcome(value: &str) -> Option<MatchOutcome> {
 }
 
 fn row_to_tournament(row: &rusqlite::Row<'_>) -> rusqlite::Result<Tournament> {
-    let status_str: String = row.get(2)?;
-    let format_str: String = row.get(4)?;
+    let status_str: String = row.get(3)?;
+    let format_str: String = row.get(5)?;
     Ok(Tournament {
         id: row.get(0)?,
         name: row.get(1)?,
+        description: row.get(2)?,
         status: TournamentStatus::parse(&status_str).unwrap_or(TournamentStatus::Draft),
-        pool_count: row.get(3)?,
+        pool_count: row.get(4)?,
         bracket_format: BracketFormat::parse(&format_str)
             .unwrap_or(BracketFormat::QuartersDirect),
-        created_at: row.get(5)?,
-        started_at: row.get(6)?,
-        pools_finalized_at: row.get(7)?,
-        completed_at: row.get(8)?,
+        created_at: row.get(6)?,
+        started_at: row.get(7)?,
+        pools_finalized_at: row.get(8)?,
+        completed_at: row.get(9)?,
     })
 }
 
@@ -2794,6 +3505,14 @@ fn row_to_registration(row: &rusqlite::Row<'_>) -> rusqlite::Result<TournamentRe
         reviewed_at: row.get(7)?,
         reviewed_by: row.get(8)?,
         army_id: row.get(9)?,
+        army_list_1: row.get(10)?,
+        army_list_2: row.get(11)?,
+        bracket_list_1: row.get(12)?,
+        bracket_list_2: row.get(13)?,
+        has_army_lists: false,
+        has_bracket_lists: false,
+        has_army_list_2: false,
+        has_bracket_list_2: false,
     })
 }
 
@@ -2839,6 +3558,8 @@ fn row_to_tournament_match(row: &rusqlite::Row<'_>) -> rusqlite::Result<Tourname
         player2_army_id: row.get(30)?,
         played_at: row.get(31)?,
         is_unplayed: row.get::<_, i64>(32)? != 0,
+        player1_army_list_code: row.get(33)?,
+        player2_army_list_code: row.get(34)?,
     })
 }
 
@@ -2895,6 +3616,8 @@ mod tests {
             player2_survivors: 84,
             player1_army_id: None,
             player2_army_id: None,
+            player1_list_slot: None,
+            player2_list_slot: None,
             scenario_id: None,
             scenario_other: None,
         };
@@ -2938,6 +3661,8 @@ mod tests {
             player2_survivors: 40,
             player1_army_id: None,
             player2_army_id: None,
+            player1_list_slot: None,
+            player2_list_slot: None,
             scenario_id: None,
             scenario_other: None,
         };
@@ -2975,6 +3700,8 @@ mod tests {
             player2_survivors: 60,
             player1_army_id: None,
             player2_army_id: None,
+            player1_list_slot: None,
+            player2_list_slot: None,
             scenario_id: None,
             scenario_other: None,
         };

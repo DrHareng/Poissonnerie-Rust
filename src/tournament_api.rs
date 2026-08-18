@@ -15,13 +15,15 @@ use crate::{
     match_record::MatchScores,
     player::{MatchOutcome, RatingUpdate},
     store::Leaderboard,
-    tournament::TournamentMatchStatus,
+    tournament::{TournamentMatchStatus, TournamentStatus},
     User,
 };
 
 use crate::tournament_store::{
-    AdminRegisterRequest, CreateTournamentRequest, ForfeitRequest, RegisterRequest,
-    SetupPoolsRequest, SubmitMatchRequest,
+    AdminRegisterRequest, CompleteRegistrationListsRequest, CreateTournamentRequest, ForfeitRequest,
+    RegisterRequest, RerollScenarioRequest, SetBracketScenarioPoolRequest, SetPoolScenariosRequest,
+    SetupPoolsRequest, SubmitMatchRequest, UpdateBracketListsRequest,
+    UpdateTournamentDetailsRequest,
 };
 
 async fn require_user(state: &AppState, session: &Session) -> Result<User, ApiError> {
@@ -83,6 +85,10 @@ async fn viewer_context(state: &AppState, session: &Session) -> ViewerContext {
     }
 }
 
+fn tournament_visible_to_viewer(status: TournamentStatus, is_admin: bool) -> bool {
+    is_admin || status != TournamentStatus::Draft
+}
+
 fn mask_registrations(
     tournament: &crate::tournament::Tournament,
     registrations: Vec<crate::tournament::TournamentRegistration>,
@@ -92,10 +98,28 @@ fn mask_registrations(
         tournament.status,
         crate::tournament::TournamentStatus::Started | crate::tournament::TournamentStatus::Completed
     );
+    let lists_public = tournament.status == crate::tournament::TournamentStatus::Completed;
 
     registrations
         .into_iter()
         .map(|mut registration| {
+            registration.has_army_lists = registration
+                .army_list_1
+                .as_ref()
+                .is_some_and(|s| !s.trim().is_empty());
+            registration.has_bracket_lists = registration
+                .bracket_list_1
+                .as_ref()
+                .is_some_and(|s| !s.trim().is_empty());
+            registration.has_army_list_2 = registration
+                .army_list_2
+                .as_ref()
+                .is_some_and(|s| !s.trim().is_empty());
+            registration.has_bracket_list_2 = registration
+                .bracket_list_2
+                .as_ref()
+                .is_some_and(|s| !s.trim().is_empty());
+
             let is_own = viewer
                 .player_name
                 .as_ref()
@@ -107,9 +131,48 @@ fn mask_registrations(
             if !armies_public && !viewer.is_admin && !is_own {
                 registration.army_id = None;
             }
+            // Listes secrètes jusqu'à la fin du tournoi (sauf pour soi / admin avant démarrage).
+            let can_see_lists = lists_public
+                || is_own
+                || (viewer.is_admin
+                    && !matches!(
+                        tournament.status,
+                        crate::tournament::TournamentStatus::Started
+                    ));
+            if !can_see_lists {
+                registration.army_list_1 = None;
+                registration.army_list_2 = None;
+                registration.bracket_list_1 = None;
+                registration.bracket_list_2 = None;
+            }
             registration
         })
         .collect()
+}
+
+fn mask_tournament_match_lists(
+    tournament: &crate::tournament::Tournament,
+    matches: &mut [crate::tournament::TournamentMatch],
+    viewer: &ViewerContext,
+) {
+    if tournament.status == TournamentStatus::Completed {
+        return;
+    }
+    for tm in matches {
+        let is_participant = viewer.player_name.as_ref().is_some_and(|name| {
+            tm.player1.as_ref().is_some_and(|p| {
+                crate::store::normalize_name(name) == crate::store::normalize_name(p)
+            }) || tm.player2.as_ref().is_some_and(|p| {
+                crate::store::normalize_name(name) == crate::store::normalize_name(p)
+            })
+        });
+        let revealed_to_participants =
+            tm.status == crate::tournament::TournamentMatchStatus::Confirmed;
+        if !revealed_to_participants || !is_participant {
+            tm.player1_army_list_code = None;
+            tm.player2_army_list_code = None;
+        }
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -165,7 +228,12 @@ pub fn tournament_routes() -> axum::Router<AppState> {
             get(get_pack_scenario).patch(update_pack_scenario),
         )
         .route("/api/tournaments", get(list_tournaments).post(create_tournament))
-        .route("/api/tournaments/{id}", get(get_tournament))
+        .route(
+            "/api/tournaments/{id}",
+            get(get_tournament)
+                .patch(update_tournament_details)
+                .delete(delete_tournament),
+        )
         .route(
             "/api/tournaments/{id}/open-registration",
             post(open_registration),
@@ -176,6 +244,14 @@ pub fn tournament_routes() -> axum::Router<AppState> {
         )
         .route("/api/tournaments/{id}/register", post(register_tournament))
         .route(
+            "/api/tournaments/{id}/register/lists",
+            post(complete_registration_lists),
+        )
+        .route(
+            "/api/tournaments/{id}/unregister",
+            post(unregister_tournament),
+        )
+        .route(
             "/api/tournaments/{id}/registrations",
             post(admin_register).get(list_registrations),
         )
@@ -185,6 +261,39 @@ pub fn tournament_routes() -> axum::Router<AppState> {
         )
         .route("/api/tournaments/{id}/start", post(start_tournament))
         .route("/api/tournaments/{id}/pools", post(setup_pools))
+        .route("/api/tournaments/{id}/draw-pools", post(draw_pools))
+        .route(
+            "/api/tournaments/{id}/pool-scenarios",
+            post(set_pool_scenarios),
+        )
+        .route(
+            "/api/tournaments/{id}/pool-scenarios/draw",
+            post(draw_pool_scenarios),
+        )
+        .route(
+            "/api/tournaments/{id}/pool-scenarios/reroll",
+            post(reroll_pool_scenario),
+        )
+        .route(
+            "/api/tournaments/{id}/bracket-scenarios",
+            post(set_bracket_scenario_pool),
+        )
+        .route(
+            "/api/tournaments/{id}/bracket-scenarios/draw",
+            post(draw_bracket_scenario_pool),
+        )
+        .route(
+            "/api/tournaments/{id}/bracket-scenarios/reroll",
+            post(reroll_bracket_scenario_pool),
+        )
+        .route(
+            "/api/tournaments/{id}/bracket-scenarios/assign",
+            post(assign_bracket_scenarios),
+        )
+        .route(
+            "/api/tournaments/{id}/bracket-lists",
+            post(update_my_bracket_lists),
+        )
         .route(
             "/api/tournaments/{id}/generate-pool-matches",
             post(generate_pool_matches),
@@ -355,7 +464,9 @@ async fn update_pack_scenario(
 
 async fn list_tournaments(
     State(state): State<AppState>,
+    session: Session,
 ) -> Result<Json<Vec<crate::tournament::TournamentListEntry>>, ApiError> {
+    let viewer = viewer_context(&state, &session).await;
     let entries = state.tournaments.list_entries().map_err(|error| {
         ApiError::bad_request(error.to_string())
     })?;
@@ -366,6 +477,9 @@ async fn list_tournaments(
     Ok(Json(
         entries
             .into_iter()
+            .filter(|entry| {
+                tournament_visible_to_viewer(entry.tournament.status, viewer.is_admin)
+            })
             .map(|mut entry| {
                 for top_entry in &mut entry.top_four {
                     top_entry.player_display_name =
@@ -390,6 +504,33 @@ async fn create_tournament(
     Ok((StatusCode::CREATED, Json(tournament)))
 }
 
+async fn delete_tournament(
+    State(state): State<AppState>,
+    session: Session,
+    Path(id): Path<i64>,
+) -> Result<StatusCode, ApiError> {
+    require_admin(&state, &session).await?;
+    state
+        .tournaments
+        .delete(id)
+        .map_err(|error| ApiError::bad_request(error.to_string()))?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+async fn update_tournament_details(
+    State(state): State<AppState>,
+    session: Session,
+    Path(id): Path<i64>,
+    Json(payload): Json<UpdateTournamentDetailsRequest>,
+) -> Result<Json<crate::tournament::Tournament>, ApiError> {
+    require_admin(&state, &session).await?;
+    let tournament = state
+        .tournaments
+        .update_details(id, &payload)
+        .map_err(|error| ApiError::bad_request(error.to_string()))?;
+    Ok(Json(tournament))
+}
+
 async fn get_tournament(
     State(state): State<AppState>,
     session: Session,
@@ -402,8 +543,13 @@ async fn get_tournament(
         .map_err(|error| ApiError::bad_request(error.to_string()))?
         .ok_or_else(|| ApiError::bad_request("tournoi introuvable"))?;
 
+    if !tournament_visible_to_viewer(detail.tournament.status, viewer.is_admin) {
+        return Err(ApiError::bad_request("tournoi introuvable"));
+    }
+
     detail.registrations =
         mask_registrations(&detail.tournament, detail.registrations, &viewer);
+    mask_tournament_match_lists(&detail.tournament, &mut detail.matches, &viewer);
 
     let board = state.board.lock().unwrap();
     let resolver = crate::display_name::PlayerDisplayResolver::new(&board, state.users.as_ref());
@@ -436,23 +582,102 @@ async fn close_registration(
         .map_err(|error| ApiError::bad_request(error.to_string()))
 }
 
+fn resolve_army_id_from_lists(
+    state: &AppState,
+    list1: &str,
+    list2: &str,
+    explicit: Option<u32>,
+) -> Result<u32, ApiError> {
+    if let Some(army_id) = explicit {
+        state
+            .armies
+            .validate_selectable_id(army_id)
+            .map_err(|error| ApiError::bad_request(error.to_string()))?;
+        return Ok(army_id);
+    }
+
+    let slug1 = crate::army_list::parse_army_list_faction_slug(list1)
+        .ok_or_else(|| ApiError::bad_request("impossible de lire la sectorielle depuis la liste 1"))?;
+    if let Some(list2_code) = crate::army_list::normalize_army_list_code(list2) {
+        let slug2 = crate::army_list::parse_army_list_faction_slug(&list2_code)
+            .ok_or_else(|| ApiError::bad_request("impossible de lire la sectorielle depuis la liste 2"))?;
+        if !slug1.eq_ignore_ascii_case(&slug2) {
+            return Err(ApiError::bad_request(
+                "les deux listes doivent appartenir à la même sectorielle",
+            ));
+        }
+    }
+
+    let army = state
+        .armies
+        .get_by_slug(&slug1)
+        .map_err(|error| ApiError::bad_request(error.to_string()))?
+        .ok_or_else(|| {
+            ApiError::bad_request(format!("sectorielle inconnue pour le slug « {slug1} »"))
+        })?;
+    Ok(army.id)
+}
+
 async fn register_tournament(
     State(state): State<AppState>,
     session: Session,
     Path(id): Path<i64>,
-    Json(payload): Json<RegisterRequest>,
+    Json(_payload): Json<RegisterRequest>,
 ) -> Result<(StatusCode, Json<crate::tournament::TournamentRegistration>), ApiError> {
     let (user, player_name) = require_player(&state, &session).await?;
-    state
-        .armies
-        .validate_selectable_id(payload.army_id)
-        .map_err(|error| ApiError::bad_request(error.to_string()))?;
-
     let registration = state
         .tournaments
-        .register(id, &player_name, user.id, payload.army_id)
+        .register(id, &player_name, user.id)
         .map_err(|error| ApiError::bad_request(error.to_string()))?;
     Ok((StatusCode::CREATED, Json(registration)))
+}
+
+async fn complete_registration_lists(
+    State(state): State<AppState>,
+    session: Session,
+    Path(id): Path<i64>,
+    Json(payload): Json<CompleteRegistrationListsRequest>,
+) -> Result<Json<crate::tournament::TournamentRegistration>, ApiError> {
+    let (_user, player_name) = require_player(&state, &session).await?;
+
+    let list1 = crate::army_list::normalize_army_list_code(&payload.army_list_1);
+    let list2 = crate::army_list::normalize_army_list_code(&payload.army_list_2);
+
+    if list1.is_none() {
+        if list2.is_some() {
+            return Err(ApiError::bad_request(
+                "indiquez la liste 1, ou laissez les deux listes vides pour les supprimer",
+            ));
+        }
+        let registration = state
+            .tournaments
+            .complete_registration_lists(id, &player_name, "", "", None)
+            .map_err(|error| ApiError::bad_request(error.to_string()))?;
+        return Ok(Json(registration));
+    }
+
+    let (list1, list2) = crate::army_list::require_lists(&payload.army_list_1, &payload.army_list_2)
+        .map_err(|error| ApiError::bad_request(error.to_string()))?;
+    let list2 = list2.unwrap_or_default();
+    let army_id = resolve_army_id_from_lists(&state, &list1, &list2, None)?;
+    let registration = state
+        .tournaments
+        .complete_registration_lists(id, &player_name, &list1, &list2, Some(army_id))
+        .map_err(|error| ApiError::bad_request(error.to_string()))?;
+    Ok(Json(registration))
+}
+
+async fn unregister_tournament(
+    State(state): State<AppState>,
+    session: Session,
+    Path(id): Path<i64>,
+) -> Result<StatusCode, ApiError> {
+    let (_user, player_name) = require_player(&state, &session).await?;
+    state
+        .tournaments
+        .unregister(id, &player_name)
+        .map_err(|error| ApiError::bad_request(error.to_string()))?;
+    Ok(StatusCode::NO_CONTENT)
 }
 
 async fn admin_register(
@@ -467,11 +692,6 @@ async fn admin_register(
         return Err(ApiError::bad_request("indiquez un joueur"));
     }
 
-    state
-        .armies
-        .validate_selectable_id(payload.army_id)
-        .map_err(|error| ApiError::bad_request(error.to_string()))?;
-
     {
         let board = state.board.lock().unwrap();
         board
@@ -479,9 +699,23 @@ async fn admin_register(
             .map_err(|error| ApiError::bad_request(error.to_string()))?;
     }
 
+    let army_id = resolve_army_id_from_lists(
+        &state,
+        &payload.army_list_1,
+        &payload.army_list_2,
+        payload.army_id,
+    )?;
+
     let registration = state
         .tournaments
-        .admin_register(id, player_name, admin.id, payload.army_id)
+        .admin_register(
+            id,
+            player_name,
+            admin.id,
+            army_id,
+            &payload.army_list_1,
+            &payload.army_list_2,
+        )
         .map_err(|error| ApiError::bad_request(error.to_string()))?;
     Ok((StatusCode::CREATED, Json(registration)))
 }
@@ -547,6 +781,133 @@ async fn setup_pools(
         .setup_pools(id, &payload)
         .map_err(|error| ApiError::bad_request(error.to_string()))?;
     Ok(Json(pools))
+}
+
+async fn draw_pools(
+    State(state): State<AppState>,
+    session: Session,
+    Path(id): Path<i64>,
+) -> Result<Json<Vec<crate::tournament::Pool>>, ApiError> {
+    require_admin(&state, &session).await?;
+    state
+        .tournaments
+        .draw_pools(id)
+        .map(Json)
+        .map_err(|error| ApiError::bad_request(error.to_string()))
+}
+
+async fn set_pool_scenarios(
+    State(state): State<AppState>,
+    session: Session,
+    Path(id): Path<i64>,
+    Json(payload): Json<SetPoolScenariosRequest>,
+) -> Result<Json<Vec<crate::tournament::TournamentScenarioSlot>>, ApiError> {
+    require_admin(&state, &session).await?;
+    state
+        .tournaments
+        .set_pool_scenarios(id, &payload.scenario_ids)
+        .map(Json)
+        .map_err(|error| ApiError::bad_request(error.to_string()))
+}
+
+async fn draw_pool_scenarios(
+    State(state): State<AppState>,
+    session: Session,
+    Path(id): Path<i64>,
+) -> Result<Json<Vec<crate::tournament::TournamentScenarioSlot>>, ApiError> {
+    require_admin(&state, &session).await?;
+    state
+        .tournaments
+        .draw_pool_scenarios(id)
+        .map(Json)
+        .map_err(|error| ApiError::bad_request(error.to_string()))
+}
+
+async fn reroll_pool_scenario(
+    State(state): State<AppState>,
+    session: Session,
+    Path(id): Path<i64>,
+    Json(payload): Json<RerollScenarioRequest>,
+) -> Result<Json<Vec<crate::tournament::TournamentScenarioSlot>>, ApiError> {
+    require_admin(&state, &session).await?;
+    state
+        .tournaments
+        .reroll_pool_scenario(id, &payload.slot)
+        .map(Json)
+        .map_err(|error| ApiError::bad_request(error.to_string()))
+}
+
+async fn set_bracket_scenario_pool(
+    State(state): State<AppState>,
+    session: Session,
+    Path(id): Path<i64>,
+    Json(payload): Json<SetBracketScenarioPoolRequest>,
+) -> Result<Json<Vec<crate::tournament::TournamentScenarioSlot>>, ApiError> {
+    require_admin(&state, &session).await?;
+    state
+        .tournaments
+        .set_bracket_scenario_pool(id, &payload.scenario_ids)
+        .map(Json)
+        .map_err(|error| ApiError::bad_request(error.to_string()))
+}
+
+async fn draw_bracket_scenario_pool(
+    State(state): State<AppState>,
+    session: Session,
+    Path(id): Path<i64>,
+) -> Result<Json<Vec<crate::tournament::TournamentScenarioSlot>>, ApiError> {
+    require_admin(&state, &session).await?;
+    state
+        .tournaments
+        .draw_bracket_scenario_pool(id)
+        .map(Json)
+        .map_err(|error| ApiError::bad_request(error.to_string()))
+}
+
+async fn reroll_bracket_scenario_pool(
+    State(state): State<AppState>,
+    session: Session,
+    Path(id): Path<i64>,
+    Json(payload): Json<RerollScenarioRequest>,
+) -> Result<Json<Vec<crate::tournament::TournamentScenarioSlot>>, ApiError> {
+    require_admin(&state, &session).await?;
+    state
+        .tournaments
+        .reroll_bracket_scenario_pool_slot(id, &payload.slot)
+        .map(Json)
+        .map_err(|error| ApiError::bad_request(error.to_string()))
+}
+
+async fn assign_bracket_scenarios(
+    State(state): State<AppState>,
+    session: Session,
+    Path(id): Path<i64>,
+) -> Result<Json<Vec<crate::tournament::TournamentScenarioSlot>>, ApiError> {
+    require_admin(&state, &session).await?;
+    state
+        .tournaments
+        .assign_bracket_scenarios(id)
+        .map(Json)
+        .map_err(|error| ApiError::bad_request(error.to_string()))
+}
+
+async fn update_my_bracket_lists(
+    State(state): State<AppState>,
+    session: Session,
+    Path(id): Path<i64>,
+    Json(payload): Json<UpdateBracketListsRequest>,
+) -> Result<Json<crate::tournament::TournamentRegistration>, ApiError> {
+    let (_user, player_name) = require_player(&state, &session).await?;
+    state
+        .tournaments
+        .update_bracket_lists(
+            id,
+            &player_name,
+            &payload.bracket_list_1,
+            &payload.bracket_list_2,
+        )
+        .map(Json)
+        .map_err(|error| ApiError::bad_request(error.to_string()))
 }
 
 async fn generate_pool_matches(
@@ -835,6 +1196,8 @@ fn apply_tournament_match_to_board(
             Some(tm.tournament_id),
             Some(tm.phase.as_str().to_string()),
             tournament_name,
+            tm.player1_army_list_code.clone(),
+            tm.player2_army_list_code.clone(),
         )
         .map_err(|error| ApiError::bad_request(error.to_string()))?;
     Ok(())

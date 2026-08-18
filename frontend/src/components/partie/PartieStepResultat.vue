@@ -8,6 +8,7 @@ import { completeMatch } from '@/lib/api'
 import type { PartiePlayerSlot, PartieScenario, PartieScores } from '@/composables/usePartieFlow'
 import type { MatchOutcome } from '@/types/elo'
 import { useAuth } from '@/composables/useAuth'
+import { externalHref } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -81,10 +82,14 @@ async function submit() {
       player2_objectives: clampObjectives(props.scores.player2Objectives),
       player2_survivors: clampSurvivors(props.scores.player2Survivors),
     })
-    toast.success(
-      `${record.player1} ${Math.round(record.player1_old)} → ${Math.round(record.player1_new)} | ` +
-        `${record.player2} ${Math.round(record.player2_old)} → ${Math.round(record.player2_new)}`,
-    )
+    if (record.counts_for_elo === false) {
+      toast.success('Résultat enregistré')
+    } else {
+      toast.success(
+        `${record.player1} ${Math.round(record.player1_old)} → ${Math.round(record.player1_new)} | ` +
+          `${record.player2} ${Math.round(record.player2_old)} → ${Math.round(record.player2_new)}`,
+      )
+    }
     emit('recorded')
     router.push(`/matchs/${record.id}`)
   } catch (error) {
@@ -113,7 +118,16 @@ async function submit() {
     <div class="neon-panel rounded-lg border border-primary/20 p-4 text-sm">
       <p>
         <span class="text-muted-foreground">Scénario :</span>
-        <span class="font-medium">{{ scenario.name ?? scenario.other }}</span>
+        <a
+          v-if="scenario.url"
+          :href="externalHref(scenario.url)"
+          target="_blank"
+          rel="noopener noreferrer"
+          class="ml-1 font-medium text-primary hover:underline"
+        >
+          {{ scenario.name ?? scenario.other }}
+        </a>
+        <span v-else class="font-medium">{{ scenario.name ?? scenario.other }}</span>
       </p>
     </div>
 

@@ -2,12 +2,17 @@
 import { computed } from 'vue'
 import { RouterLink } from 'vue-router'
 import type { MatchRecord } from '@/types/elo'
+import { casualMatchContextLabel } from '@/lib/matchElo'
 import { phaseLabel } from '@/lib/tournamentPhase'
 
 const props = defineProps<{
   match: Pick<
     MatchRecord,
-    'tournament_id' | 'tournament_name' | 'tournament_phase' | 'scenario_name'
+    | 'tournament_id'
+    | 'tournament_name'
+    | 'tournament_phase'
+    | 'scenario_name'
+    | 'counts_for_elo'
   >
 }>()
 
@@ -23,7 +28,7 @@ const contextLine = computed(() => {
   if (isTournamentMatch.value && phaseText.value) {
     parts.push(phaseText.value)
   } else if (!isTournamentMatch.value) {
-    parts.push('Match libre')
+    parts.push(casualMatchContextLabel(props.match.counts_for_elo))
   }
 
   if (props.match.scenario_name) {

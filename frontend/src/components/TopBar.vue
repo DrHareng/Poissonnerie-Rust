@@ -9,7 +9,6 @@ import {
   Map,
   Medal,
   Pencil,
-  Shield,
   Play,
   Swords,
   Trophy,
@@ -37,20 +36,33 @@ const { menuLabel: inProgressMenuLabel, menuRoute: inProgressRoute } =
   useMyInProgressMatches()
 
 const links = [
-  { to: '/classement', label: 'Classement', icon: Trophy },
-  { to: '/tournois', label: 'Tournois', icon: Medal },
   { to: '/scenarios', label: 'Scénarios', icon: Map },
-  { to: '/sectorielles', label: 'Sectorielles', icon: Shield },
   { to: '/matchs', label: 'Matchs', icon: Swords },
+  { to: '/tournois', label: 'Tournois', icon: Medal },
+  { to: '/classement', label: 'Classement', icon: Trophy },
 ]
 
 const activePath = computed(() => route.path)
 
 function isLinkActive(to: string) {
-  if (activePath.value === to) return true
-  if (to === '/tournois' && activePath.value.startsWith('/tournoi')) return true
-  if (to === '/scenarios' && activePath.value.startsWith('/scenarios')) return true
-  return false
+  const path = activePath.value
+  if (to === '/classement') {
+    return (
+      path === '/classement' ||
+      path.startsWith('/sectorielle') ||
+      path.startsWith('/joueur')
+    )
+  }
+  if (to === '/matchs') {
+    return path.startsWith('/matchs')
+  }
+  if (to === '/tournois') {
+    return path.startsWith('/tournoi')
+  }
+  if (to === '/scenarios') {
+    return path.startsWith('/scenarios')
+  }
+  return path === to
 }
 
 const playerPageRoute = computed(() =>
@@ -73,7 +85,7 @@ async function handleLogout() {
 
 <template>
   <header class="topbar">
-    <RouterLink to="/classement" class="topbar-brand">
+    <RouterLink to="/" class="topbar-brand">
       <img src="/brand/favicon.png" alt="" class="size-7 object-contain" />
       <div class="min-w-0">
         <p class="topbar-title">La Poissonnerie</p>
@@ -84,6 +96,7 @@ async function handleLogout() {
     <div class="flex flex-col gap-3 md:flex-row md:items-center md:gap-4">
       <nav class="topbar-nav" aria-label="Navigation principale">
         <RouterLink
+          v-if="isAuthenticated"
           to="/partie"
           class="topbar-cta"
           :class="{ 'topbar-cta-active': activePath === '/partie' }"

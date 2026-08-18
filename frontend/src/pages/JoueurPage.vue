@@ -13,6 +13,8 @@ import {
 } from '@/lib/api'
 import { pageTitle } from '@/lib/pageTitle'
 import { formatMatchRecordedDate } from '@/lib/tournamentMatchDisplay'
+import { matchCountsForElo } from '@/lib/matchElo'
+import { classementTabs } from '@/lib/pageTitleTabs'
 import { useAuth } from '@/composables/useAuth'
 import { useAppSidePanel } from '@/composables/useAppSidePanel'
 import type {
@@ -24,6 +26,7 @@ import type {
 } from '@/types/elo'
 import MatchResultBadges from '@/components/MatchResultBadges.vue'
 import MatchContextCell from '@/components/MatchContextCell.vue'
+import PageTitleTabs from '@/components/PageTitleTabs.vue'
 import WinDrawLossBar from '@/components/WinDrawLossBar.vue'
 import ArmyLogo from '@/components/ArmyLogo.vue'
 import { useArmies } from '@/composables/useArmies'
@@ -319,6 +322,12 @@ onMounted(refresh)
     </div>
 
     <template v-else-if="player">
+      <PageTitleTabs
+        :tabs="classementTabs"
+        aria-label="Sections du classement"
+        :current="{ label: headerTitle || playerName }"
+      />
+
       <Teleport defer to="#app-side-panel">
         <Card
           v-if="isOwnProfile"
@@ -521,9 +530,12 @@ onMounted(refresh)
                     />
                   </TableCell>
                   <TableCell class="text-right tabular-nums">
-                    {{ Math.round(row.normalized.player1_old) }}
-                    →
-                    <span class="elo-score">{{ Math.round(row.normalized.player1_new) }}</span>
+                    <template v-if="matchCountsForElo(row.normalized.counts_for_elo)">
+                      {{ Math.round(row.normalized.player1_old) }}
+                      →
+                      <span class="elo-score">{{ Math.round(row.normalized.player1_new) }}</span>
+                    </template>
+                    <span v-else class="text-muted-foreground">—</span>
                   </TableCell>
                   <TableCell class="text-right">
                     <Button
