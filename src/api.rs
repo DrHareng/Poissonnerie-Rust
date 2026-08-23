@@ -946,10 +946,16 @@ async fn start_match(
         .validate_selectable_id(payload.player2_army_id)
         .map_err(|error| ApiError::bad_request(error.to_string()))?;
 
-    if payload.player1_secondary_slugs.len() != 3 || payload.player2_secondary_slugs.len() != 3 {
-        return Err(ApiError::bad_request(
-            "chaque joueur doit recevoir exactement 3 objectifs secondaires",
-        ));
+    if !payload.player1_secondary_slugs.is_empty()
+        || !payload.player2_secondary_slugs.is_empty()
+    {
+        if payload.player1_secondary_slugs.len() != 3
+            || payload.player2_secondary_slugs.len() != 3
+        {
+            return Err(ApiError::bad_request(
+                "chaque joueur doit recevoir exactement 3 objectifs secondaires, ou aucun (saisie manuelle)",
+            ));
+        }
     }
 
     let mut board = state.board.lock().unwrap();

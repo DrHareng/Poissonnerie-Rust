@@ -8,6 +8,7 @@ import { Button } from '@/components/ui/button'
 import { Label } from '@/components/ui/label'
 
 export type MatchEloMode = 'friendly' | 'ranked'
+export type SecondaryDrawMode = 'draw' | 'manual'
 
 const props = defineProps<{
   players: RankedPlayer[]
@@ -20,6 +21,7 @@ const props = defineProps<{
   initialArmy1?: number
   initialArmy2?: number
   initialEloMode?: MatchEloMode
+  initialSecondaryDrawMode?: SecondaryDrawMode
 }>()
 
 const emit = defineEmits<{
@@ -31,6 +33,7 @@ const emit = defineEmits<{
       player2: string
       army2: number
       counts_for_elo: boolean
+      secondary_draw_mode: SecondaryDrawMode
     },
   ]
 }>()
@@ -44,6 +47,9 @@ const army2 = ref<string | undefined>(
   props.initialArmy2 != null ? String(props.initialArmy2) : undefined,
 )
 const eloMode = ref<MatchEloMode>(props.initialEloMode ?? 'friendly')
+const secondaryDrawMode = ref<SecondaryDrawMode>(
+  props.initialSecondaryDrawMode ?? 'draw',
+)
 
 const playerOptions = computed(() =>
   props.players.map((player) => ({
@@ -72,8 +78,20 @@ const eloModeHint = computed(() =>
     : 'Le score ELO des joueurs ne sera pas impacté.',
 )
 
+const secondaryDrawHint = computed(() =>
+  secondaryDrawMode.value === 'manual'
+    ? 'Vous indiquerez manuellement le secondaire déjà tiré pour chaque joueur.'
+    : 'L’application tire au sort 3 secondaires pour chaque joueur.',
+)
+
 function eloModeButtonClass(mode: MatchEloMode) {
   return eloMode.value === mode
+    ? 'border-primary bg-primary! text-primary-foreground hover:bg-primary/90'
+    : 'border-border bg-black text-white hover:text-primary'
+}
+
+function secondaryDrawButtonClass(mode: SecondaryDrawMode) {
+  return secondaryDrawMode.value === mode
     ? 'border-primary bg-primary! text-primary-foreground hover:bg-primary/90'
     : 'border-border bg-black text-white hover:text-primary'
 }
@@ -104,6 +122,7 @@ function submit() {
     player2: player2.value,
     army2: Number(army2.value),
     counts_for_elo: eloMode.value === 'ranked',
+    secondary_draw_mode: secondaryDrawMode.value,
   })
 }
 </script>
@@ -152,6 +171,41 @@ function submit() {
         </div>
         <p class="text-sm text-muted-foreground">
           {{ eloModeHint }}
+        </p>
+      </div>
+    </div>
+
+    <div class="grid gap-2">
+      <Label>Objectifs secondaires</Label>
+      <div class="flex flex-wrap items-center gap-3">
+        <div
+          class="flex items-center gap-0"
+          role="group"
+          aria-label="Tirage des secondaires"
+        >
+          <Button
+            type="button"
+            size="xs"
+            variant="outline"
+            :class="['rounded-r-none', secondaryDrawButtonClass('draw')]"
+            :aria-pressed="secondaryDrawMode === 'draw'"
+            @click="secondaryDrawMode = 'draw'"
+          >
+            Tirer au sort
+          </Button>
+          <Button
+            type="button"
+            size="xs"
+            variant="outline"
+            :class="['rounded-l-none border-l-0', secondaryDrawButtonClass('manual')]"
+            :aria-pressed="secondaryDrawMode === 'manual'"
+            @click="secondaryDrawMode = 'manual'"
+          >
+            Secondaires déjà tirés
+          </Button>
+        </div>
+        <p class="text-sm text-muted-foreground">
+          {{ secondaryDrawHint }}
         </p>
       </div>
     </div>

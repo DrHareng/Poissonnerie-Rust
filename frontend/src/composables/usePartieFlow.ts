@@ -11,6 +11,8 @@ export type PartieStep =
 
 export type ScenarioMode = 'list' | 'random' | 'other'
 
+export type SecondaryDrawMode = 'draw' | 'manual'
+
 export interface PartieScenario {
   mode: ScenarioMode
   id?: number
@@ -55,6 +57,7 @@ export function usePartieFlow() {
   const player1 = ref<PartiePlayerSlot | null>(null)
   const player2 = ref<PartiePlayerSlot | null>(null)
   const scenario = ref<PartieScenario | null>(null)
+  const secondaryDrawMode = ref<SecondaryDrawMode>('draw')
   const secondariesPlayer1 = ref<string[]>([])
   const secondariesPlayer2 = ref<string[]>([])
   const secondaryPool = ref<string[]>([])
@@ -124,6 +127,10 @@ export function usePartieFlow() {
     player2.value = { name: p2Name, armyId: p2ArmyId }
   }
 
+  function setSecondaryDrawMode(mode: SecondaryDrawMode) {
+    secondaryDrawMode.value = mode
+  }
+
   function setScenario(value: PartieScenario) {
     scenario.value = value
     if (value.mode === 'other') {
@@ -186,6 +193,7 @@ export function usePartieFlow() {
     player1.value = null
     player2.value = null
     scenario.value = null
+    secondaryDrawMode.value = 'draw'
     secondariesPlayer1.value = []
     secondariesPlayer2.value = []
     secondaryPool.value = []
@@ -225,6 +233,7 @@ export function usePartieFlow() {
     player1,
     player2,
     scenario,
+    secondaryDrawMode,
     secondariesPlayer1,
     secondariesPlayer2,
     secondaryPool,
@@ -241,6 +250,7 @@ export function usePartieFlow() {
     canAdvanceFromJoueurs,
     setMatchId,
     setJoueurs,
+    setSecondaryDrawMode,
     setScenario,
     setSecondaries,
     setLieutenant,

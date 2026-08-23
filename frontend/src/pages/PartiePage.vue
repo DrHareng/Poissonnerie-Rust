@@ -64,6 +64,7 @@ const {
   player1,
   player2,
   scenario,
+  secondaryDrawMode,
   secondariesPlayer1,
   secondariesPlayer2,
   secondaryPool,
@@ -76,6 +77,7 @@ const {
   activeSteps,
   setMatchId,
   setJoueurs,
+  setSecondaryDrawMode,
   setScenario,
   setSecondaries,
   setLieutenant,
@@ -246,14 +248,18 @@ function hydrateFromMatch(record: MatchRecord) {
     )
   }
 
-  if (record.player1_secondary_slugs?.length || record.player2_secondary_slugs?.length) {
+  {
+    const p1 = record.player1_secondary_slugs ?? []
+    const p2 = record.player2_secondary_slugs ?? []
     setSecondaries(
-      record.player1_secondary_slugs ?? [],
-      record.player2_secondary_slugs ?? [],
+      p1,
+      p2,
       record.player1_chosen_secondary ?? null,
       record.player2_chosen_secondary ?? null,
       record.secondary_pool_slugs ?? [],
     )
+    // Tirage auto = exactement 3+3 ; sinon saisie manuelle (1 choisi, ou encore vide).
+    setSecondaryDrawMode(p1.length === 3 && p2.length === 3 ? 'draw' : 'manual')
   }
 
   if (
@@ -336,6 +342,7 @@ async function onJoueursNext(payload: {
   player2: string
   army2: number
   counts_for_elo: boolean
+  secondary_draw_mode: 'draw' | 'manual'
 }) {
   if (!isAuthenticated.value || !currentPlayer.value) {
     toast.error('Connectez-vous pour démarrer une partie.')
@@ -346,8 +353,12 @@ async function onJoueursNext(payload: {
   const player1Name = currentPlayer.value.name
   saving.value = true
   try {
+    setSecondaryDrawMode(payload.secondary_draw_mode)
     if (!matchId.value) {
-      const drawn = drawSecondarySlugs()
+      const drawn =
+        payload.secondary_draw_mode === 'draw'
+          ? drawSecondarySlugs()
+          : { player1: [] as string[], player2: [] as string[] }
       const record = await startMatch({
         player1: player1Name,
         player2: payload.player2,
@@ -396,6 +407,7 @@ async function onScenarioNext(value: Parameters<typeof setScenario>[0]) {
       // Pas de secondaires pour un scénario saisi librement.
       setSecondaries([], [])
     } else if (
+      secondaryDrawMode.value === 'draw' &&
       !isCombatEsprit &&
       (secondariesPlayer1.value.length === 0 || secondariesPlayer2.value.length === 0)
     ) {
@@ -702,6 +714,7 @@ onMounted(loadData)
               :initial-player2="player2?.name"
               :initial-army1="player1?.armyId"
               :initial-army2="player2?.armyId"
+              :initial-secondary-draw-mode="secondaryDrawMode"
               @next="onJoueursNext"
             />
 
@@ -721,6 +734,7 @@ onMounted(loadData)
               :scenario-slug="scenario?.slug"
               :secondaries="secondaries"
               :loading="loadingSecondaries || saving"
+              :manual-selection="secondaryDrawMode === 'manual'"
               :initial-player1="secondariesPlayer1"
               :initial-player2="secondariesPlayer2"
               :initial-chosen-player1="chosenSecondaryPlayer1"

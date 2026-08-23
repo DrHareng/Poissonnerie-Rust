@@ -26,6 +26,14 @@ import CombatEspritPoolStrip from '@/components/partie/CombatEspritPoolStrip.vue
 import SecondaryCardGrid from '@/components/partie/SecondaryCardGrid.vue'
 import ContentHoverTip from '@/components/ContentHoverTip.vue'
 import { Button } from '@/components/ui/button'
+import { Label } from '@/components/ui/label'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
 
 const props = defineProps<{
   player1Name: string
@@ -33,6 +41,8 @@ const props = defineProps<{
   scenarioSlug?: string
   secondaries: SecondaryObjective[]
   loading?: boolean
+  /** Saisie manuelle du secondaire déjà tiré (hors Combat de l'esprit). */
+  manualSelection?: boolean
   initialPlayer1?: string[]
   initialPlayer2?: string[]
   initialChosenPlayer1?: string | null
@@ -57,6 +67,10 @@ const isCombatEsprit = computed(
   () => props.scenarioSlug === COMBAT_ESPRIT_SLUG,
 )
 
+const isManual = computed(
+  () => props.manualSelection === true && !isCombatEsprit.value,
+)
+
 const drawnPlayer1 = ref<string[]>([])
 const drawnPlayer2 = ref<string[]>([])
 const chosenPlayer1 = ref<string | null>(props.initialChosenPlayer1 ?? null)
@@ -66,6 +80,7 @@ const draftState = ref<CombatEspritDraftState | null>(null)
 const firstPicker = ref<DraftPlayer>('A')
 const draftRestored = ref(false)
 const draftTick = ref(0)
+
 
 const currentStep = computed(() => {
   draftTick.value
@@ -208,19 +223,34 @@ const currentStepNumber = computed(() => {
   return draftState.value.stepIndex + 1
 })
 
-const canContinueStandard = computed(
-  () =>
+const canContinueStandard = computed(() => {
+  if (isManual.value) {
+    return Boolean(chosenPlayer1.value && chosenPlayer2.value)
+  }
+  return (
     drawnPlayer1.value.length === 3 &&
     drawnPlayer2.value.length === 3 &&
     Boolean(chosenPlayer1.value) &&
     Boolean(chosenPlayer2.value) &&
     drawnPlayer1.value.includes(chosenPlayer1.value!) &&
-    drawnPlayer2.value.includes(chosenPlayer2.value!),
-)
+    drawnPlayer2.value.includes(chosenPlayer2.value!)
+  )
+})
 
 const canContinue = computed(() =>
   isCombatEsprit.value ? draftComplete.value : canContinueStandard.value,
 )
+
+function setManualChosen(player: 1 | 2, slug: string | undefined) {
+  const value = slug || null
+  if (player === 1) {
+    chosenPlayer1.value = value
+    drawnPlayer1.value = value ? [value] : []
+  } else {
+    chosenPlayer2.value = value
+    drawnPlayer2.value = value ? [value] : []
+  }
+}
 
 function bumpDraft() {
   draftTick.value += 1
@@ -288,6 +318,20 @@ function ensureDrawn() {
   draftRestored.value = false
   poolSlugs.value = []
 
+  if (isManual.value) {
+    const chosen1 =
+      props.initialChosenPlayer1 ??
+      (props.initialPlayer1?.length === 1 ? props.initialPlayer1[0] : null)
+    const chosen2 =
+      props.initialChosenPlayer2 ??
+      (props.initialPlayer2?.length === 1 ? props.initialPlayer2[0] : null)
+    chosenPlayer1.value = chosen1
+    chosenPlayer2.value = chosen2
+    drawnPlayer1.value = chosen1 ? [chosen1] : []
+    drawnPlayer2.value = chosen2 ? [chosen2] : []
+    return
+  }
+
   if (
     (props.initialPlayer1?.length ?? 0) >= 3 &&
     (props.initialPlayer2?.length ?? 0) >= 3
@@ -301,6 +345,16 @@ function ensureDrawn() {
 
 function submit() {
   if (!canContinue.value) return
+  if (isManual.value) {
+    emit('next', {
+      player1: chosenPlayer1.value ? [chosenPlayer1.value] : [],
+      player2: chosenPlayer2.value ? [chosenPlayer2.value] : [],
+      chosenPlayer1: chosenPlayer1.value,
+      chosenPlayer2: chosenPlayer2.value,
+      pool: null,
+    })
+    return
+  }
   emit('next', {
     player1: drawnPlayer1.value,
     player2: drawnPlayer2.value,
@@ -321,6 +375,7 @@ watch(
     props.initialChosenPlayer2,
     props.initialPool,
     props.scenarioSlug,
+    props.manualSelection,
   ],
   () => {
     ensureDrawn()
@@ -533,41 +588,90 @@ watch(
 
     <template v-else>
       <p class="page-description">
-        Chaque joueur pioche 3 objectifs et en choisit 1 via le cercle. Cliquez sur une
-        carte pour l'agrandir.
+        <template v-if="isManual">
+          Indiquez le secondaire déjà tiré pour chaque joueur.
+        </template>
+        <template v-else>
+          Chaque joueur pioche 3 objectifs et en choisit 1 via le cercle. Cliquez sur une
+          carte pour l'agrandir.
+        </template>
       </p>
 
       <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
-        <section class="player-match-panel">
+        <section class="player-match-panel grid gap-3">
           <p class="player-match-panel-title">{{ player1Name }}</p>
-          <SecondaryCardGrid
-            v-if="drawnPlayer1.length > 0"
-            :secondaries="resolveSlugs(drawnPlayer1)"
-            viewable
-            choosable
-            choice-name="secondary-player1"
-            :selected-slug="chosenPlayer1 ?? undefined"
-            @choose="chosenPlayer1 = $event"
-          />
-          <p v-else class="text-sm text-muted-foreground">
-            Tirage en cours…
-          </p>
+          <template v-if="isManual">
+            <div class="grid gap-1.5">
+              <Label class="text-xs">Secondaire</Label>
+              <Select
+                :model-value="chosenPlayer1 ?? undefined"
+                @update:model-value="setManualChosen(1, $event as string)"
+              >
+                <SelectTrigger class="w-full max-w-full">
+                  <SelectValue placeholder="Choisir…" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem
+                    v-for="item in secondaries"
+                    :key="item.slug"
+                    :value="item.slug"
+                  >
+                    {{ item.name }}
+                  </SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          </template>
+          <template v-else>
+            <SecondaryCardGrid
+              v-if="drawnPlayer1.length > 0"
+              :secondaries="resolveSlugs(drawnPlayer1)"
+              viewable
+              choosable
+              choice-name="secondary-player1"
+              :selected-slug="chosenPlayer1 ?? undefined"
+              @choose="chosenPlayer1 = $event"
+            />
+            <p v-else class="text-sm text-muted-foreground">Tirage en cours…</p>
+          </template>
         </section>
 
-        <section class="player-match-panel">
+        <section class="player-match-panel grid gap-3">
           <p class="player-match-panel-title">{{ player2Name }}</p>
-          <SecondaryCardGrid
-            v-if="drawnPlayer2.length > 0"
-            :secondaries="resolveSlugs(drawnPlayer2)"
-            viewable
-            choosable
-            choice-name="secondary-player2"
-            :selected-slug="chosenPlayer2 ?? undefined"
-            @choose="chosenPlayer2 = $event"
-          />
-          <p v-else class="text-sm text-muted-foreground">
-            Tirage en cours…
-          </p>
+          <template v-if="isManual">
+            <div class="grid gap-1.5">
+              <Label class="text-xs">Secondaire</Label>
+              <Select
+                :model-value="chosenPlayer2 ?? undefined"
+                @update:model-value="setManualChosen(2, $event as string)"
+              >
+                <SelectTrigger class="w-full max-w-full">
+                  <SelectValue placeholder="Choisir…" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem
+                    v-for="item in secondaries"
+                    :key="item.slug"
+                    :value="item.slug"
+                  >
+                    {{ item.name }}
+                  </SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          </template>
+          <template v-else>
+            <SecondaryCardGrid
+              v-if="drawnPlayer2.length > 0"
+              :secondaries="resolveSlugs(drawnPlayer2)"
+              viewable
+              choosable
+              choice-name="secondary-player2"
+              :selected-slug="chosenPlayer2 ?? undefined"
+              @choose="chosenPlayer2 = $event"
+            />
+            <p v-else class="text-sm text-muted-foreground">Tirage en cours…</p>
+          </template>
         </section>
       </div>
     </template>

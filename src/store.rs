@@ -621,8 +621,14 @@ impl Leaderboard {
         if normalize_name(player1) == normalize_name(player2) {
             bail!("un joueur ne peut pas jouer contre lui-même");
         }
-        if player1_secondary_slugs.len() != 3 || player2_secondary_slugs.len() != 3 {
-            bail!("chaque joueur doit recevoir exactement 3 objectifs secondaires");
+        let defer_secondaries =
+            player1_secondary_slugs.is_empty() && player2_secondary_slugs.is_empty();
+        if !defer_secondaries
+            && (player1_secondary_slugs.len() != 3 || player2_secondary_slugs.len() != 3)
+        {
+            bail!(
+                "chaque joueur doit recevoir exactement 3 objectifs secondaires, ou aucun (saisie manuelle)"
+            );
         }
         let key1 = normalize_name(player1);
         let key2 = normalize_name(player2);
@@ -670,8 +676,16 @@ impl Leaderboard {
             player2_report: None,
             player1_army_list_code: None,
             player2_army_list_code: None,
-            player1_secondary_slugs: Some(player1_secondary_slugs),
-            player2_secondary_slugs: Some(player2_secondary_slugs),
+            player1_secondary_slugs: if defer_secondaries {
+                None
+            } else {
+                Some(player1_secondary_slugs)
+            },
+            player2_secondary_slugs: if defer_secondaries {
+                None
+            } else {
+                Some(player2_secondary_slugs)
+            },
             secondary_pool_slugs: None,
             player1_chosen_secondary: None,
             player2_chosen_secondary: None,
