@@ -132,6 +132,12 @@ async function saveScenarioField(
   toast.success('Scénario enregistré')
 }
 
+async function persistExclusionRule(payload: { name?: string; body: string }) {
+  const rule = scenario.value?.exclusion_rule
+  if (!rule) return
+  await saveCommonRule(rule.slug, payload)
+}
+
 async function saveCommonRule(
   ruleSlug: string,
   payload: { name?: string; body: string },
@@ -356,10 +362,7 @@ watch(
                   :body="scenario.exclusion_rule.body_md"
                   :rows="4"
                   :rules="ruleGlossary"
-                  :persist="
-                    (payload) =>
-                      saveCommonRule(scenario.exclusion_rule!.slug, payload)
-                  "
+                  :persist="persistExclusionRule"
                 >
                   <p class="italic text-muted-foreground">
                     {{ scenario.exclusion_rule.body_md }}

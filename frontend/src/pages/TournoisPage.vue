@@ -82,7 +82,7 @@ onMounted(refresh)
   <div class="page-stack">
     <PageTitleTabs
       :tabs="tournoisTabs"
-      aria-label="Sections des tournois"
+      ariaLabel="Sections des tournois"
     />
 
     <section class="page-header">

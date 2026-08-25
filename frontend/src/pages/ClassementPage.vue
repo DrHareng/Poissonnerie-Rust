@@ -56,7 +56,7 @@ onMounted(refreshRanking)
   <div class="page-stack">
     <PageTitleTabs
       :tabs="classementTabs"
-      aria-label="Sections du classement"
+      ariaLabel="Sections du classement"
     />
 
     <section class="page-header">

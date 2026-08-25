@@ -150,7 +150,7 @@ onMounted(async () => {
   <div class="page-stack">
     <PageTitleTabs
       :tabs="matchsTabs"
-      aria-label="Sections des matchs"
+      ariaLabel="Sections des matchs"
     />
 
     <section class="page-header">

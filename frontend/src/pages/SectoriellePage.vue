@@ -43,10 +43,10 @@ const loadingMatches = ref(true)
 
 const armyId = computed(() => Number(route.params.id))
 
-function flipOutcome(outcome: MatchOutcome): MatchOutcome {
+function flipOutcome(outcome: MatchOutcome | null | undefined): MatchOutcome {
+  if (!outcome || outcome === 'draw') return 'draw'
   if (outcome === 'player1_win') return 'player2_win'
-  if (outcome === 'player2_win') return 'player1_win'
-  return 'draw'
+  return 'player1_win'
 }
 
 function normalizeMatchForArmy(match: MatchRecord, sectorialId: number): MatchRecord {
@@ -162,7 +162,7 @@ onMounted(refresh)
     <template v-else-if="army">
       <PageTitleTabs
         :tabs="classementTabs"
-        aria-label="Sections du classement"
+        ariaLabel="Sections du classement"
         :current="{ label: armyName }"
       />
 

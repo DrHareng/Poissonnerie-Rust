@@ -324,7 +324,7 @@ onMounted(refresh)
     <template v-else-if="player">
       <PageTitleTabs
         :tabs="classementTabs"
-        aria-label="Sections du classement"
+        ariaLabel="Sections du classement"
         :current="{ label: headerTitle || playerName }"
       />
 

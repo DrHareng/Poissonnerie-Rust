@@ -107,12 +107,12 @@ export function useSearchablePickerKeyboard<T>({
   }
 
   function handleBlur(
-    trigger: Ref<HTMLElement | null>,
-    dropdown: Ref<HTMLElement | null>,
+    triggerEl: HTMLElement | null,
+    dropdownEl: HTMLElement | null,
   ) {
     window.setTimeout(() => {
       const active = document.activeElement
-      if (trigger.value?.contains(active) || dropdown.value?.contains(active)) {
+      if (triggerEl?.contains(active) || dropdownEl?.contains(active)) {
         return
       }
       onClose()

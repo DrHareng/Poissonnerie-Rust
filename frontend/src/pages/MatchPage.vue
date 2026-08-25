@@ -326,7 +326,7 @@ onMounted(loadMatch)
   <div class="page-stack">
     <PageTitleTabs
       :tabs="matchsTabs"
-      aria-label="Sections des matchs"
+      ariaLabel="Sections des matchs"
       :current="{ label: `Match #${matchId}` }"
     />
 

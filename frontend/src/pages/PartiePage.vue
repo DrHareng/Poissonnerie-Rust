@@ -204,13 +204,12 @@ function toggleMissionMode() {
 }
 
 function openMissionSecondaryViewer(slug: string) {
-  const items = myMissionCards.value
-    .map((card) => {
-      const src = secondaryImageSrc(card.slug)
-      if (!src) return null
-      return { src, alt: card.name, caption: card.name }
-    })
-    .filter((item): item is ImageViewerItem => item != null)
+  const items: ImageViewerItem[] = []
+  for (const card of myMissionCards.value) {
+    const src = secondaryImageSrc(card.slug)
+    if (!src) continue
+    items.push({ src, alt: card.name, caption: card.name })
+  }
   const index = items.findIndex(
     (item) => item.src === secondaryImageSrc(slug),
   )

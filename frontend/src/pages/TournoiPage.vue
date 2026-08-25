@@ -1061,19 +1061,21 @@ function matchHasList2(match: TournamentMatch, slot: 'player1' | 'player2') {
 
 async function submitMatch(match: TournamentMatch) {
   const form = getForm(match)
-  if (form.list1 !== 1 && form.list1 !== 2) {
+  const list1 = form.list1
+  const list2 = form.list2
+  if (list1 !== 1 && list1 !== 2) {
     toast.error('Choisissez la liste du joueur 1')
     return
   }
-  if (form.list2 !== 1 && form.list2 !== 2) {
+  if (list2 !== 1 && list2 !== 2) {
     toast.error('Choisissez la liste du joueur 2')
     return
   }
-  if (form.list1 === 2 && !matchHasList2(match, 'player1')) {
+  if (list1 === 2 && !matchHasList2(match, 'player1')) {
     toast.error('Le joueur 1 n’a pas de liste 2')
     return
   }
-  if (form.list2 === 2 && !matchHasList2(match, 'player2')) {
+  if (list2 === 2 && !matchHasList2(match, 'player2')) {
     toast.error('Le joueur 2 n’a pas de liste 2')
     return
   }
@@ -1084,8 +1086,8 @@ async function submitMatch(match: TournamentMatch) {
         player2_objectives: form.p2,
         player1_survivors: form.s1,
         player2_survivors: form.s2,
-        player1_list_slot: form.list1,
-        player2_list_slot: form.list2,
+        player1_list_slot: list1,
+        player2_list_slot: list2,
       }),
     'Résultat soumis',
   )
@@ -1183,7 +1185,7 @@ onMounted(refresh)
     <template v-else-if="detail">
       <PageTitleTabs
         :tabs="tournoisTabs"
-        aria-label="Sections des tournois"
+        ariaLabel="Sections des tournois"
         :current="{ label: detail.name }"
       />
 

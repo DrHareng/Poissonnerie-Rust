@@ -41,6 +41,6 @@ export function otherPlayerChoices(
   return WINNER_CHOICES.filter((choice) => choice.value.startsWith('initiative'))
 }
 
-export function choiceLabel(value: LieutenantWinnerChoice): string {
+export function choiceLabel(value: string): string {
   return WINNER_CHOICES.find((choice) => choice.value === value)?.label ?? value
 }

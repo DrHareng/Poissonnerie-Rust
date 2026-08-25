@@ -98,7 +98,7 @@ const displayEntries = computed(() => {
   }))
 })
 
-function sortButtonVariant(mode: ArmySortMode) {
+function sortButtonVariant(mode: ArmySortMode): 'outline' {
   return sortMode.value === mode ? 'outline' : 'outline'
 }
 

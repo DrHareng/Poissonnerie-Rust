@@ -1,12 +1,5 @@
 export const INFINITY_ARMY_LIST_BASE = 'https://infinitytheuniverse.com/army/list/'
 
-const URL_PREFIXES = [
-  'https://infinitytheuniverse.com/army/list/',
-  'http://infinitytheuniverse.com/army/list/',
-  'https://www.infinitytheuniverse.com/army/list/',
-  'http://www.infinitytheuniverse.com/army/list/',
-]
-
 const FACTION_SLUG_RE = /^[a-z0-9]+(?:-[a-z0-9]+)*$/
 
 /** Extrait le code de liste depuis un code brut ou une URL Army complète. */
