@@ -1,19 +1,22 @@
 <script setup lang="ts">
-import { ref, watch } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { RouterView, useRoute } from 'vue-router'
 import TopBar from '@/components/TopBar.vue'
 import { Toaster } from '@/components/ui/sonner'
 import { useAppSidePanelHost } from '@/composables/useAppSidePanel'
-
-const SIDE_IMAGES = ['/brand/side_01.png', '/brand/side_02.png', '/brand/side_03.png', '/brand/side_04.png'] as const
-
-function pickSideImage() {
-  return SIDE_IMAGES[Math.floor(Math.random() * SIDE_IMAGES.length)]!
-}
+import { useSideImagePrefs } from '@/composables/useSideImagePrefs'
 
 const route = useRoute()
-const sideImage = ref(pickSideImage())
 const { customSideActive } = useAppSidePanelHost()
+const { pickSideImage, enabledImages } = useSideImagePrefs()
+
+const sideImage = ref(pickSideImage())
+const showBrandImage = computed(
+  () => !customSideActive.value && sideImage.value != null,
+)
+const showSidePanel = computed(
+  () => customSideActive.value || showBrandImage.value,
+)
 
 watch(
   () => route.path,
@@ -21,6 +24,12 @@ watch(
     sideImage.value = pickSideImage()
   },
 )
+
+watch(enabledImages, (pool) => {
+  if (!sideImage.value || !pool.some((image) => image.src === sideImage.value)) {
+    sideImage.value = pickSideImage()
+  }
+})
 </script>
 
 <template>
@@ -30,10 +39,16 @@ watch(
     <div class="poissonnerie-inner">
       <TopBar />
 
-      <div class="poissonnerie-body">
+      <div
+        class="poissonnerie-body"
+        :class="{ 'poissonnerie-body--no-side': !showSidePanel }"
+      >
         <aside
           class="poissonnerie-side-panel"
-          :class="{ 'poissonnerie-side-panel--custom': customSideActive }"
+          :class="{
+            'poissonnerie-side-panel--custom': customSideActive,
+            'poissonnerie-side-panel--empty': !showSidePanel,
+          }"
           :aria-hidden="customSideActive ? undefined : true"
         >
           <div
@@ -42,7 +57,7 @@ watch(
             :class="{ hidden: !customSideActive }"
           />
           <img
-            v-show="!customSideActive"
+            v-if="showBrandImage && sideImage"
             :src="sideImage"
             alt=""
             class="poissonnerie-side-image"

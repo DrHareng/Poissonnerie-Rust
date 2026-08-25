@@ -177,12 +177,24 @@
     @apply flex min-h-0 flex-1 flex-col gap-6 lg:flex-row lg:items-stretch;
   }
 
+  .poissonnerie-body--no-side {
+    @apply lg:justify-center;
+  }
+
+  .poissonnerie-body--no-side .poissonnerie-content {
+    @apply lg:w-full lg:max-w-7xl;
+  }
+
   .poissonnerie-side-panel {
     @apply hidden shrink-0 lg:flex lg:h-full;
   }
 
   .poissonnerie-side-panel--custom {
     @apply w-80 xl:w-96;
+  }
+
+  .poissonnerie-side-panel--empty {
+    display: none !important;
   }
 
   .poissonnerie-side-slot {

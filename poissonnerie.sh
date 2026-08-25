@@ -50,6 +50,28 @@ err() {
     printf '[poissonnerie] ERREUR: %s\n' "$*" >&2
 }
 
+dump_log_tail() {
+    local log="$1"
+    if [[ -f "$log" && -s "$log" ]]; then
+        printf '[poissonnerie] --- %s ---\n' "$log" >&2
+        tail -n 30 "$log" >&2 || true
+    fi
+}
+
+is_windows_exec_block() {
+    local log="$1"
+    [[ -f "$log" ]] || return 1
+    grep -qiE 'Permission denied|Device Guard|4551|contrôle d.application|Smart App Control' "$log"
+}
+
+windows_blocks_unsigned_bin() {
+    local bin="$1"
+    err "$(basename "$bin") est bloqué par Smart App Control (Device Guard)."
+    err "Sécurité Windows → Contrôle des applications et du navigateur → Smart App Control → Désactivé"
+    err "Puis relancez : $(basename "$0") start"
+    err "Note : une fois désactivé, Smart App Control ne peut généralement pas être réactivé sans réinitialiser Windows."
+}
+
 ensure_dirs() {
     mkdir -p "$LOG_DIR"
 }
@@ -134,21 +156,59 @@ wait_for_port() {
     local addr="$1"
     local label="$2"
     local retries="${3:-30}"
+    local pid_file="${4:-}"
+    local log_file="${5:-}"
+    local bin="${6:-}"
 
     for ((i = 1; i <= retries; i++)); do
         if port_is_open "$addr"; then
             return 0
         fi
+        if [[ -n "$pid_file" ]]; then
+            local pid
+            pid="$(read_pid "$pid_file")"
+            if ! pid_is_running "$pid"; then
+                err "$label s'est arrêté avant d'écouter sur $addr"
+                if [[ -n "$log_file" ]]; then
+                    dump_log_tail "$log_file"
+                    if is_windows_exec_block "$log_file"; then
+                        windows_blocks_unsigned_bin "${bin:-$label}"
+                    fi
+                fi
+                return 1
+            fi
+        fi
         sleep 1
     done
 
     err "$label ne répond pas sur $addr (voir les logs dans $LOG_DIR)"
+    if [[ -n "$log_file" ]]; then
+        dump_log_tail "$log_file"
+        if is_windows_exec_block "$log_file"; then
+            windows_blocks_unsigned_bin "${bin:-$label}"
+        fi
+    fi
     return 1
 }
 
 build_rust_bins() {
     log "Compilation des binaires Rust..."
-    cargo build --target-dir "$ROOT_DIR/target" --bin poissonnerie-server --bin poissonnerie-sync-armies
+    unset RUSTC RUSTC_WRAPPER RUSTC_WORKSPACE_WRAPPER
+    local cargo_target="$ROOT_DIR/target"
+    if command -v cygpath >/dev/null 2>&1; then
+        cargo_target="$(cygpath -w "$ROOT_DIR/target")"
+    fi
+    export CARGO_TARGET_DIR="$cargo_target"
+
+    cargo_build_bins() {
+        cargo build --target-dir "$CARGO_TARGET_DIR" --lib --bin poissonnerie-server --bin poissonnerie-sync-armies
+    }
+
+    if ! cargo_build_bins; then
+        log "Compilation échouée, nettoyage du cache incrémental Rust..."
+        rm -rf "$ROOT_DIR/target/debug/incremental"
+        cargo_build_bins
+    fi
 
     if [[ ! -x "$SERVER_BIN" ]]; then
         err "binaire introuvable après compilation : $SERVER_BIN"
@@ -191,6 +251,17 @@ start_server() {
     fi
 
     : >"$SERVER_LOG"
+    if ! "$SERVER_BIN" --help >/dev/null 2>>"$SERVER_LOG"; then
+        dump_log_tail "$SERVER_LOG"
+        if is_windows_exec_block "$SERVER_LOG"; then
+            windows_blocks_unsigned_bin "$SERVER_BIN"
+        else
+            err "impossible d'exécuter $SERVER_BIN"
+        fi
+        return 1
+    fi
+    : >"$SERVER_LOG"
+
     (
         cd "$ROOT_DIR"
         if [[ "$HAS_SETSID" == 1 ]]; then
@@ -201,7 +272,7 @@ start_server() {
     ) >>"$SERVER_LOG" 2>&1 &
     echo $! >"$SERVER_PID_FILE"
 
-    wait_for_port "$SERVER_ADDR" "API" || return 1
+    wait_for_port "$SERVER_ADDR" "API" 30 "$SERVER_PID_FILE" "$SERVER_LOG" "$SERVER_BIN" || return 1
     log "API démarrée (PID $(read_pid "$SERVER_PID_FILE"), http://$SERVER_ADDR)"
 }
 
@@ -242,7 +313,7 @@ start_frontend() {
     ) >>"$FRONTEND_LOG" 2>&1 &
     echo $! >"$FRONTEND_PID_FILE"
 
-    wait_for_port "$FRONTEND_ADDR" "Frontend" 60 || return 1
+    wait_for_port "$FRONTEND_ADDR" "Frontend" 60 "$FRONTEND_PID_FILE" "$FRONTEND_LOG" || return 1
     log "Frontend démarré (PID $(read_pid "$FRONTEND_PID_FILE"), http://$FRONTEND_ADDR)"
 }
 
