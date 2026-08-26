@@ -193,6 +193,12 @@ pub struct Tournament {
     pub started_at: Option<u64>,
     pub pools_finalized_at: Option<u64>,
     pub completed_at: Option<u64>,
+    /// Utilisateur chargé de valider les listes d'armées (prérequis au démarrage).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub list_validator_user_id: Option<i64>,
+    /// Affichage enrichi côté API (non stocké en base).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub list_validator_display_name: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

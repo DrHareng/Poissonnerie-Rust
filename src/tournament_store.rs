@@ -203,7 +203,8 @@ impl TournamentStore {
         let mut stmt = conn.prepare(
             "
             SELECT id, name, description, status, pool_count, bracket_format,
-                   created_at, started_at, pools_finalized_at, completed_at
+                   created_at, started_at, pools_finalized_at, completed_at,
+                   list_validator_user_id
             FROM tournaments
             ORDER BY id DESC
             ",
@@ -218,7 +219,8 @@ impl TournamentStore {
             let mut stmt = conn.prepare(
                 "
                 SELECT id, name, description, status, pool_count, bracket_format,
-                       created_at, started_at, pools_finalized_at, completed_at
+                       created_at, started_at, pools_finalized_at, completed_at,
+                       list_validator_user_id
                 FROM tournaments
                 ORDER BY id DESC
                 ",
@@ -308,6 +310,83 @@ impl TournamentStore {
         }
         self.get_in_conn(&conn, tournament_id)?
             .context("tournoi introuvable après mise à jour")
+    }
+
+    /// Désigne (ou retire) le validateur de listes. Possible uniquement avant le démarrage.
+    pub fn set_list_validator(
+        &self,
+        tournament_id: i64,
+        user_id: Option<i64>,
+    ) -> Result<Tournament> {
+        let conn = self.conn.lock().unwrap();
+        let tournament = self
+            .get_in_conn(&conn, tournament_id)?
+            .context("tournoi introuvable")?;
+
+        match tournament.status {
+            TournamentStatus::Draft
+            | TournamentStatus::RegistrationOpen
+            | TournamentStatus::RegistrationClosed => {}
+            TournamentStatus::Started | TournamentStatus::Completed => {
+                bail!("impossible de modifier le validateur après le démarrage du tournoi");
+            }
+        }
+
+        if let Some(uid) = user_id {
+            let already_registered: bool = conn.query_row(
+                "
+                SELECT EXISTS(
+                    SELECT 1 FROM tournament_registrations
+                    WHERE tournament_id = ?1
+                      AND user_id = ?2
+                      AND status IN ('pending', 'approved', 'waitlisted')
+                )
+                ",
+                params![tournament_id, uid],
+                |row| row.get(0),
+            )?;
+            if already_registered {
+                bail!("cet utilisateur est déjà inscrit au tournoi");
+            }
+        }
+
+        let updated = conn.execute(
+            "
+            UPDATE tournaments
+            SET list_validator_user_id = ?1
+            WHERE id = ?2
+            ",
+            params![user_id, tournament_id],
+        )?;
+        if updated == 0 {
+            bail!("tournoi introuvable");
+        }
+        self.get_in_conn(&conn, tournament_id)?
+            .context("tournoi introuvable après mise à jour")
+    }
+
+    /// Indique si un utilisateur est le validateur de listes du tournoi.
+    pub fn is_list_validator(&self, tournament_id: i64, user_id: i64) -> Result<bool> {
+        let conn = self.conn.lock().unwrap();
+        let tournament = self
+            .get_in_conn(&conn, tournament_id)?
+            .context("tournoi introuvable")?;
+        Ok(tournament.list_validator_user_id == Some(user_id))
+    }
+
+    /// Vérifie qu'un joueur (par nom) n'est pas le validateur désigné.
+    pub fn ensure_player_is_not_list_validator(
+        &self,
+        tournament_id: i64,
+        player_user_id: Option<i64>,
+    ) -> Result<()> {
+        let Some(uid) = player_user_id else {
+            return Ok(());
+        };
+        if self.is_list_validator(tournament_id, uid)? {
+            bail!("le validateur de listes ne peut pas être inscrit au tournoi");
+        }
+        Ok(())
     }
 
     /// Supprime un tournoi tant que la phase de poules n'a pas démarré
@@ -450,6 +529,9 @@ impl TournamentStore {
             .context("tournoi introuvable")?;
         if tournament.status != TournamentStatus::RegistrationOpen {
             bail!("les inscriptions ne sont pas ouvertes");
+        }
+        if tournament.list_validator_user_id == Some(user_id) {
+            bail!("le validateur de listes ne peut pas s'inscrire au tournoi");
         }
 
         let key = normalize_name(player_name);
@@ -713,11 +795,18 @@ impl TournamentStore {
 
     pub fn review_registration(
         &self,
+        tournament_id: i64,
         registration_id: i64,
         action: &str,
         admin_id: i64,
     ) -> Result<TournamentRegistration> {
         let conn = self.conn.lock().unwrap();
+        let registration = self
+            .get_registration_in_conn(&conn, registration_id)?
+            .context("inscription introuvable")?;
+        if registration.tournament_id != tournament_id {
+            bail!("inscription introuvable pour ce tournoi");
+        }
         self.review_registration_in_tx(&conn, registration_id, action, admin_id)
     }
 
@@ -871,6 +960,10 @@ impl TournamentStore {
 
         if approved.is_empty() {
             bail!("aucun joueur validé");
+        }
+
+        if tournament.list_validator_user_id.is_none() {
+            bail!("désignez un validateur de listes avant de démarrer le tournoi");
         }
 
         let now = now_unix();
@@ -3120,7 +3213,8 @@ impl TournamentStore {
         let mut stmt = conn.prepare(
             "
             SELECT id, name, description, status, pool_count, bracket_format,
-                   created_at, started_at, pools_finalized_at, completed_at
+                   created_at, started_at, pools_finalized_at, completed_at,
+                   list_validator_user_id
             FROM tournaments WHERE id = ?1
             ",
         )?;
@@ -3587,6 +3681,8 @@ fn row_to_tournament(row: &rusqlite::Row<'_>) -> rusqlite::Result<Tournament> {
         started_at: row.get(7)?,
         pools_finalized_at: row.get(8)?,
         completed_at: row.get(9)?,
+        list_validator_user_id: row.get(10)?,
+        list_validator_display_name: None,
     })
 }
 

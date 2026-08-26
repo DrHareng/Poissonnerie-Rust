@@ -1,4 +1,4 @@
-/** Minimal Markdown → HTML for scenario rules content. */
+/** Markdown maison → HTML (scénarios, CR, descriptions, etc.). */
 
 import { withBase } from '@/lib/basePath'
 
@@ -36,10 +36,10 @@ export function renderMarkdown(
       continue
     }
 
-    const imageOnly = trimmed.match(/^\[img\]([^\[\]]+)\[img\]$/i)
+    const imageOnly = standaloneImageHtml(trimmed)
     if (imageOnly) {
       flushList()
-      html.push(renderScenarioImage(imageOnly[1]))
+      html.push(imageOnly)
       continue
     }
 
@@ -115,15 +115,67 @@ export function renderMarkdown(
 }
 
 function inline(text: string, options: MarkdownOptions = {}): string {
-  return escapeHtml(text)
-    .replace(/\[img\]([^\[\]]+)\[img\]/gi, (_, filename) =>
-      renderScenarioImage(filename),
-    )
-    .replace(/\[\[([^\]|]+)(?:\|([^\]]+))?\]\]/g, (_, slugRaw, labelRaw) => {
+  const slots: string[] = []
+  const keep = (html: string) => {
+    const i = slots.length
+    slots.push(html)
+    return `\u0001${i}\u0001`
+  }
+
+  let work = text.replace(/\[img\]([^\[\]]+)\[img\]/gi, (_, raw) =>
+    keep(renderMarkdownImage(String(raw))),
+  )
+
+  work = work.replace(
+    /\[\[([^\]|]+)(?:\|([^\]]+))?\]\]/g,
+    (_, slugRaw, labelRaw) => {
       const slug = String(slugRaw).trim()
-      const label = String(labelRaw ?? '').trim() || options.ruleLabel?.(slug) || slug
-      return `<button type="button" class="md-rule-ref" data-rule-slug="${slug}">${label}</button>`
-    })
+      const label =
+        String(labelRaw ?? '').trim() || options.ruleLabel?.(slug) || slug
+      return keep(
+        `<button type="button" class="md-rule-ref" data-rule-slug="${escapeHtml(slug)}">${escapeHtml(label)}</button>`,
+      )
+    },
+  )
+
+  work = work.replace(
+    /!\[([^\]]*)\]\((https?:\/\/[^)\s]+)\)/gi,
+    (full, altRaw, urlRaw) => {
+      const url = safeHttpUrl(String(urlRaw))
+      if (!url) return full
+      return keep(renderRemoteImage(url, String(altRaw)))
+    },
+  )
+
+  work = work.replace(
+    /\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)/g,
+    (full, labelRaw, urlRaw) => {
+      const url = safeHttpUrl(String(urlRaw))
+      if (!url) return full
+      const label = applyInlineMarkup(escapeHtml(String(labelRaw)))
+      return keep(renderLink(url, label))
+    },
+  )
+
+  work = work.replace(
+    /(?:https?:\/\/|www\.)[^\s<>\[\]`'"]+/gi,
+    (raw) => {
+      const { href, trailing } = splitAutolink(raw)
+      const url = safeHttpUrl(normalizeHrefCandidate(href))
+      if (!url) return raw
+      return keep(renderLink(url, escapeHtml(href))) + trailing
+    },
+  )
+
+  return unstash(applyInlineMarkup(escapeHtml(work)), slots)
+}
+
+function unstash(text: string, slots: string[]): string {
+  return text.replace(/\u0001(\d+)\u0001/g, (_, i) => slots[Number(i)] ?? '')
+}
+
+function applyInlineMarkup(escaped: string): string {
+  return escaped
     .replace(/###(.+?)###/g, '<span class="md-inline-title">$1</span>')
     .replace(/=b=(.+?)=b=/g, '<mark class="md-c-b">$1</mark>')
     .replace(/=v=(.+?)=v=/g, '<mark class="md-c-v">$1</mark>')
@@ -134,12 +186,52 @@ function inline(text: string, options: MarkdownOptions = {}): string {
     .replace(/\*(.+?)\*/g, '<em>$1</em>')
 }
 
+function standaloneImageHtml(trimmed: string): string | null {
+  const imgTag = trimmed.match(/^\[img\]([^\[\]]+)\[img\]$/i)
+  if (imgTag) return renderMarkdownImage(imgTag[1])
+
+  const bang = trimmed.match(/^!\[([^\]]*)\]\((https?:\/\/[^)\s]+)\)$/i)
+  if (bang) {
+    const url = safeHttpUrl(bang[2])
+    if (!url) return null
+    return renderRemoteImage(url, bang[1])
+  }
+  return null
+}
+
 function escapeHtml(text: string): string {
   return text
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;')
+}
+
+function splitAutolink(raw: string): { href: string; trailing: string } {
+  const match = raw.match(/^(.*?)([.,;:!?]+)$/)
+  if (!match || !match[1]) return { href: raw, trailing: '' }
+  return { href: match[1], trailing: match[2] }
+}
+
+function normalizeHrefCandidate(raw: string): string {
+  const trimmed = raw.trim()
+  if (/^www\./i.test(trimmed)) return `https://${trimmed}`
+  return trimmed
+}
+
+/** http(s) only — rejects javascript:, data:, credentials, etc. */
+function safeHttpUrl(raw: string): string | null {
+  const trimmed = normalizeHrefCandidate(raw)
+  if (!trimmed || trimmed.length > 2000 || /\s/.test(trimmed)) return null
+  let parsed: URL
+  try {
+    parsed = new URL(trimmed)
+  } catch {
+    return null
+  }
+  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return null
+  if (parsed.username || parsed.password) return null
+  return parsed.href
 }
 
 function safeScenarioImageFilename(name: string): string | null {
@@ -153,11 +245,38 @@ function safeScenarioImageFilename(name: string): string | null {
   return trimmed
 }
 
-function renderScenarioImage(rawFilename: string): string {
-  const file = safeScenarioImageFilename(rawFilename)
+function altFromUrl(url: string): string {
+  try {
+    const name = new URL(url).pathname.split('/').filter(Boolean).pop()
+    if (name) return decodeURIComponent(name)
+  } catch {
+    /* ignore */
+  }
+  return ''
+}
+
+function renderImgTag(src: string, alt: string): string {
+  return `<img class="md-img" src="${escapeHtml(src)}" alt="${escapeHtml(alt)}" loading="lazy" referrerpolicy="no-referrer" />`
+}
+
+function renderRemoteImage(url: string, altRaw?: string): string {
+  const alt = altRaw?.trim() || altFromUrl(url)
+  return renderImgTag(url, alt)
+}
+
+function renderLink(href: string, innerHtml: string): string {
+  return `<a class="md-link" href="${escapeHtml(href)}" target="_blank" rel="noopener noreferrer">${innerHtml}</a>`
+}
+
+function renderMarkdownImage(rawFilename: string): string {
+  const trimmed = rawFilename.trim()
+  const remote = safeHttpUrl(trimmed)
+  if (remote) return renderRemoteImage(remote)
+
+  const file = safeScenarioImageFilename(trimmed)
   if (!file) {
     return escapeHtml(`[img]${rawFilename}[img]`)
   }
   const src = withBase(`/scenario/${encodeURIComponent(file).replace(/%2F/gi, '')}`)
-  return `<img class="md-scenario-img" src="${src}" alt="${escapeHtml(file)}" loading="lazy" />`
+  return renderImgTag(src, file)
 }

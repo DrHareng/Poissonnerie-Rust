@@ -254,6 +254,22 @@ impl UserStore {
         self.get_by_username_in_conn(&conn, username)
     }
 
+    pub fn list_all(&self) -> Result<Vec<User>> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "
+            SELECT id, discord_id, username, display_name, avatar_url,
+                   local_display_name, local_avatar_url, secondary_view_mode,
+                   scenario_slug, army_sort_mode, is_admin,
+                   created_at, last_login_at
+            FROM users
+            ORDER BY lower(COALESCE(NULLIF(TRIM(local_display_name), ''), display_name)) ASC
+            ",
+        )?;
+        let rows = stmt.query_map([], row_to_user)?;
+        rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
+    }
+
     fn get_by_id_in_conn(&self, conn: &Connection, id: i64) -> Result<Option<User>> {
         let mut stmt = conn.prepare(
             "

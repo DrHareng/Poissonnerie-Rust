@@ -423,6 +423,13 @@ pub fn migrate(conn: &Connection) -> Result<()> {
         )?;
     }
 
+    if !column_exists(conn, "tournaments", "list_validator_user_id")? {
+        conn.execute(
+            "ALTER TABLE tournaments ADD COLUMN list_validator_user_id INTEGER REFERENCES users(id)",
+            [],
+        )?;
+    }
+
     if !column_exists(conn, "tournament_matches", "player1_army_list_code")? {
         conn.execute(
             "ALTER TABLE tournament_matches ADD COLUMN player1_army_list_code TEXT",

@@ -3,6 +3,9 @@ import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import { renderMarkdown } from '@/lib/markdown'
 import type { CommonRule } from '@/types/elo'
 import { splitRuleTitle } from '@/lib/ruleTitle'
+import ImageViewer, {
+  type ImageViewerItem,
+} from '@/components/ImageViewer.vue'
 
 const props = defineProps<{
   source?: string | null
@@ -52,6 +55,10 @@ const tooltipBodyHtml = computed(() => {
   }
   return renderMarkdown(activeRule.value.body_md)
 })
+
+const imageViewerOpen = ref(false)
+const imageViewerIndex = ref(0)
+const imageViewerItems = ref<ImageViewerItem[]>([])
 
 function clearTimers() {
   if (openTimer) {
@@ -138,6 +145,27 @@ function onRootPointerOut(event: PointerEvent) {
   scheduleClose()
 }
 
+function onRootClick(event: MouseEvent) {
+  const target = event.target
+  if (!(target instanceof HTMLImageElement)) return
+  if (!target.classList.contains('md-img')) return
+  event.preventDefault()
+  event.stopPropagation()
+  const rootEl = root.value
+  if (!rootEl) return
+  const images = [
+    ...rootEl.querySelectorAll<HTMLImageElement>('img.md-img'),
+  ]
+  if (images.length === 0) return
+  imageViewerItems.value = images.map((img) => ({
+    src: img.currentSrc || img.src,
+    alt: img.alt || undefined,
+    caption: img.alt || undefined,
+  }))
+  imageViewerIndex.value = Math.max(0, images.indexOf(target))
+  imageViewerOpen.value = true
+}
+
 function onTooltipEnter() {
   clearTimers()
 }
@@ -179,7 +207,14 @@ onBeforeUnmount(() => {
     class="md-content"
     @pointerover="onRootPointerOver"
     @pointerout="onRootPointerOut"
+    @click="onRootClick"
     v-html="html"
+  />
+
+  <ImageViewer
+    v-model:open="imageViewerOpen"
+    v-model:index="imageViewerIndex"
+    :items="imageViewerItems"
   />
 
   <Teleport to="body">

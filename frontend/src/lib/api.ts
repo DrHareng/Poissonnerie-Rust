@@ -25,6 +25,7 @@ import type {
   TournamentMatch,
   TournamentRegistration,
   TournamentScenarioSlot,
+  User,
 } from '@/types/elo'
 import { withBase } from '@/lib/basePath'
 
@@ -507,6 +508,20 @@ export function reviewRegistration(
     `/api/tournaments/${tournamentId}/registrations/${regId}/review`,
     { method: 'POST', body: JSON.stringify({ action }) },
   )
+}
+
+export function setTournamentListValidator(
+  id: number,
+  userId: number | null,
+): Promise<Tournament> {
+  return request<Tournament>(`/api/tournaments/${id}/list-validator`, {
+    method: 'POST',
+    body: JSON.stringify({ user_id: userId }),
+  })
+}
+
+export function fetchUsers(): Promise<User[]> {
+  return request<User[]>('/api/users')
 }
 
 export function startTournament(id: number): Promise<Tournament> {

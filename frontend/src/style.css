@@ -1344,7 +1344,11 @@
     color: #ff9500;
   }
 
-  .md-content .md-scenario-img {
+  .md-content a.md-link {
+    @apply font-medium text-primary underline underline-offset-2 hover:text-primary/80;
+  }
+
+  .md-content .md-img {
     @apply my-2 max-h-48 max-w-full cursor-pointer rounded-md object-contain transition hover:opacity-90;
   }
 }

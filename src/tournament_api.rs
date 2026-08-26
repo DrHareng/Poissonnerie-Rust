@@ -50,13 +50,37 @@ async fn require_player(state: &AppState, session: &Session) -> Result<(User, St
     Ok((user, player.name.clone()))
 }
 
+async fn require_list_validator(
+    state: &AppState,
+    session: &Session,
+    tournament_id: i64,
+) -> Result<User, ApiError> {
+    let user = require_user(state, session).await?;
+    let is_validator = state
+        .tournaments
+        .is_list_validator(tournament_id, user.id)
+        .map_err(|error| ApiError::bad_request(error.to_string()))?;
+    if !is_validator {
+        return Err(ApiError::unauthorized(
+            "droits de validateur de listes requis",
+        ));
+    }
+    Ok(user)
+}
+
 #[derive(Debug, Deserialize)]
 struct ReviewRegistrationRequest {
     action: String,
 }
 
+#[derive(Debug, Deserialize)]
+struct SetListValidatorRequest {
+    user_id: Option<i64>,
+}
+
 struct ViewerContext {
     is_admin: bool,
+    user_id: Option<i64>,
     player_name: Option<String>,
 }
 
@@ -68,6 +92,7 @@ async fn viewer_context(state: &AppState, session: &Session) -> ViewerContext {
     let Some(user) = user else {
         return ViewerContext {
             is_admin: false,
+            user_id: None,
             player_name: None,
         };
     };
@@ -81,12 +106,42 @@ async fn viewer_context(state: &AppState, session: &Session) -> ViewerContext {
 
     ViewerContext {
         is_admin: user.is_admin,
+        user_id: Some(user.id),
         player_name,
     }
 }
 
-fn tournament_visible_to_viewer(status: TournamentStatus, is_admin: bool) -> bool {
-    is_admin || status != TournamentStatus::Draft
+fn is_viewer_list_validator(
+    tournament: &crate::tournament::Tournament,
+    viewer: &ViewerContext,
+) -> bool {
+    matches!(
+        (tournament.list_validator_user_id, viewer.user_id),
+        (Some(validator_id), Some(user_id)) if validator_id == user_id
+    )
+}
+
+fn tournament_visible_to_viewer(
+    tournament: &crate::tournament::Tournament,
+    viewer: &ViewerContext,
+) -> bool {
+    viewer.is_admin
+        || is_viewer_list_validator(tournament, viewer)
+        || tournament.status != TournamentStatus::Draft
+}
+
+fn enrich_list_validator_display_name(
+    state: &AppState,
+    tournament: &mut crate::tournament::Tournament,
+) {
+    if let Some(user_id) = tournament.list_validator_user_id {
+        tournament.list_validator_display_name = state
+            .users
+            .get_by_id(user_id)
+            .ok()
+            .flatten()
+            .map(|user| user.effective_display_name().to_string());
+    }
 }
 
 fn mask_registrations(
@@ -99,6 +154,7 @@ fn mask_registrations(
         crate::tournament::TournamentStatus::Started | crate::tournament::TournamentStatus::Completed
     );
     let lists_public = tournament.status == crate::tournament::TournamentStatus::Completed;
+    let is_list_validator = is_viewer_list_validator(tournament, viewer);
 
     registrations
         .into_iter()
@@ -128,17 +184,11 @@ fn mask_registrations(
                         == crate::store::normalize_name(&registration.player_name)
                 });
 
-            if !armies_public && !viewer.is_admin && !is_own {
+            if !armies_public && !is_list_validator && !is_own {
                 registration.army_id = None;
             }
-            // Listes secrètes jusqu'à la fin du tournoi (sauf pour soi / admin avant démarrage).
-            let can_see_lists = lists_public
-                || is_own
-                || (viewer.is_admin
-                    && !matches!(
-                        tournament.status,
-                        crate::tournament::TournamentStatus::Started
-                    ));
+            // Listes secrètes jusqu'à la fin du tournoi (sauf pour soi / validateur).
+            let can_see_lists = lists_public || is_own || is_list_validator;
             if !can_see_lists {
                 registration.army_list_1 = None;
                 registration.army_list_2 = None;
@@ -228,6 +278,7 @@ pub fn tournament_routes() -> axum::Router<AppState> {
             get(get_pack_scenario).patch(update_pack_scenario),
         )
         .route("/api/tournaments", get(list_tournaments).post(create_tournament))
+        .route("/api/users", get(list_users))
         .route(
             "/api/tournaments/{id}",
             get(get_tournament)
@@ -258,6 +309,10 @@ pub fn tournament_routes() -> axum::Router<AppState> {
         .route(
             "/api/tournaments/{id}/registrations/{reg_id}/review",
             post(review_registration),
+        )
+        .route(
+            "/api/tournaments/{id}/list-validator",
+            post(set_list_validator),
         )
         .route("/api/tournaments/{id}/start", post(start_tournament))
         .route("/api/tournaments/{id}/pools", post(setup_pools))
@@ -489,10 +544,9 @@ async fn list_tournaments(
     Ok(Json(
         entries
             .into_iter()
-            .filter(|entry| {
-                tournament_visible_to_viewer(entry.tournament.status, viewer.is_admin)
-            })
+            .filter(|entry| tournament_visible_to_viewer(&entry.tournament, &viewer))
             .map(|mut entry| {
+                enrich_list_validator_display_name(&state, &mut entry.tournament);
                 for top_entry in &mut entry.top_four {
                     top_entry.player_display_name =
                         Some(resolver.resolve(&top_entry.player_name));
@@ -555,9 +609,11 @@ async fn get_tournament(
         .map_err(|error| ApiError::bad_request(error.to_string()))?
         .ok_or_else(|| ApiError::bad_request("tournoi introuvable"))?;
 
-    if !tournament_visible_to_viewer(detail.tournament.status, viewer.is_admin) {
+    if !tournament_visible_to_viewer(&detail.tournament, &viewer) {
         return Err(ApiError::bad_request("tournoi introuvable"));
     }
+
+    enrich_list_validator_display_name(&state, &mut detail.tournament);
 
     detail.registrations =
         mask_registrations(&detail.tournament, detail.registrations, &viewer);
@@ -704,12 +760,20 @@ async fn admin_register(
         return Err(ApiError::bad_request("indiquez un joueur"));
     }
 
-    {
+    let player_user_id = {
         let board = state.board.lock().unwrap();
-        board
+        let player = board
             .get_player(player_name)
             .map_err(|error| ApiError::bad_request(error.to_string()))?;
-    }
+        player.discord_username.clone()
+    };
+    let player_user_id = player_user_id
+        .and_then(|username| state.users.get_by_username(&username).ok().flatten())
+        .map(|user| user.id);
+    state
+        .tournaments
+        .ensure_player_is_not_list_validator(id, player_user_id)
+        .map_err(|error| ApiError::bad_request(error.to_string()))?;
 
     let army_id = resolve_army_id_from_lists(
         &state,
@@ -737,27 +801,108 @@ async fn list_registrations(
     session: Session,
     Path(id): Path<i64>,
 ) -> Result<Json<Vec<crate::tournament::TournamentRegistration>>, ApiError> {
-    require_admin(&state, &session).await?;
+    let user = require_user(&state, &session).await?;
+    let is_validator = state
+        .tournaments
+        .is_list_validator(id, user.id)
+        .map_err(|error| ApiError::bad_request(error.to_string()))?;
+    if !user.is_admin && !is_validator {
+        return Err(ApiError::unauthorized("droits insuffisants"));
+    }
     let detail = state
         .tournaments
         .get_detail(id)
         .map_err(|error| ApiError::bad_request(error.to_string()))?
         .ok_or_else(|| ApiError::bad_request("tournoi introuvable"))?;
-    Ok(Json(detail.registrations))
+    let viewer = ViewerContext {
+        is_admin: user.is_admin,
+        user_id: Some(user.id),
+        player_name: None,
+    };
+    Ok(Json(mask_registrations(
+        &detail.tournament,
+        detail.registrations,
+        &viewer,
+    )))
 }
 
 async fn review_registration(
     State(state): State<AppState>,
     session: Session,
-    Path((_tournament_id, reg_id)): Path<(i64, i64)>,
+    Path((tournament_id, reg_id)): Path<(i64, i64)>,
     Json(payload): Json<ReviewRegistrationRequest>,
 ) -> Result<Json<crate::tournament::TournamentRegistration>, ApiError> {
-    let admin = require_admin(&state, &session).await?;
+    let validator = require_list_validator(&state, &session, tournament_id).await?;
     state
         .tournaments
-        .review_registration(reg_id, &payload.action, admin.id)
+        .review_registration(tournament_id, reg_id, &payload.action, validator.id)
         .map(Json)
         .map_err(|error| ApiError::bad_request(error.to_string()))
+}
+
+async fn set_list_validator(
+    State(state): State<AppState>,
+    session: Session,
+    Path(id): Path<i64>,
+    Json(payload): Json<SetListValidatorRequest>,
+) -> Result<Json<crate::tournament::Tournament>, ApiError> {
+    require_admin(&state, &session).await?;
+
+    if let Some(user_id) = payload.user_id {
+        let user = state
+            .users
+            .get_by_id(user_id)
+            .map_err(|error| ApiError::bad_request(error.to_string()))?
+            .ok_or_else(|| ApiError::bad_request("utilisateur introuvable"))?;
+
+        // Bloque aussi si le joueur lié est déjà inscrit (inscriptions admin sans user_id).
+        let linked_player_registered = {
+            let board = state.board.lock().unwrap();
+            if let Some(player) = board.get_player_by_discord_username(&user.username) {
+                let detail = state
+                    .tournaments
+                    .get_detail(id)
+                    .map_err(|error| ApiError::bad_request(error.to_string()))?
+                    .ok_or_else(|| ApiError::bad_request("tournoi introuvable"))?;
+                detail.registrations.iter().any(|reg| {
+                    crate::store::normalize_name(&reg.player_name)
+                        == crate::store::normalize_name(&player.name)
+                        && matches!(
+                            reg.status,
+                            crate::tournament::RegistrationStatus::Pending
+                                | crate::tournament::RegistrationStatus::Approved
+                                | crate::tournament::RegistrationStatus::Waitlisted
+                        )
+                })
+            } else {
+                false
+            }
+        };
+        if linked_player_registered {
+            return Err(ApiError::bad_request(
+                "cet utilisateur est déjà inscrit au tournoi",
+            ));
+        }
+    }
+
+    let mut tournament = state
+        .tournaments
+        .set_list_validator(id, payload.user_id)
+        .map_err(|error| ApiError::bad_request(error.to_string()))?;
+    enrich_list_validator_display_name(&state, &mut tournament);
+    Ok(Json(tournament))
+}
+
+async fn list_users(
+    State(state): State<AppState>,
+    session: Session,
+) -> Result<Json<Vec<crate::user::UserResponse>>, ApiError> {
+    require_admin(&state, &session).await?;
+    let users = state
+        .users
+        .list_all()
+        .map_err(|error| ApiError::bad_request(error.to_string()))?;
+    Ok(Json(users.into_iter().map(Into::into).collect()))
 }
 
 async fn start_tournament(

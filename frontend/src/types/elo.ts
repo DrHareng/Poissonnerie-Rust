@@ -249,6 +249,8 @@ export interface Tournament {
   started_at?: number | null
   pools_finalized_at?: number | null
   completed_at?: number | null
+  list_validator_user_id?: number | null
+  list_validator_display_name?: string | null
 }
 
 export interface TournamentRegistration {

@@ -24,6 +24,7 @@ import {
   reviewRegistration,
   setBracketScenarioPool,
   setPoolScenarios,
+  setTournamentListValidator,
   setupTournamentBracket,
   setupTournamentPools,
   startTournament,
@@ -31,6 +32,7 @@ import {
   unregisterFromTournament,
   updateMyBracketLists,
   updateTournamentDetails,
+  fetchUsers,
 } from '@/lib/api'
 import type {
   Pool,
@@ -40,6 +42,7 @@ import type {
   TournamentMatch,
   TournamentPhase,
   TournamentRegistration,
+  User,
 } from '@/types/elo'
 import { useAuth } from '@/composables/useAuth'
 import { useAppSidePanel } from '@/composables/useAppSidePanel'
@@ -75,17 +78,20 @@ import { Label } from '@/components/ui/label'
 const props = defineProps<{ id: string }>()
 const route = useRoute()
 const router = useRouter()
-const { isAdmin, hasPlayer, player, isAuthenticated } = useAuth()
+const { isAdmin, hasPlayer, player, isAuthenticated, user } = useAuth()
 const { setCustomSide } = useAppSidePanel()
 
 const detail = ref<TournamentDetail | null>(null)
 const rankedPlayers = ref<RankedPlayer[]>([])
+const users = ref<User[]>([])
 const loading = ref(true)
 const registerList1 = ref('')
 const registerList2 = ref('')
 const adminPlayerName = ref<string>()
 const adminList1 = ref('')
 const adminList2 = ref('')
+const listValidatorUserId = ref<string>()
+const savingListValidator = ref(false)
 const bracketList1 = ref('')
 const bracketList2 = ref('')
 const registering = ref(false)
@@ -137,6 +143,33 @@ const myRegistration = computed(() =>
   detail.value?.registrations.find(
     (r) => player.value && r.player_name.toLowerCase() === player.value.name.toLowerCase(),
   ),
+)
+
+const isListValidator = computed(
+  () =>
+    !!user.value
+    && detail.value?.list_validator_user_id != null
+    && detail.value.list_validator_user_id === user.value.id,
+)
+
+const canAccessAdminTab = computed(() => isAdmin.value || isListValidator.value)
+
+const canEditListValidator = computed(
+  () =>
+    isAdmin.value
+    && !!detail.value
+    && (detail.value.status === 'draft'
+      || detail.value.status === 'registration_open'
+      || detail.value.status === 'registration_closed'),
+)
+
+const canStartTournament = computed(
+  () =>
+    isAdmin.value
+    && !!detail.value
+    && (detail.value.status === 'registration_open'
+      || detail.value.status === 'registration_closed')
+    && detail.value.list_validator_user_id != null,
 )
 
 const poolMatches = computed(() =>
@@ -197,8 +230,13 @@ const tournamentTabs = computed(() => {
   if (showInscriptionsTab.value) {
     tabs.push({ id: 'inscriptions', label: 'Inscriptions' })
   }
-  if (isAdmin.value) {
-    tabs.push({ id: 'admin', label: 'Administration' })
+  if (canAccessAdminTab.value) {
+    tabs.push({
+      id: 'admin',
+      label: isListValidator.value && !isAdmin.value
+        ? 'Validation des listes'
+        : 'Administration',
+    })
   }
   return tabs
 })
@@ -257,6 +295,32 @@ const bracketPhases = computed(() =>
 const pendingRegistrations = computed(
   () => detail.value?.registrations.filter((r) => r.status === 'pending') ?? [],
 )
+
+/** Inscriptions avec listes validées, pour consultation par le validateur. */
+const validatorListRegistrations = computed(
+  () =>
+    detail.value?.registrations.filter(
+      (r) =>
+        (r.status === 'approved' || r.status === 'waitlisted')
+        && (r.has_army_lists || !!r.army_list_1),
+    ) ?? [],
+)
+
+const availableUsersForValidator = computed(() => {
+  const registeredUserIds = new Set(
+    (detail.value?.registrations ?? [])
+      .filter((r) =>
+        ['pending', 'approved', 'waitlisted'].includes(r.status) && r.user_id != null,
+      )
+      .map((r) => r.user_id!),
+  )
+  return users.value
+    .filter((u) => !registeredUserIds.has(u.id))
+    .map((u) => ({
+      value: String(u.id),
+      label: u.effective_display_name || u.display_name || u.username,
+    }))
+})
 
 const armiesRevealed = computed(
   () => detail.value?.status === 'started' || detail.value?.status === 'completed',
@@ -402,6 +466,16 @@ async function refresh() {
     ])
     detail.value = tournament
     rankedPlayers.value = ranking
+    listValidatorUserId.value = tournament.list_validator_user_id != null
+      ? String(tournament.list_validator_user_id)
+      : undefined
+    if (isAdmin.value) {
+      try {
+        users.value = await fetchUsers()
+      } catch {
+        users.value = []
+      }
+    }
   } catch (error) {
     toast.error(error instanceof Error ? error.message : 'Tournoi introuvable')
     router.push('/tournois')
@@ -735,7 +809,7 @@ watch(
 
 function showArmyForRegistration(reg: TournamentRegistration) {
   if (!reg.army_id) return false
-  if (isAdmin.value || armiesRevealed.value) return true
+  if (isAdmin.value || isListValidator.value || armiesRevealed.value) return true
   return (
     !!player.value &&
     reg.player_name.toLowerCase() === player.value.name.toLowerCase()
@@ -747,6 +821,31 @@ async function review(reg: TournamentRegistration, action: 'approved' | 'rejecte
     () => reviewRegistration(tournamentId.value, reg.id, action),
     action === 'approved' ? 'Inscription validée' : 'Inscription refusée',
   )
+}
+
+async function onSaveListValidator() {
+  if (!canEditListValidator.value) return
+  savingListValidator.value = true
+  try {
+    const userId = listValidatorUserId.value
+      ? Number(listValidatorUserId.value)
+      : null
+    const updated = await setTournamentListValidator(tournamentId.value, userId)
+    if (detail.value) {
+      detail.value = {
+        ...detail.value,
+        list_validator_user_id: updated.list_validator_user_id,
+        list_validator_display_name: updated.list_validator_display_name,
+      }
+    }
+    toast.success(
+      userId != null ? 'Validateur de listes désigné' : 'Validateur de listes retiré',
+    )
+  } catch (error) {
+    toast.error(error instanceof Error ? error.message : 'Erreur')
+  } finally {
+    savingListValidator.value = false
+  }
 }
 
 function initManualPools() {
@@ -1665,13 +1764,19 @@ onMounted(refresh)
               </div>
 
               <div
-                v-if="hasPlayer && !myRegistration && detail.status === 'registration_open'"
+                v-if="hasPlayer && !myRegistration && !isListValidator && detail.status === 'registration_open'"
                 class="grid gap-3"
               >
                 <Button class="w-fit" :disabled="registering" @click="register">
                   {{ registering ? 'Inscription…' : "S'inscrire" }}
                 </Button>
               </div>
+              <p
+                v-else-if="isListValidator && !myRegistration && detail.status === 'registration_open'"
+                class="text-sm text-muted-foreground"
+              >
+                En tant que validateur de listes, vous ne pouvez pas vous inscrire à ce tournoi.
+              </p>
 
               <div v-else-if="myRegistration" class="grid gap-3">
                 <div class="flex flex-wrap items-center gap-3">
@@ -1861,6 +1966,7 @@ onMounted(refresh)
         </template>
 
         <template v-else-if="activeTab === 'admin'">
+          <template v-if="isAdmin">
           <Card class="neon-panel relative">
             <CardHeader>
               <CardTitle>Infos du tournoi</CardTitle>
@@ -1891,6 +1997,45 @@ onMounted(refresh)
             </CardContent>
           </Card>
 
+          <Card class="neon-panel">
+            <CardHeader>
+              <CardTitle>Validateur de listes</CardTitle>
+              <CardDescription>
+                Utilisateur chargé de valider les listes d'armées. Prérequis pour démarrer le tournoi ;
+                il ne peut pas s'inscrire.
+              </CardDescription>
+            </CardHeader>
+            <CardContent class="grid gap-3">
+              <template v-if="canEditListValidator">
+                <div class="grid min-w-[14rem] max-w-md gap-2">
+                  <Label>Utilisateur</Label>
+                  <PlayerPicker
+                    v-model="listValidatorUserId"
+                    :options="availableUsersForValidator"
+                    placeholder="Chercher un utilisateur"
+                    empty-message="Aucun utilisateur trouvé."
+                  />
+                </div>
+                <Button
+                  class="w-fit"
+                  :disabled="savingListValidator"
+                  @click="onSaveListValidator"
+                >
+                  {{ savingListValidator ? 'Enregistrement…' : 'Enregistrer le validateur' }}
+                </Button>
+              </template>
+              <p v-else class="text-sm">
+                <template v-if="detail.list_validator_display_name || detail.list_validator_user_id">
+                  Validateur :
+                  {{ detail.list_validator_display_name ?? `utilisateur #${detail.list_validator_user_id}` }}
+                </template>
+                <template v-else>
+                  Aucun validateur désigné.
+                </template>
+              </p>
+            </CardContent>
+          </Card>
+
           <Card class="neon-panel-accent">
             <CardHeader>
               <CardTitle>Administration</CardTitle>
@@ -1914,6 +2059,8 @@ onMounted(refresh)
               <Button
                 v-if="detail.status === 'registration_open' || detail.status === 'registration_closed'"
                 size="sm"
+                :disabled="!canStartTournament"
+                :title="!detail.list_validator_user_id ? 'Désignez un validateur de listes' : undefined"
                 @click="act(() => startTournament(tournamentId), 'Tournoi démarré')"
               >
                 Démarrer le tournoi
@@ -2058,10 +2205,15 @@ onMounted(refresh)
               />
             </CardContent>
           </Card>
+          </template>
 
+          <template v-if="isListValidator">
           <Card v-if="pendingRegistrations.length > 0" class="neon-panel">
             <CardHeader>
               <CardTitle>Inscriptions en attente</CardTitle>
+              <CardDescription>
+                Validez ou refusez les listes d'armées des joueurs.
+              </CardDescription>
             </CardHeader>
             <CardContent class="grid gap-2">
               <div
@@ -2128,6 +2280,81 @@ onMounted(refresh)
               </div>
             </CardContent>
           </Card>
+
+          <Card
+            v-if="validatorListRegistrations.length > 0"
+            class="neon-panel"
+          >
+            <CardHeader>
+              <CardTitle>
+                {{ pendingRegistrations.length > 0 ? 'Toutes les listes' : 'Listes des joueurs' }}
+              </CardTitle>
+              <CardDescription>
+                Consultation des listes d'armées du tournoi.
+              </CardDescription>
+            </CardHeader>
+            <CardContent class="grid gap-2">
+              <div
+                v-for="reg in validatorListRegistrations"
+                :key="`consult-${reg.id}`"
+                class="rounded border p-3"
+              >
+                <div class="mb-2 flex flex-wrap items-center gap-2">
+                  <PlayerLink
+                    :name="reg.player_name"
+                    :display-name="reg.player_display_name"
+                  />
+                  <ArmyLogo v-if="reg.army_id" :army-id="reg.army_id" />
+                  <Badge variant="outline" class="text-xs">
+                    {{ registrationStatusLabel(reg) }}
+                  </Badge>
+                </div>
+                <template v-if="reg.army_list_1">
+                  <div class="grid gap-1.5">
+                    <div class="flex flex-wrap items-center gap-2">
+                      <Input
+                        :model-value="reg.army_list_1"
+                        readonly
+                        class="min-w-0 flex-1 text-xs"
+                      />
+                      <ArmyListQuickActions :code="reg.army_list_1" />
+                    </div>
+                    <div
+                      v-if="reg.army_list_2"
+                      class="flex flex-wrap items-center gap-2"
+                    >
+                      <Input
+                        :model-value="reg.army_list_2"
+                        readonly
+                        class="min-w-0 flex-1 text-xs"
+                      />
+                      <ArmyListQuickActions :code="reg.army_list_2" />
+                    </div>
+                    <span
+                      v-else
+                      class="text-xs text-muted-foreground italic"
+                    >
+                      pas de liste 2
+                    </span>
+                  </div>
+                </template>
+                <span
+                  v-else
+                  class="text-xs text-muted-foreground italic"
+                >
+                  Listes non saisies
+                </span>
+              </div>
+            </CardContent>
+          </Card>
+
+          <p
+            v-if="pendingRegistrations.length === 0 && validatorListRegistrations.length === 0"
+            class="text-sm text-muted-foreground"
+          >
+            Aucune liste à valider pour le moment.
+          </p>
+          </template>
         </template>
       </div>
     </template>

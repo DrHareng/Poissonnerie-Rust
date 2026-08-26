@@ -78,18 +78,6 @@ function openMapViewer() {
   })
 }
 
-function onDetailClick(event: MouseEvent) {
-  const target = event.target
-  if (!(target instanceof HTMLImageElement)) return
-  if (!target.classList.contains('md-scenario-img')) return
-  event.preventDefault()
-  openImageViewer({
-    src: target.currentSrc || target.src,
-    alt: target.alt || undefined,
-    caption: target.alt || undefined,
-  })
-}
-
 async function load() {
   loading.value = true
   mapFailed.value = false
@@ -208,7 +196,6 @@ watch(
 
     <div
       class="scenario-detail-body flex min-h-0 flex-col gap-4 pb-4"
-      @click="onDetailClick"
     >
       <div class="scenario-detail-row scenario-detail-row--top">
         <Card class="neon-panel scenario-detail-cell">

@@ -2,8 +2,10 @@
 import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import {
   Bold,
+  BookOpen,
   Eye,
   Heading3,
+  Image as ImageIcon,
   Italic,
   Link2,
   List,
@@ -21,7 +23,7 @@ const props = withDefaults(
     rows?: number
     rules?: CommonRule[]
     placeholder?: string
-    /** Masque les liens de règles et l’insertion d’images. */
+    /** Masque les liens de règles et l’insertion d’images de scénario. */
     simple?: boolean
   }>(),
   {
@@ -179,22 +181,77 @@ function insertBlankRuleRef() {
   wrapSelection('[[', ']]', 'slug|libellé')
 }
 
-function insertImage(filename: string) {
+function looksLikeUrl(text: string): boolean {
+  const trimmed = text.trim()
+  return /^https?:\/\/\S+$/i.test(trimmed) || /^www\.\S+$/i.test(trimmed)
+}
+
+function hrefFromSelection(text: string): string {
+  const trimmed = text.trim()
+  if (/^www\./i.test(trimmed)) return `https://${trimmed}`
+  return trimmed
+}
+
+function insertLink() {
   const value = props.modelValue
   const { start, end } = selectionRange()
-  const token = `[img]${filename}[img]`
+  const selected = value.slice(start, end)
+  const trimmed = selected.trim()
+
+  if (looksLikeUrl(trimmed)) {
+    const href = hrefFromSelection(trimmed)
+    const token = `[texte](${href})`
+    sync(value.slice(0, start) + token + value.slice(end))
+    focusAndSelect(start + 1, start + 1 + 'texte'.length)
+    return
+  }
+
+  if (trimmed) {
+    const token = `[${trimmed}](https://)`
+    sync(value.slice(0, start) + token + value.slice(end))
+    const urlStart = start + trimmed.length + 3
+    focusAndSelect(urlStart, urlStart + 'https://'.length)
+    return
+  }
+
+  const token = '[texte](https://)'
+  sync(value.slice(0, start) + token + value.slice(end))
+  const urlStart = start + '[texte]('.length
+  focusAndSelect(urlStart, urlStart + 'https://'.length)
+}
+
+function insertImageToken(inner: string, selectInner: boolean) {
+  const value = props.modelValue
+  const { start, end } = selectionRange()
+  const token = `[img]${inner}[img]`
   const before = value.slice(0, start)
   const after = value.slice(end)
   const needsLeadingNewline = before.length > 0 && !before.endsWith('\n')
   const needsTrailingNewline = after.length > 0 && !after.startsWith('\n')
-  const block =
-    (needsLeadingNewline ? '\n' : '') +
-    token +
-    (needsTrailingNewline ? '\n' : '')
-  const next = before + block + after
-  sync(next)
+  const leading = needsLeadingNewline ? '\n' : ''
+  const block = leading + token + (needsTrailingNewline ? '\n' : '')
+  sync(before + block + after)
+  if (selectInner) {
+    const innerStart = before.length + leading.length + '[img]'.length
+    focusAndSelect(innerStart, innerStart + inner.length)
+    return
+  }
   const cursor = before.length + block.length
   focusAndSelect(cursor, cursor)
+}
+
+function insertImage(filename: string) {
+  insertImageToken(filename, false)
+}
+
+function insertRemoteImage() {
+  const { start, end } = selectionRange()
+  const selected = props.modelValue.slice(start, end).trim()
+  if (looksLikeUrl(selected)) {
+    insertImageToken(hrefFromSelection(selected), false)
+    return
+  }
+  insertImageToken('https://', true)
 }
 
 function onKeydown(event: KeyboardEvent) {
@@ -218,6 +275,9 @@ function onKeydown(event: KeyboardEvent) {
   } else if (key === 'o' && event.shiftKey) {
     event.preventDefault()
     wrapSelection('=o=', '=o=')
+  } else if (key === 'k' && !event.shiftKey) {
+    event.preventDefault()
+    insertLink()
   }
 }
 </script>
@@ -326,6 +386,27 @@ function onKeydown(event: KeyboardEvent) {
 
       <span class="mx-0.5 h-4 w-px bg-border" aria-hidden="true" />
 
+      <Button
+        type="button"
+        variant="ghost"
+        size="icon-xs"
+        title="Lien ([texte](https://…)) — Ctrl+K"
+        @mousedown.prevent
+        @click="insertLink"
+      >
+        <Link2 />
+      </Button>
+      <Button
+        type="button"
+        variant="ghost"
+        size="icon-xs"
+        title="Image en ligne ([img]https://…[img])"
+        @mousedown.prevent
+        @click="insertRemoteImage"
+      >
+        <ImageIcon />
+      </Button>
+
       <template v-if="!simple">
         <Button
           type="button"
@@ -335,7 +416,7 @@ function onKeydown(event: KeyboardEvent) {
           @mousedown.prevent
           @click="insertBlankRuleRef"
         >
-          <Link2 />
+          <BookOpen />
         </Button>
         <select
           v-if="sortedRules.length > 0"
