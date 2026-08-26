@@ -50,12 +50,73 @@ impl MatchStatus {
     }
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum ReportStatus {
+    Draft,
+    #[default]
+    Published,
+}
+
+impl ReportStatus {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Draft => "draft",
+            Self::Published => "published",
+        }
+    }
+
+    pub fn parse(value: &str) -> Self {
+        match value {
+            "draft" => Self::Draft,
+            _ => Self::Published,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct MatchReport {
     pub id: i64,
     pub body_md: String,
+    #[serde(default)]
+    pub status: ReportStatus,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub published_at: Option<u64>,
     pub created_at: u64,
     pub updated_at: u64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct RecentMatchReport {
+    pub match_id: u64,
+    pub report_id: i64,
+    pub author_name: String,
+    pub author_slot: &'static str,
+    pub opponent_name: String,
+    pub author_army_id: Option<u32>,
+    pub opponent_army_id: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub scenario_name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tournament_id: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tournament_phase: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tournament_name: Option<String>,
+    pub counts_for_elo: bool,
+    pub excerpt: String,
+    pub published_at: u64,
+    pub updated_at: u64,
+}
+
+pub fn report_excerpt(body: &str, max_chars: usize) -> String {
+    let collapsed = body.split_whitespace().collect::<Vec<_>>().join(" ");
+    if collapsed.chars().count() <= max_chars {
+        return collapsed;
+    }
+    let take = max_chars.saturating_sub(1);
+    let truncated: String = collapsed.chars().take(take).collect();
+    format!("{truncated}…")
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -244,5 +305,14 @@ mod tests {
         }
         .validate()
         .is_err());
+    }
+
+    #[test]
+    fn report_excerpt_collapses_and_truncates() {
+        assert_eq!(report_excerpt("  hello\n\nworld  ", 80), "hello world");
+        let long = "a".repeat(40);
+        let excerpt = report_excerpt(&long, 10);
+        assert_eq!(excerpt.chars().count(), 10);
+        assert!(excerpt.ends_with('…'));
     }
 }

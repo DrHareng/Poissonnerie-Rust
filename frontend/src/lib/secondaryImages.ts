@@ -1,3 +1,5 @@
+import { withBase } from '@/lib/basePath'
+
 export const SECONDARY_IMAGES: Record<string, string> = {
   enlevement: 'Enlèvement.png',
   'saisie-de-materiel': 'Saisie_de_matériel.png',
@@ -11,5 +13,7 @@ export const SECONDARY_IMAGES: Record<string, string> = {
 
 export function secondaryImageSrc(slug: string): string | undefined {
   const filename = SECONDARY_IMAGES[slug]
-  return filename ? `/secondaires/${encodeURIComponent(filename)}` : undefined
+  return filename
+    ? withBase(`/secondaires/${encodeURIComponent(filename)}`)
+    : undefined
 }

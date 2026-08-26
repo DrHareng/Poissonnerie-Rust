@@ -6,6 +6,7 @@ import { fetchPackScenario } from '@/lib/api'
 import type { ScenarioDetail, ScenarioSummary } from '@/types/elo'
 import { DEFAULT_SCENARIO_PACK_SLUG } from '@/types/elo'
 import MarkdownContent from '@/components/MarkdownContent.vue'
+import { withBase } from '@/lib/basePath'
 import { Button } from '@/components/ui/button'
 import {
   Card,
@@ -59,7 +60,7 @@ const showPackPreview = computed(
 const mapPreviewSrc = computed(() => {
   const scenario = scenarioDetail.value
   if (!scenario?.map_filename || mapFailed.value) return undefined
-  return `/scenario-maps/${scenario.map_filename}`
+  return withBase(`/scenario-maps/${scenario.map_filename}`)
 })
 
 const ruleGlossary = computed(() => {

@@ -9,6 +9,7 @@ import {
   fetchPackSecondaries,
   fetchRanking,
   fetchScenarioPack,
+  fetchTournament,
   deleteMatch,
   startMatch,
   updateMatchProgress,
@@ -20,6 +21,8 @@ import type {
   RankedPlayer,
   ScenarioSummary,
   SecondaryObjective,
+  TournamentDetail,
+  TournamentMatch,
 } from '@/types/elo'
 import PartieStepJoueurs from '@/components/partie/PartieStepJoueurs.vue'
 import PartieStepLieutenant from '@/components/partie/PartieStepLieutenant.vue'
@@ -98,6 +101,44 @@ const loadingSecondaries = ref(true)
 const saving = ref(false)
 const deleting = ref(false)
 const apiOnline = ref(true)
+const tournamentDetail = ref<TournamentDetail | null>(null)
+const tournamentMatch = ref<TournamentMatch | null>(null)
+
+const tournamentMatchId = computed(() => {
+  const raw = route.query.tournamentMatchId
+  const id = Number(Array.isArray(raw) ? raw[0] : raw)
+  return Number.isFinite(id) && id > 0 ? id : null
+})
+
+const isTournamentPartie = computed(
+  () => Boolean(tournamentMatchId.value || tournamentMatch.value),
+)
+
+function registrationFor(name: string | null | undefined) {
+  if (!name || !tournamentDetail.value) return undefined
+  const key = name.toLowerCase()
+  return tournamentDetail.value.registrations.find(
+    (reg) => reg.player_name.toLowerCase() === key,
+  )
+}
+
+const tournamentListLabel = computed(() =>
+  tournamentMatch.value?.phase === 'pool' ? 'Liste d’inscription' : 'Liste d’arbre',
+)
+
+const player1HasList2 = computed(() => {
+  const reg = registrationFor(player1.value?.name)
+  if (!reg) return false
+  if (tournamentMatch.value?.phase === 'pool') return Boolean(reg.has_army_list_2)
+  return Boolean(reg.has_bracket_list_2)
+})
+
+const player2HasList2 = computed(() => {
+  const reg = registrationFor(player2.value?.name)
+  if (!reg) return false
+  if (tournamentMatch.value?.phase === 'pool') return Boolean(reg.has_army_list_2)
+  return Boolean(reg.has_bracket_list_2)
+})
 
 const matchupLabel = computed(() => {
   if (!player1.value || !player2.value) return ''
@@ -309,8 +350,29 @@ async function loadData() {
         return
       }
       hydrateFromMatch(record)
+
+      // Contexte tournoi (query ou match déjà tagué).
+      let tmId = tournamentMatchId.value
+      if (!tmId && record.tournament_id) {
+        // Chercher le match tournoi lié via détail tournoi.
+        try {
+          const detail = await fetchTournament(record.tournament_id)
+          tournamentDetail.value = detail
+          const linked = detail.matches.find((m) => m.elo_match_id === record.id)
+          if (linked) {
+            tournamentMatch.value = linked
+            tmId = linked.id
+          }
+        } catch {
+          /* ignore */
+        }
+      } else if (tmId) {
+        await loadTournamentContext(tmId)
+      }
     } else {
       reset()
+      tournamentDetail.value = null
+      tournamentMatch.value = null
     }
   } catch (error) {
     apiOnline.value = false
@@ -323,6 +385,21 @@ async function loadData() {
     loadingScenarios.value = false
     loadingSecondaries.value = false
   }
+}
+
+async function loadTournamentContext(tmId: number) {
+  // On a besoin du tournament_id : le trouver via query only — fetch match tournoi n'existe pas.
+  // start-partie a tagué le match ELO avec tournament_id.
+  const resumeId = Number(route.params.id)
+  if (!Number.isFinite(resumeId)) return
+  const record = await fetchMatch(resumeId)
+  if (!record.tournament_id) return
+  const detail = await fetchTournament(record.tournament_id)
+  tournamentDetail.value = detail
+  tournamentMatch.value =
+    detail.matches.find((m) => m.id === tmId)
+    ?? detail.matches.find((m) => m.elo_match_id === resumeId)
+    ?? null
 }
 
 function drawSecondarySlugs(): { player1: string[]; player2: string[] } {
@@ -508,8 +585,13 @@ function abandonPartie() {
   }
   if (window.confirm('Quitter cette partie ? Elle restera disponible dans vos parties en cours.')) {
     const id = matchId.value
+    const tournamentId = tournamentMatch.value?.tournament_id ?? tournamentDetail.value?.id
     reset()
-    router.push(id ? '/matchs' : '/classement')
+    if (tournamentId) {
+      router.push(`/tournoi/${tournamentId}`)
+    } else {
+      router.push(id ? '/matchs' : '/classement')
+    }
   }
 }
 
@@ -540,7 +622,9 @@ onMounted(loadData)
         <div class="space-y-2">
           <div class="flex flex-wrap items-center gap-3">
             <h1 class="page-title">
-              Partie<span v-if="matchId"> #{{ matchId }}</span>
+              <template v-if="isTournamentPartie">Partie de tournoi</template>
+              <template v-else>Partie</template>
+              <span v-if="matchId"> #{{ matchId }}</span>
             </h1>
             <Button
               v-if="canShowMission"
@@ -760,6 +844,11 @@ onMounted(loadData)
               :scenario="scenario"
               :scores="scores"
               :resolved-outcome="resolvedOutcome"
+              :tournament-match-id="tournamentMatch?.id ?? tournamentMatchId"
+              :tournament-id="tournamentMatch?.tournament_id ?? tournamentDetail?.id"
+              :player1-has-list2="player1HasList2"
+              :player2-has-list2="player2HasList2"
+              :list-label="tournamentListLabel"
               @back="prevStep"
               @update:scores="updateScores"
               @recorded="reset"

@@ -25,6 +25,7 @@ import {
 import { useAuth } from '@/composables/useAuth'
 import { useAdminEditMode } from '@/composables/useAdminEditMode'
 import { useMyInProgressMatches } from '@/composables/useMyInProgressMatches'
+import { withBase } from '@/lib/basePath'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 
@@ -86,7 +87,7 @@ async function handleLogout() {
 <template>
   <header class="topbar">
     <RouterLink to="/" class="topbar-brand">
-      <img src="/brand/favicon.png" alt="" class="size-7 object-contain" />
+      <img :src="withBase('/brand/favicon.png')" alt="" class="size-7 object-contain" />
       <div class="min-w-0">
         <p class="topbar-title">La Poissonnerie</p>
         <p class="topbar-subtitle">Communauté française Infinity sur TTS</p>

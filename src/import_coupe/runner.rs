@@ -612,8 +612,9 @@ fn submit_bracket_line(
                 }
             }
         };
-        let tm = store.declare_forfeit(tm.id, forfeit_player, ADMIN_ID, true)?;
-        // Pas d'Elo sur forfait.
+        let tm = store.declare_forfeit(tm.id, forfeit_player, ADMIN_ID, true, None)?;
+        // Import historique : confirmer immédiatement le forfait.
+        let tm = store.confirm_match(tm.id, ADMIN_ID, true, None, DEFAULT_K_FACTOR)?;
         let _ = tm;
         return Ok(());
     }

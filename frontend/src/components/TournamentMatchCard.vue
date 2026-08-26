@@ -2,7 +2,6 @@
 import { computed, ref, watch } from 'vue'
 import TournamentMatchScoreboard from '@/components/TournamentMatchScoreboard.vue'
 import { Button } from '@/components/ui/button'
-import { Label } from '@/components/ui/label'
 import { formatMatchRecordedDate } from '@/lib/tournamentMatchDisplay'
 import type { TournamentMatch } from '@/types/elo'
 
@@ -21,15 +20,15 @@ const props = withDefaults(
     form: TournamentMatchForm
     canInteract: boolean
     isAdmin: boolean
+    /** Nom du joueur connecté (pour forfait soi-même). */
+    currentPlayerName?: string | null
     player1ArmyId?: number
     player2ArmyId?: number
     player1HasList2?: boolean
     player2HasList2?: boolean
     statusLabel: string
     phaseLabel?: string
-    /** Affichage resserré (panneau latéral / mobile). */
     compact?: boolean
-    /** Les deux joueurs ont leurs listes d'arbre (hors poules). */
     listsReady?: boolean
     listsReadyMessage?: string
   }>(),
@@ -39,14 +38,17 @@ const props = withDefaults(
     listsReadyMessage: '',
     player1HasList2: false,
     player2HasList2: false,
+    currentPlayerName: null,
   },
 )
 
 const emit = defineEmits<{
-  submit: []
+  start: []
+  resume: []
   confirm: []
   correct: [form: TournamentMatchForm]
   forfeit: [playerName: string]
+  cancelForfeit: []
   unplayed: []
 }>()
 
@@ -58,44 +60,61 @@ const hasBothPlayers = computed(
 
 const isPoolMatch = computed(() => props.match.phase === 'pool')
 
-const listLabel = computed(() =>
-  isPoolMatch.value ? 'Liste d’inscription' : 'Liste d’arbre',
-)
-
-/** Affichage compact confirmé (scores sur une ligne). */
 const showScoresView = computed(
-  () => props.match.status === 'confirmed' && !correcting.value,
+  () =>
+    (props.match.status === 'confirmed' || props.match.status === 'submitted')
+    && !correcting.value,
 )
-
-/** Saisie ou correction — jamais pour un match confirmé sauf mode correction admin. */
-const showFormView = computed(() => {
-  if (correcting.value) return true
-  if (props.match.status === 'confirmed') return false
-  return props.canInteract && hasBothPlayers.value
-})
 
 const scoreboardMode = computed(() => {
+  if (correcting.value) return 'form' as const
   if (showScoresView.value) return 'scores' as const
-  if (showFormView.value) return 'form' as const
   return 'players' as const
 })
 
-const canSubmitScores = computed(
+const canStart = computed(
   () =>
-    props.listsReady
-    && (props.form.list1 === 1 || props.form.list1 === 2)
-    && (props.form.list2 === 1 || props.form.list2 === 2)
-    && (props.form.list1 !== 2 || props.player1HasList2)
-    && (props.form.list2 !== 2 || props.player2HasList2),
+    props.canInteract
+    && hasBothPlayers.value
+    && props.match.status === 'scheduled'
+    && !props.match.is_forfeit
+    && !props.match.is_unplayed
+    && props.listsReady
+    && !props.match.elo_match_id,
 )
 
+const canResume = computed(
+  () =>
+    props.canInteract
+    && Boolean(props.match.elo_match_id)
+    && props.match.status === 'scheduled'
+    && !props.match.is_forfeit
+    && !props.match.is_unplayed,
+)
+
+const canConfirm = computed(
+  () => props.canInteract && props.match.status === 'submitted',
+)
+
+const selfForfeitName = computed(() => {
+  const me = props.currentPlayerName?.toLowerCase()
+  if (!me) return null
+  if (props.match.player1?.toLowerCase() === me) return props.match.player1
+  if (props.match.player2?.toLowerCase() === me) return props.match.player2
+  return null
+})
+
 watch(
-  () => [props.player1HasList2, props.player2HasList2] as const,
-  ([p1, p2]) => {
-    if (!p1) props.form.list1 = 1
-    if (!p2) props.form.list2 = 1
+  () => [
+    props.match.player1_objectives,
+    props.match.player2_objectives,
+    props.match.player1_survivors,
+    props.match.player2_survivors,
+    props.match.status,
+  ],
+  () => {
+    correcting.value = false
   },
-  { immediate: true },
 )
 
 function startCorrection() {
@@ -116,22 +135,8 @@ function saveCorrection() {
     p2: Number(props.form.p2) || 0,
     s1: Number(props.form.s1) || 0,
     s2: Number(props.form.s2) || 0,
-    list1: props.form.list1,
-    list2: props.form.list2,
   })
 }
-
-watch(
-  () => [
-    props.match.player1_objectives,
-    props.match.player2_objectives,
-    props.match.player1_survivors,
-    props.match.player2_survivors,
-  ],
-  () => {
-    correcting.value = false
-  },
-)
 
 function matchPlayerLabel(slot: 'player1' | 'player2') {
   const name = props.match[slot]
@@ -174,13 +179,22 @@ function matchPlayerLabel(slot: 'player1' | 'player2') {
           {{ statusLabel }}
         </span>
         <Button
-          v-if="isAdmin && match.status === 'confirmed' && !correcting"
+          v-if="isAdmin && match.status === 'confirmed' && !match.is_forfeit && !correcting"
           size="sm"
           variant="outline"
           class="tournament-match-correct-btn"
           @click="startCorrection"
         >
           Corriger
+        </Button>
+        <Button
+          v-if="isAdmin && match.is_forfeit"
+          size="sm"
+          variant="outline"
+          class="tournament-match-correct-btn"
+          @click="emit('cancelForfeit')"
+        >
+          Annuler forfait
         </Button>
       </div>
     </div>
@@ -195,8 +209,11 @@ function matchPlayerLabel(slot: 'player1' | 'player2') {
         :player2-army-id="player2ArmyId"
       />
 
-      <div v-if="showFormView" class="tournament-match-actions">
-        <template v-if="match.status === 'confirmed' && correcting">
+      <div
+        v-if="canInteract && hasBothPlayers"
+        class="tournament-match-actions"
+      >
+        <template v-if="correcting">
           <Button size="sm" @click="saveCorrection">
             Enregistrer
           </Button>
@@ -206,90 +223,68 @@ function matchPlayerLabel(slot: 'player1' | 'player2') {
         </template>
         <template v-else>
           <p
-            v-if="!listsReady"
+            v-if="!listsReady && match.status === 'scheduled'"
             class="w-full text-sm text-amber-600 dark:text-amber-400"
           >
             {{ listsReadyMessage || 'Listes d’arbre manquantes.' }}
           </p>
-          <div
-            v-else
-            class="flex w-full flex-wrap items-end gap-3"
-          >
-            <div class="grid gap-1">
-              <Label class="text-xs">{{ matchPlayerLabel('player1') }} — {{ listLabel }}</Label>
-              <select
-                v-if="player1HasList2"
-                v-model.number="form.list1"
-                class="h-8 rounded-md border border-input bg-transparent px-2 text-sm"
-              >
-                <option :value="undefined" disabled>Choisir…</option>
-                <option :value="1">Liste 1</option>
-                <option :value="2">Liste 2</option>
-              </select>
-              <span
-                v-else
-                class="flex h-8 items-center text-sm text-muted-foreground"
-              >
-                Liste 1
-              </span>
-            </div>
-            <div class="grid gap-1">
-              <Label class="text-xs">{{ matchPlayerLabel('player2') }} — {{ listLabel }}</Label>
-              <select
-                v-if="player2HasList2"
-                v-model.number="form.list2"
-                class="h-8 rounded-md border border-input bg-transparent px-2 text-sm"
-              >
-                <option :value="undefined" disabled>Choisir…</option>
-                <option :value="1">Liste 1</option>
-                <option :value="2">Liste 2</option>
-              </select>
-              <span
-                v-else
-                class="flex h-8 items-center text-sm text-muted-foreground"
-              >
-                Liste 1
-              </span>
-            </div>
-          </div>
+
           <Button
+            v-if="canStart"
             size="sm"
-            :disabled="!canSubmitScores"
-            @click="emit('submit')"
+            @click="emit('start')"
           >
-            Soumettre
+            Démarrer la partie
           </Button>
           <Button
-            v-if="match.status === 'submitted'"
+            v-if="canResume"
+            size="sm"
+            @click="emit('resume')"
+          >
+            Reprendre la partie
+          </Button>
+          <Button
+            v-if="canConfirm"
             size="sm"
             variant="outline"
             @click="emit('confirm')"
           >
-            Confirmer
+            {{ match.is_forfeit ? 'Confirmer le forfait' : 'Confirmer' }}
           </Button>
-          <template v-if="isAdmin">
+
+          <template v-if="match.status === 'scheduled' && !match.is_unplayed">
             <Button
-              v-if="isPoolMatch"
-              size="sm"
-              variant="outline"
-              @click="emit('unplayed')"
-            >
-              Match non joué
-            </Button>
-            <Button
+              v-if="selfForfeitName"
               size="sm"
               variant="destructive"
-              @click="emit('forfeit', match.player1!)"
+              @click="emit('forfeit', selfForfeitName)"
             >
-              FF {{ matchPlayerLabel('player1') }}
+              Je déclare forfait
             </Button>
-            <Button
-              size="sm"
-              variant="destructive"
-              @click="emit('forfeit', match.player2!)"
-            >
-              FF {{ matchPlayerLabel('player2') }}
-            </Button>
+            <template v-if="isAdmin">
+              <Button
+                v-if="isPoolMatch"
+                size="sm"
+                variant="outline"
+                @click="emit('unplayed')"
+              >
+                Match non joué
+              </Button>
+              <Button
+                size="sm"
+                variant="destructive"
+                @click="emit('forfeit', match.player1!)"
+              >
+                FF {{ matchPlayerLabel('player1') }}
+              </Button>
+              <Button
+                size="sm"
+                variant="destructive"
+                @click="emit('forfeit', match.player2!)"
+              >
+                FF {{ matchPlayerLabel('player2') }}
+              </Button>
+            </template>
           </template>
         </template>
       </div>

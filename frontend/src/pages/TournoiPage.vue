@@ -6,6 +6,7 @@ import { toast } from 'vue-sonner'
 import {
   adminRegisterForTournament,
   assignBracketScenarios,
+  cancelTournamentForfeit,
   closeTournamentRegistration,
   completeTournamentRegistrationLists,
   confirmTournamentMatch,
@@ -26,7 +27,7 @@ import {
   setupTournamentBracket,
   setupTournamentPools,
   startTournament,
-  submitTournamentMatch,
+  startTournamentPartie,
   unregisterFromTournament,
   updateMyBracketLists,
   updateTournamentDetails,
@@ -1059,42 +1060,37 @@ function matchHasList2(match: TournamentMatch, slot: 'player1' | 'player2') {
   return Boolean(reg.has_bracket_list_2)
 }
 
-async function submitMatch(match: TournamentMatch) {
-  const form = getForm(match)
-  const list1 = form.list1
-  const list2 = form.list2
-  if (list1 !== 1 && list1 !== 2) {
-    toast.error('Choisissez la liste du joueur 1')
+async function startPartie(match: TournamentMatch) {
+  try {
+    const record = await startTournamentPartie(match.id)
+    await refresh()
+    await router.push({
+      name: 'partie-resume',
+      params: { id: String(record.id) },
+      query: { tournamentMatchId: String(match.id) },
+    })
+  } catch (error) {
+    toast.error(error instanceof Error ? error.message : 'Impossible de démarrer la partie')
+  }
+}
+
+async function resumePartie(match: TournamentMatch) {
+  if (!match.elo_match_id) {
+    await startPartie(match)
     return
   }
-  if (list2 !== 1 && list2 !== 2) {
-    toast.error('Choisissez la liste du joueur 2')
-    return
-  }
-  if (list1 === 2 && !matchHasList2(match, 'player1')) {
-    toast.error('Le joueur 1 n’a pas de liste 2')
-    return
-  }
-  if (list2 === 2 && !matchHasList2(match, 'player2')) {
-    toast.error('Le joueur 2 n’a pas de liste 2')
-    return
-  }
-  await act(
-    () =>
-      submitTournamentMatch(match.id, {
-        player1_objectives: form.p1,
-        player2_objectives: form.p2,
-        player1_survivors: form.s1,
-        player2_survivors: form.s2,
-        player1_list_slot: list1,
-        player2_list_slot: list2,
-      }),
-    'Résultat soumis',
-  )
+  await router.push({
+    name: 'partie-resume',
+    params: { id: String(match.elo_match_id) },
+    query: { tournamentMatchId: String(match.id) },
+  })
 }
 
 async function confirmMatch(match: TournamentMatch) {
-  await act(() => confirmTournamentMatch(match.id), 'Résultat confirmé')
+  await act(
+    () => confirmTournamentMatch(match.id),
+    match.is_forfeit ? 'Forfait confirmé' : 'Résultat confirmé',
+  )
 }
 
 async function correctMatch(match: TournamentMatch, form: TournamentMatchForm) {
@@ -1124,10 +1120,23 @@ async function correctMatch(match: TournamentMatch, form: TournamentMatchForm) {
 }
 
 async function forfeitMatch(match: TournamentMatch, forfeitPlayer: string) {
-  await act(
-    () => forfeitTournamentMatch(match.id, forfeitPlayer),
-    'Forfait enregistré',
-  )
+  const label =
+    player.value && forfeitPlayer.toLowerCase() === player.value.name.toLowerCase()
+      ? 'Forfait déclaré — en attente de confirmation'
+      : 'Forfait déclaré — en attente de confirmation'
+  if (
+    !window.confirm(
+      `Confirmer le forfait de ${forfeitPlayer} ? L’adversaire (ou un admin) devra valider.`,
+    )
+  ) {
+    return
+  }
+  await act(() => forfeitTournamentMatch(match.id, forfeitPlayer), label)
+}
+
+async function cancelForfeit(match: TournamentMatch) {
+  if (!window.confirm('Annuler ce forfait et remettre le match à jouer ?')) return
+  await act(() => cancelTournamentForfeit(match.id), 'Forfait annulé')
 }
 
 async function markMatchUnplayed(match: TournamentMatch) {
@@ -1138,8 +1147,9 @@ async function markMatchUnplayed(match: TournamentMatch) {
 }
 
 function canInteractWithMatch(match: TournamentMatch) {
-  if (!isAuthenticated.value || !player.value) return false
+  if (!isAuthenticated.value) return false
   if (isAdmin.value) return true
+  if (!player.value) return false
   const name = player.value.name.toLowerCase()
   return (
     match.player1?.toLowerCase() === name || match.player2?.toLowerCase() === name
@@ -1148,7 +1158,10 @@ function canInteractWithMatch(match: TournamentMatch) {
 
 function matchStatusLabel(match: TournamentMatch) {
   if (match.is_unplayed) return 'Non joué'
-  return match.is_forfeit ? 'Forfait' : statusLabels[match.status] ?? match.status
+  if (match.is_forfeit && match.status === 'submitted') return 'Forfait à confirmer'
+  if (match.is_forfeit) return 'Forfait'
+  if (match.elo_match_id && match.status === 'scheduled') return 'Partie en cours'
+  return statusLabels[match.status] ?? match.status
 }
 
 watch(() => tournamentId.value, () => {
@@ -1237,6 +1250,7 @@ onMounted(refresh)
                 :form="getForm(match)"
                 :can-interact="canInteractWithMatch(match)"
                 :is-admin="isAdmin"
+                :current-player-name="player?.name"
                 :player1-army-id="matchPlayerArmyId(match, 'player1')"
                 :player2-army-id="matchPlayerArmyId(match, 'player2')"
                 :player1-has-list2="matchHasList2(match, 'player1')"
@@ -1245,10 +1259,12 @@ onMounted(refresh)
                 :phase-label="phaseLabels[match.phase] ?? match.phase"
                 :lists-ready="matchListsReady(match)"
                 :lists-ready-message="matchListsReadyMessage(match)"
-                @submit="submitMatch(match)"
+                @start="startPartie(match)"
+                @resume="resumePartie(match)"
                 @confirm="confirmMatch(match)"
                 @correct="correctMatch(match, $event)"
                 @forfeit="forfeitMatch(match, $event)"
+                @cancel-forfeit="cancelForfeit(match)"
                 @unplayed="markMatchUnplayed(match)"
               />
             </CardContent>
@@ -1274,6 +1290,7 @@ onMounted(refresh)
               :form="getForm(match)"
               :can-interact="canInteractWithMatch(match)"
               :is-admin="isAdmin"
+              :current-player-name="player?.name"
               :player1-army-id="matchPlayerArmyId(match, 'player1')"
               :player2-army-id="matchPlayerArmyId(match, 'player2')"
               :player1-has-list2="matchHasList2(match, 'player1')"
@@ -1282,10 +1299,12 @@ onMounted(refresh)
               :phase-label="phaseLabels[match.phase] ?? match.phase"
               :lists-ready="matchListsReady(match)"
               :lists-ready-message="matchListsReadyMessage(match)"
-              @submit="submitMatch(match)"
+              @start="startPartie(match)"
+              @resume="resumePartie(match)"
               @confirm="confirmMatch(match)"
               @correct="correctMatch(match, $event)"
               @forfeit="forfeitMatch(match, $event)"
+              @cancel-forfeit="cancelForfeit(match)"
               @unplayed="markMatchUnplayed(match)"
             />
           </CardContent>
@@ -1381,6 +1400,7 @@ onMounted(refresh)
                 <PoolMatchesTable
                   :matches="section.matches"
                   :is-admin="isAdmin"
+                  :current-player-name="player?.name"
                   :get-form="getForm"
                   :can-interact="canInteractWithMatch"
                   :player-army-id="matchPlayerArmyId"
@@ -1389,10 +1409,12 @@ onMounted(refresh)
                   :allow-unplayed="false"
                   :lists-ready="matchListsReady"
                   :lists-ready-message="matchListsReadyMessage"
-                  @submit="submitMatch"
+                  @start="startPartie"
+                  @resume="resumePartie"
                   @confirm="confirmMatch"
                   @correct="correctMatch"
                   @forfeit="forfeitMatch"
+                  @cancel-forfeit="cancelForfeit"
                   @unplayed="markMatchUnplayed"
                 />
               </section>
@@ -1582,15 +1604,20 @@ onMounted(refresh)
                   v-if="poolMatchesForPool(selectedPoolId!).length > 0"
                   :matches="poolMatchesForPool(selectedPoolId!)"
                   :is-admin="isAdmin"
+                  :current-player-name="player?.name"
                   :get-form="getForm"
                   :can-interact="canInteractWithMatch"
                   :player-army-id="matchPlayerArmyId"
                   :player-has-list2="matchHasList2"
                   :status-label="matchStatusLabel"
-                  @submit="submitMatch"
+                  :lists-ready="matchListsReady"
+                  :lists-ready-message="matchListsReadyMessage"
+                  @start="startPartie"
+                  @resume="resumePartie"
                   @confirm="confirmMatch"
                   @correct="correctMatch"
                   @forfeit="forfeitMatch"
+                  @cancel-forfeit="cancelForfeit"
                   @unplayed="markMatchUnplayed"
                 />
                 <p

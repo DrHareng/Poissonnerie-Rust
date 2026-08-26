@@ -1,17 +1,19 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { History, Medal, Trophy } from '@lucide/vue'
+import { FileText, History, Medal, Trophy } from '@lucide/vue'
 import { toast } from 'vue-sonner'
 import {
   fetchRanking,
   fetchRecentMatches,
+  fetchRecentReports,
   fetchTournaments,
 } from '@/lib/api'
 import type {
   MatchRecord,
   PlayerArmyUsage,
   RankedPlayer,
+  RecentMatchReport,
   TournamentListEntry,
 } from '@/types/elo'
 import ArmyLogo from '@/components/ArmyLogo.vue'
@@ -36,8 +38,6 @@ import {
   Table,
   TableBody,
   TableCell,
-  TableHead,
-  TableHeader,
   TableRow,
 } from '@/components/ui/table'
 
@@ -48,6 +48,7 @@ const loading = ref(true)
 const players = ref<RankedPlayer[]>([])
 const tournament = ref<TournamentListEntry | null>(null)
 const matches = ref<MatchRecord[]>([])
+const reports = ref<RecentMatchReport[]>([])
 
 const topPlayers = computed(() =>
   players.value
@@ -84,6 +85,11 @@ function rankBadgeClass(rank: number) {
   return 'rank-badge-outline tabular-nums'
 }
 
+function armyName(armyId?: number | null): string {
+  if (!armyId) return 'Sectorielle'
+  return getArmy(armyId)?.name ?? 'Sectorielle'
+}
+
 function armyTooltip(usage: PlayerArmyUsage) {
   const armyName = getArmy(usage.army_id)?.name ?? 'cette sectorielle'
   const label = usage.matches > 1 ? 'parties' : 'partie'
@@ -100,6 +106,14 @@ function openMatch(id: number) {
     return
   }
   router.push({ name: 'match', params: { id: String(id) } })
+}
+
+function openReport(report: RecentMatchReport) {
+  router.push({
+    name: 'match',
+    params: { id: String(report.match_id) },
+    hash: `#cr-${report.author_slot}`,
+  })
 }
 
 function openTournament() {
@@ -132,16 +146,18 @@ function matchShortDate(timestamp: number) {
 onMounted(async () => {
   loading.value = true
   try {
-    const [ranking, tournaments, recent] = await Promise.all([
+    const [ranking, tournaments, recent, recentReports] = await Promise.all([
       fetchRanking(),
       fetchTournaments(),
       fetchRecentMatches(5),
+      fetchRecentReports(5),
       ensureLoaded(),
     ])
     players.value = ranking
     tournament.value =
       tournaments.find((item) => item.status !== 'draft') ?? tournaments[0] ?? null
     matches.value = recent.items
+    reports.value = recentReports.items ?? []
   } catch (error) {
     toast.error(
       error instanceof Error ? error.message : 'Impossible de charger l’accueil',
@@ -157,6 +173,7 @@ onMounted(async () => {
     <div
       class="grid min-h-0 flex-1 grid-cols-1 items-start gap-4 lg:grid-cols-[minmax(0,20rem)_minmax(0,1fr)] xl:grid-cols-[minmax(0,22rem)_minmax(0,1fr)]"
     >
+      <div class="grid w-full min-w-0 gap-4 self-start">
       <Card class="neon-panel h-fit w-full self-start">
         <CardHeader class="pb-3">
           <div class="flex items-center justify-between gap-3">
@@ -186,14 +203,6 @@ onMounted(async () => {
             Aucun joueur classé pour l’instant.
           </div>
           <Table v-else>
-            <TableHeader>
-              <TableRow>
-                <TableHead class="w-12">#</TableHead>
-                <TableHead>Joueur</TableHead>
-                <TableHead>Sectorielles</TableHead>
-                <TableHead class="text-right">ELO</TableHead>
-              </TableRow>
-            </TableHeader>
             <TableBody>
               <TableRow
                 v-for="player in topPlayers"
@@ -230,14 +239,66 @@ onMounted(async () => {
                   </div>
                   <span v-else class="text-muted-foreground">—</span>
                 </TableCell>
-                <TableCell class="text-right font-semibold tabular-nums elo-score">
-                  {{ Math.round(player.rating) }}
+              </TableRow>
+            </TableBody>
+          </Table>
+        </CardContent>
+      </Card>
+
+      <Card class="neon-panel h-fit w-full">
+        <CardHeader class="pb-3">
+          <div class="flex items-center justify-between gap-3">
+            <CardTitle class="flex items-center gap-2">
+              <FileText class="size-5 text-primary" />
+              Derniers comptes rendus
+            </CardTitle>
+            <RouterLink
+              :to="{ name: 'matchs-cr' }"
+              class="text-sm font-medium text-primary hover:underline"
+            >
+              Voir tout
+            </RouterLink>
+          </div>
+        </CardHeader>
+        <CardContent>
+          <div
+            v-if="loading"
+            class="rounded-lg border border-dashed p-4 text-center text-sm text-muted-foreground"
+          >
+            Chargement…
+          </div>
+          <div
+            v-else-if="reports.length === 0"
+            class="rounded-lg border border-dashed p-4 text-center text-sm text-muted-foreground"
+          >
+            Aucun compte rendu publié pour l’instant.
+          </div>
+          <Table v-else>
+            <TableBody>
+              <TableRow
+                v-for="report in reports"
+                :key="report.report_id"
+                class="player-row cursor-pointer"
+                @click="openReport(report)"
+              >
+                <TableCell class="tabular-nums text-muted-foreground">
+                  {{ matchShortDate(report.updated_at || report.published_at) ?? '—' }}
+                </TableCell>
+                <TableCell class="min-w-0 truncate font-medium">
+                  {{ report.author_display_name || report.author_name }}
+                </TableCell>
+                <TableCell class="text-right">
+                  <ArmyLogo
+                    :army-id="report.author_army_id"
+                    :title="armyName(report.author_army_id)"
+                  />
                 </TableCell>
               </TableRow>
             </TableBody>
           </Table>
         </CardContent>
       </Card>
+      </div>
 
       <div class="grid min-w-0 gap-4 self-start">
         <Card class="neon-panel">

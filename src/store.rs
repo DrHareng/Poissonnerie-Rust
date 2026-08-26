@@ -7,7 +7,8 @@ use rusqlite::{params, Connection};
 use serde::{Deserialize, Serialize};
 
 use crate::match_record::{
-    decode_slug_list, encode_slug_list, now_unix, MatchRecord, MatchReport, MatchScores, MatchStatus,
+    decode_slug_list, encode_slug_list, now_unix, report_excerpt, MatchRecord, MatchReport,
+    MatchScores, MatchStatus, RecentMatchReport, ReportStatus,
 };
 use crate::migrate::migrate;
 use crate::player::{MatchOutcome, Player};
@@ -257,36 +258,10 @@ impl Leaderboard {
             )?;
 
             if let Some(report) = &record.player1_report {
-                tx.execute(
-                    "
-                    INSERT INTO match_reports (id, match_id, player_name, body_md, created_at, updated_at)
-                    VALUES (?1, ?2, ?3, ?4, ?5, ?6)
-                    ",
-                    params![
-                        report.id,
-                        record.id,
-                        record.player1,
-                        report.body_md,
-                        report.created_at,
-                        report.updated_at,
-                    ],
-                )?;
+                insert_match_report(&tx, record.id, &record.player1, report)?;
             }
             if let Some(report) = &record.player2_report {
-                tx.execute(
-                    "
-                    INSERT INTO match_reports (id, match_id, player_name, body_md, created_at, updated_at)
-                    VALUES (?1, ?2, ?3, ?4, ?5, ?6)
-                    ",
-                    params![
-                        report.id,
-                        record.id,
-                        record.player2,
-                        report.body_md,
-                        report.created_at,
-                        report.updated_at,
-                    ],
-                )?;
+                insert_match_report(&tx, record.id, &record.player2, report)?;
             }
         }
 
@@ -618,6 +593,37 @@ impl Leaderboard {
         player2_secondary_slugs: Vec<String>,
         counts_for_elo: bool,
     ) -> Result<MatchRecord> {
+        self.start_match_with_tournament(
+            player1,
+            player2,
+            player1_army_id,
+            player2_army_id,
+            created_by,
+            player1_secondary_slugs,
+            player2_secondary_slugs,
+            counts_for_elo,
+            None,
+            None,
+            None,
+            None,
+        )
+    }
+
+    pub fn start_match_with_tournament(
+        &mut self,
+        player1: &str,
+        player2: &str,
+        player1_army_id: u32,
+        player2_army_id: u32,
+        created_by: &str,
+        player1_secondary_slugs: Vec<String>,
+        player2_secondary_slugs: Vec<String>,
+        counts_for_elo: bool,
+        tournament_id: Option<i64>,
+        tournament_phase: Option<String>,
+        scenario_id: Option<i64>,
+        scenario_name: Option<String>,
+    ) -> Result<MatchRecord> {
         if normalize_name(player1) == normalize_name(player2) {
             bail!("un joueur ne peut pas jouer contre lui-même");
         }
@@ -649,6 +655,7 @@ impl Leaderboard {
             .unwrap_or(0)
             + 1;
 
+        let has_scenario = scenario_id.is_some();
         let record = MatchRecord {
             id: next_id,
             player1: self.players.get(&key1).unwrap().name.clone(),
@@ -665,12 +672,12 @@ impl Leaderboard {
             player2_survivors: 0,
             player1_army_id: Some(player1_army_id),
             player2_army_id: Some(player2_army_id),
-            scenario_id: None,
+            scenario_id,
             scenario_other: None,
             scenario_url: None,
-            scenario_name: None,
-            tournament_id: None,
-            tournament_phase: None,
+            scenario_name,
+            tournament_id,
+            tournament_phase,
             tournament_name: None,
             player1_report: None,
             player2_report: None,
@@ -692,7 +699,11 @@ impl Leaderboard {
             lieutenant_winner: None,
             lieutenant_winner_choice: None,
             lieutenant_other_choice: None,
-            partie_step: Some("scenario".to_string()),
+            partie_step: Some(if has_scenario {
+                "secondaires".to_string()
+            } else {
+                "scenario".to_string()
+            }),
             created_by: Some(created_by.to_string()),
             counts_for_elo,
             recorded_at: now_unix(),
@@ -868,6 +879,97 @@ impl Leaderboard {
         Ok(record.clone())
     }
 
+    /// Applique un résultat tournoi (ELO déjà calculé) sur une partie liée existante.
+    pub fn apply_tournament_elo_to_existing_match(
+        &mut self,
+        match_id: u64,
+        outcome: MatchOutcome,
+        update: crate::player::RatingUpdate,
+        scores: MatchScores,
+        tournament_id: Option<i64>,
+        tournament_phase: Option<String>,
+        tournament_name: Option<String>,
+        player1_army_list_code: Option<String>,
+        player2_army_list_code: Option<String>,
+        scenario_id: Option<i64>,
+        scenario_other: Option<String>,
+        scenario_name: Option<String>,
+        player1_army_id: Option<u32>,
+        player2_army_id: Option<u32>,
+    ) -> Result<MatchRecord> {
+        let scores = scores.validate()?;
+        let index = self
+            .matches
+            .iter()
+            .position(|record| record.id == match_id)
+            .ok_or_else(|| anyhow::anyhow!("match introuvable"))?;
+
+        let key1 = normalize_name(&self.matches[index].player1.clone());
+        let key2 = normalize_name(&self.matches[index].player2.clone());
+
+        // N'applique l'ELO joueur qu'une seule fois.
+        let already_applied = self.matches[index].status == MatchStatus::Completed
+            && self.matches[index].counts_for_elo
+            && (self.matches[index].player1_new != self.matches[index].player1_old
+                || self.matches[index].player2_new != self.matches[index].player2_old);
+
+        if !already_applied {
+            let p1 = self.players.get_mut(&key1).context("joueur introuvable")?;
+            p1.rating = update.player1_new;
+            p1.record_match(outcome.score_for_player1());
+
+            let score2 = match outcome.score_for_player1() {
+                crate::elo::MatchScore::Win => crate::elo::MatchScore::Loss,
+                crate::elo::MatchScore::Draw => crate::elo::MatchScore::Draw,
+                crate::elo::MatchScore::Loss => crate::elo::MatchScore::Win,
+            };
+            let p2 = self.players.get_mut(&key2).context("joueur introuvable")?;
+            p2.rating = update.player2_new;
+            p2.record_match(score2);
+        }
+
+        let record = &mut self.matches[index];
+        record.status = MatchStatus::Completed;
+        record.outcome = Some(outcome);
+        record.player1_old = update.player1_old;
+        record.player1_new = update.player1_new;
+        record.player2_old = update.player2_old;
+        record.player2_new = update.player2_new;
+        record.player1_objectives = scores.player1_objectives;
+        record.player1_survivors = scores.player1_survivors;
+        record.player2_objectives = scores.player2_objectives;
+        record.player2_survivors = scores.player2_survivors;
+        record.counts_for_elo = true;
+        record.tournament_id = tournament_id.or(record.tournament_id);
+        record.tournament_phase = tournament_phase.or_else(|| record.tournament_phase.clone());
+        record.tournament_name = tournament_name.or_else(|| record.tournament_name.clone());
+        if player1_army_list_code.is_some() {
+            record.player1_army_list_code = player1_army_list_code;
+        }
+        if player2_army_list_code.is_some() {
+            record.player2_army_list_code = player2_army_list_code;
+        }
+        if scenario_id.is_some() {
+            record.scenario_id = scenario_id;
+        }
+        if scenario_other.is_some() {
+            record.scenario_other = scenario_other;
+        }
+        if scenario_name.is_some() {
+            record.scenario_name = scenario_name;
+        }
+        if player1_army_id.is_some() {
+            record.player1_army_id = player1_army_id;
+        }
+        if player2_army_id.is_some() {
+            record.player2_army_id = player2_army_id;
+        }
+        record.partie_step = Some("resultat".to_string());
+        record.recorded_at = now_unix();
+
+        Ok(record.clone())
+    }
+
     pub fn in_progress_matches(&self) -> Vec<&MatchRecord> {
         self.matches
             .iter()
@@ -892,6 +994,7 @@ impl Leaderboard {
         id: u64,
         player_name: &str,
         body_md: &str,
+        status: ReportStatus,
     ) -> Result<MatchRecord> {
         let key = normalize_name(player_name);
         let now = now_unix();
@@ -902,11 +1005,36 @@ impl Leaderboard {
             .find(|record| record.id == id)
             .ok_or_else(|| anyhow::anyhow!("match introuvable"))?;
 
-        let report = |existing: &Option<MatchReport>| MatchReport {
-            id: existing.as_ref().map(|r| r.id).unwrap_or(next_report_id),
-            body_md: body_md.to_string(),
-            created_at: existing.as_ref().map(|r| r.created_at).unwrap_or(now),
-            updated_at: now,
+        if record.status != MatchStatus::Completed {
+            bail!("le compte rendu n'est disponible qu'une fois le match terminé");
+        }
+
+        if status == ReportStatus::Published && body_md.trim().is_empty() {
+            bail!("le compte rendu ne peut pas être vide");
+        }
+
+        let report = |existing: &Option<MatchReport>| {
+            let published_at = if status == ReportStatus::Published {
+                if existing
+                    .as_ref()
+                    .is_some_and(|report| report.status == ReportStatus::Published)
+                {
+                    existing.as_ref().and_then(|report| report.published_at)
+                        .or(Some(now))
+                } else {
+                    Some(now)
+                }
+            } else {
+                existing.as_ref().and_then(|report| report.published_at)
+            };
+            MatchReport {
+                id: existing.as_ref().map(|r| r.id).unwrap_or(next_report_id),
+                body_md: body_md.to_string(),
+                status,
+                published_at,
+                created_at: existing.as_ref().map(|r| r.created_at).unwrap_or(now),
+                updated_at: now,
+            }
         };
 
         if normalize_name(&record.player1) == key {
@@ -918,6 +1046,23 @@ impl Leaderboard {
         }
 
         Ok(record.clone())
+    }
+
+    pub fn recent_published_reports(&self, limit: usize, offset: usize) -> (Vec<RecentMatchReport>, usize) {
+        let mut items = Vec::new();
+        for record in &self.matches {
+            push_recent_report(&mut items, record, true);
+            push_recent_report(&mut items, record, false);
+        }
+        items.sort_by(|a, b| {
+            b.updated_at
+                .cmp(&a.updated_at)
+                .then_with(|| b.published_at.cmp(&a.published_at))
+                .then_with(|| b.report_id.cmp(&a.report_id))
+        });
+        let total = items.len();
+        let page = items.into_iter().skip(offset).take(limit).collect();
+        (page, total)
     }
 
     fn next_report_id(&self) -> i64 {
@@ -950,7 +1095,7 @@ impl Leaderboard {
             .find(|record| record.id == id)
             .ok_or_else(|| anyhow::anyhow!("match introuvable"))?;
 
-        if record.tournament_id.is_some() {
+        if record.tournament_id.is_some() && record.status != MatchStatus::InProgress {
             bail!("les listes d'un match de tournoi sont figées à la validation du résultat");
         }
 
@@ -1004,6 +1149,9 @@ impl Leaderboard {
         let mut stats: HashMap<u32, (u32, u64)> = HashMap::new();
 
         for record in &self.matches {
+            if record.status != MatchStatus::Completed || !record.counts_for_elo {
+                continue;
+            }
             let army_id = if normalize_name(&record.player1) == key {
                 record.player1_army_id
             } else if normalize_name(&record.player2) == key {
@@ -1046,6 +1194,9 @@ impl Leaderboard {
 
         for record in &self.matches {
             if record.status != MatchStatus::Completed {
+                continue;
+            }
+            if !record.counts_for_elo {
                 continue;
             }
             let Some(outcome) = record.outcome else {
@@ -1200,7 +1351,7 @@ fn row_to_match(row: &rusqlite::Row<'_>) -> rusqlite::Result<MatchRecord> {
 fn attach_match_reports(conn: &Connection, matches: &mut [MatchRecord]) -> Result<()> {
     let mut stmt = conn.prepare(
         "
-        SELECT id, match_id, player_name, body_md, created_at, updated_at
+        SELECT id, match_id, player_name, body_md, created_at, updated_at, status, published_at
         FROM match_reports
         ",
     )?;
@@ -1212,17 +1363,22 @@ fn attach_match_reports(conn: &Connection, matches: &mut [MatchRecord]) -> Resul
             row.get::<_, String>(3)?,
             row.get::<_, u64>(4)?,
             row.get::<_, u64>(5)?,
+            row.get::<_, String>(6)?,
+            row.get::<_, Option<u64>>(7)?,
         ))
     })?;
 
     for row in rows {
-        let (id, match_id, player_name, body_md, created_at, updated_at) = row?;
+        let (id, match_id, player_name, body_md, created_at, updated_at, status, published_at) =
+            row?;
         let Some(record) = matches.iter_mut().find(|record| record.id == match_id) else {
             continue;
         };
         let report = MatchReport {
             id,
             body_md,
+            status: ReportStatus::parse(&status),
+            published_at,
             created_at,
             updated_at,
         };
@@ -1234,6 +1390,82 @@ fn attach_match_reports(conn: &Connection, matches: &mut [MatchRecord]) -> Resul
     }
 
     Ok(())
+}
+
+fn insert_match_report(
+    conn: &Connection,
+    match_id: u64,
+    player_name: &str,
+    report: &MatchReport,
+) -> Result<()> {
+    conn.execute(
+        "
+        INSERT INTO match_reports (
+            id, match_id, player_name, body_md, created_at, updated_at, status, published_at
+        )
+        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+        ",
+        params![
+            report.id,
+            match_id,
+            player_name,
+            report.body_md,
+            report.created_at,
+            report.updated_at,
+            report.status.as_str(),
+            report.published_at,
+        ],
+    )?;
+    Ok(())
+}
+
+fn push_recent_report(items: &mut Vec<RecentMatchReport>, record: &MatchRecord, player1: bool) {
+    let report = if player1 {
+        record.player1_report.as_ref()
+    } else {
+        record.player2_report.as_ref()
+    };
+    let Some(report) = report else {
+        return;
+    };
+    if report.status != ReportStatus::Published {
+        return;
+    }
+    let published_at = report.published_at.unwrap_or(report.created_at);
+    let (author_name, opponent_name, author_army_id, opponent_army_id, author_slot) = if player1 {
+        (
+            record.player1.clone(),
+            record.player2.clone(),
+            record.player1_army_id,
+            record.player2_army_id,
+            "player1",
+        )
+    } else {
+        (
+            record.player2.clone(),
+            record.player1.clone(),
+            record.player2_army_id,
+            record.player1_army_id,
+            "player2",
+        )
+    };
+    items.push(RecentMatchReport {
+        match_id: record.id,
+        report_id: report.id,
+        author_name,
+        author_slot,
+        opponent_name,
+        author_army_id,
+        opponent_army_id,
+        scenario_name: record.scenario_name.clone(),
+        tournament_id: record.tournament_id,
+        tournament_phase: record.tournament_phase.clone(),
+        tournament_name: record.tournament_name.clone(),
+        counts_for_elo: record.counts_for_elo,
+        excerpt: report_excerpt(&report.body_md, 280),
+        published_at,
+        updated_at: report.updated_at,
+    });
 }
 
 fn normalize_army_list_code(raw: &str) -> Option<String> {
@@ -2004,6 +2236,60 @@ mod tests {
     }
 
     #[test]
+    fn army_ranking_ignores_friendly_matches() {
+        use crate::player::MatchOutcome;
+
+        let mut board = Leaderboard::default();
+        board.add_player("Alice").unwrap();
+        board.add_player("Bob").unwrap();
+
+        board
+            .record_match(
+                "Alice",
+                "Bob",
+                MatchOutcome::Player1Win,
+                32.0,
+                MatchScores::default(),
+                Some(101),
+                Some(201),
+                None,
+                None,
+                None,
+            )
+            .unwrap();
+
+        let friendly = board
+            .start_match(
+                "Alice",
+                "Bob",
+                101,
+                201,
+                "Alice",
+                Vec::new(),
+                Vec::new(),
+                false,
+            )
+            .unwrap();
+        board
+            .complete_match(
+                friendly.id,
+                MatchOutcome::Player2Win,
+                32.0,
+                MatchScores::default(),
+            )
+            .unwrap();
+
+        let ranking = board.army_ranking();
+        let army101 = ranking.iter().find(|entry| entry.army_id == 101).unwrap();
+        assert_eq!(army101.wins, 1);
+        assert_eq!(army101.draws, 0);
+        assert_eq!(army101.losses, 0);
+        let army201 = ranking.iter().find(|entry| entry.army_id == 201).unwrap();
+        assert_eq!(army201.wins, 0);
+        assert_eq!(army201.losses, 1);
+    }
+
+    #[test]
     fn army_matches_returns_only_games_with_army() {
         use crate::player::MatchOutcome;
 
@@ -2075,6 +2361,63 @@ mod tests {
         assert_eq!(loaded.get_player("Alice").unwrap().wins, 1);
         assert_eq!(loaded.get_player("Bob").unwrap().losses, 1);
 
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn match_report_draft_stays_out_of_recent_feed() {
+        use crate::player::MatchOutcome;
+
+        let mut board = Leaderboard::default();
+        board.add_player("Alice").unwrap();
+        board.add_player("Bob").unwrap();
+        let recorded = board
+            .record_match(
+                "Alice",
+                "Bob",
+                MatchOutcome::Player1Win,
+                32.0,
+                MatchScores::default(),
+                None,
+                None,
+                None,
+                None,
+                None,
+            )
+            .unwrap();
+
+        board
+            .update_match_report(recorded.id, "Alice", "brouillon", ReportStatus::Draft)
+            .unwrap();
+        assert!(board.recent_published_reports(10, 0).0.is_empty());
+
+        board
+            .update_match_report(recorded.id, "Alice", "version publique", ReportStatus::Published)
+            .unwrap();
+        let (recent, total) = board.recent_published_reports(10, 0);
+        assert_eq!(total, 1);
+        assert_eq!(recent.len(), 1);
+        assert_eq!(recent[0].author_name, "Alice");
+        assert_eq!(recent[0].excerpt, "version publique");
+        assert!(recent[0].counts_for_elo);
+        assert!(recent[0].tournament_id.is_none());
+
+        board
+            .update_match_report(recorded.id, "Alice", "version publique", ReportStatus::Draft)
+            .unwrap();
+        assert!(board.recent_published_reports(10, 0).0.is_empty());
+
+        let path = std::env::temp_dir().join(format!(
+            "poissonnerie-report-status-{}-{}",
+            std::process::id(),
+            now_unix()
+        ));
+        let _ = fs::remove_file(&path);
+        board.save(&path).unwrap();
+        let loaded = Leaderboard::load(&path).unwrap();
+        let report = loaded.get_match(recorded.id).unwrap().player1_report.as_ref().unwrap();
+        assert_eq!(report.status, ReportStatus::Draft);
+        assert_eq!(report.body_md, "version publique");
         let _ = fs::remove_file(path);
     }
 }

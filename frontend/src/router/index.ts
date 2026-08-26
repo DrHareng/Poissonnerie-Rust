@@ -4,6 +4,7 @@ import ClassementPage from '@/pages/ClassementPage.vue'
 import JoueurPage from '@/pages/JoueurPage.vue'
 import MatchsPage from '@/pages/MatchsPage.vue'
 import MatchPage from '@/pages/MatchPage.vue'
+import MatchReportPage from '@/pages/MatchReportPage.vue'
 import SectoriellesPage from '@/pages/SectoriellesPage.vue'
 import SectoriellePage from '@/pages/SectoriellePage.vue'
 import ScenariosPage from '@/pages/ScenariosPage.vue'
@@ -13,7 +14,7 @@ import PartiePage from '@/pages/PartiePage.vue'
 import { pageTitle } from '@/lib/pageTitle'
 
 export const router = createRouter({
-  history: createWebHistory(),
+  history: createWebHistory(import.meta.env.BASE_URL),
   scrollBehavior(to) {
     if (to.hash) {
       return { el: to.hash, top: 88, behavior: 'smooth' }
@@ -69,9 +70,21 @@ export const router = createRouter({
       meta: { title: 'Matchs' },
     },
     {
+      path: '/matchs/cr',
+      name: 'matchs-cr',
+      component: MatchsPage,
+      meta: { title: 'Compte rendu' },
+    },
+    {
       path: '/matchs/:id',
       name: 'match',
       component: MatchPage,
+      props: true,
+    },
+    {
+      path: '/matchs/:id/cr',
+      name: 'match-cr',
+      component: MatchReportPage,
       props: true,
     },
     {
@@ -108,6 +121,10 @@ router.afterEach((to) => {
   }
   if (to.name === 'match') {
     document.title = 'Match'
+    return
+  }
+  if (to.name === 'match-cr') {
+    document.title = pageTitle('Compte rendu')
     return
   }
   const suffix = to.meta.title

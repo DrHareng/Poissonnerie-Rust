@@ -3,9 +3,10 @@ import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { toast } from 'vue-sonner'
 import { Eye, Play, Trash2 } from '@lucide/vue'
-import { deleteMatch, fetchRecentMatches } from '@/lib/api'
-import type { MatchRecord } from '@/types/elo'
+import { deleteMatch, fetchRecentMatches, fetchRecentReports } from '@/lib/api'
+import type { MatchRecord, RecentMatchReport } from '@/types/elo'
 import RecentMatchesList from '@/components/RecentMatchesList.vue'
+import RecentReportsList from '@/components/RecentReportsList.vue'
 import ArmyLogo from '@/components/ArmyLogo.vue'
 import PlayerLink from '@/components/PlayerLink.vue'
 import MatchContextCell from '@/components/MatchContextCell.vue'
@@ -35,6 +36,7 @@ import {
 } from '@/components/ui/table'
 
 const PAGE_SIZE = 5
+const REPORT_PAGE_SIZE = 10
 
 const router = useRouter()
 const route = useRoute()
@@ -57,7 +59,17 @@ const totalMatches = ref(0)
 const page = ref(1)
 const loadingMatches = ref(true)
 
+const isReportsTab = computed(() => route.name === 'matchs-cr')
+
+const reports = ref<RecentMatchReport[]>([])
+const totalReports = ref(0)
+const reportsPage = ref(1)
+const loadingReports = ref(true)
+
 const totalPages = computed(() => Math.max(1, Math.ceil(totalMatches.value / PAGE_SIZE)))
+const totalReportPages = computed(() =>
+  Math.max(1, Math.ceil(totalReports.value / REPORT_PAGE_SIZE)),
+)
 
 const inProgressTitle = computed(() => {
   const count = inProgress.value.length
@@ -93,12 +105,40 @@ async function refreshMatches() {
   }
 }
 
+async function refreshReports() {
+  loadingReports.value = true
+  try {
+    const response = await fetchRecentReports(
+      REPORT_PAGE_SIZE,
+      (reportsPage.value - 1) * REPORT_PAGE_SIZE,
+    )
+    reports.value = response.items
+    totalReports.value = response.total
+    apiOnline.value = true
+  } catch (error) {
+    apiOnline.value = false
+    toast.error(
+      error instanceof Error ? error.message : 'Impossible de charger les comptes rendus',
+    )
+  } finally {
+    loadingReports.value = false
+  }
+}
+
 async function refreshAll() {
+  if (isReportsTab.value) {
+    await Promise.all([refreshReports(), refreshInProgress()])
+    return
+  }
   await Promise.all([refreshMatches(), refreshInProgress()])
 }
 
 function onPageChange(nextPage: number) {
   page.value = nextPage
+}
+
+function onReportsPageChange(nextPage: number) {
+  reportsPage.value = nextPage
 }
 
 function resumePartie(id: number) {
@@ -132,7 +172,27 @@ async function scrollToHash() {
   document.querySelector(hash)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
 }
 
-watch(page, refreshMatches)
+watch(page, () => {
+  if (!isReportsTab.value) void refreshMatches()
+})
+watch(reportsPage, () => {
+  if (isReportsTab.value) void refreshReports()
+})
+watch(isReportsTab, (isReports) => {
+  if (isReports) {
+    if (reportsPage.value !== 1) {
+      reportsPage.value = 1
+      return
+    }
+    void refreshReports()
+    return
+  }
+  if (page.value !== 1) {
+    page.value = 1
+    return
+  }
+  void refreshMatches()
+})
 watch(() => route.hash, scrollToHash)
 watch(loadingInProgress, (loading) => {
   if (!loading && route.hash === '#parties-en-cours') {
@@ -155,7 +215,11 @@ onMounted(async () => {
 
     <section class="page-header">
       <p class="page-description">
-        Consultez les résultats enregistrés.
+        {{
+          isReportsTab
+            ? 'Consultez les comptes rendus publiés.'
+            : 'Consultez les résultats enregistrés.'
+        }}
       </p>
     </section>
 
@@ -169,7 +233,7 @@ onMounted(async () => {
     </Alert>
 
     <Card
-      v-if="isAuthenticated"
+      v-if="isAuthenticated && !isReportsTab"
       id="parties-en-cours"
       class="neon-panel scroll-mt-24"
     >
@@ -270,7 +334,18 @@ onMounted(async () => {
       </CardContent>
     </Card>
 
+    <RecentReportsList
+      v-if="isReportsTab"
+      :reports="reports"
+      :loading="loadingReports"
+      :page="reportsPage"
+      :page-size="REPORT_PAGE_SIZE"
+      :total="totalReports"
+      :total-pages="totalReportPages"
+      @page-change="onReportsPageChange"
+    />
     <RecentMatchesList
+      v-else
       :matches="matches"
       :loading="loadingMatches"
       :page="page"

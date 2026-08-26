@@ -279,6 +279,13 @@ pub fn migrate(conn: &Connection) -> Result<()> {
         )?;
     }
 
+    if !column_exists(conn, "tournament_matches", "elo_match_id")? {
+        conn.execute(
+            "ALTER TABLE tournament_matches ADD COLUMN elo_match_id INTEGER REFERENCES matches(id)",
+            [],
+        )?;
+    }
+
     migrate_match_reports(conn)?;
 
     if column_exists(conn, "matches", "tournament_id")?
@@ -712,12 +719,37 @@ fn migrate_match_reports(conn: &Connection) -> Result<()> {
             body_md TEXT NOT NULL,
             created_at INTEGER NOT NULL,
             updated_at INTEGER NOT NULL,
+            status TEXT NOT NULL DEFAULT 'published',
+            published_at INTEGER,
             UNIQUE(match_id, player_name)
         );
         CREATE INDEX IF NOT EXISTS idx_match_reports_match_id
             ON match_reports(match_id);
+        CREATE TABLE IF NOT EXISTS report_templates (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            name TEXT NOT NULL,
+            body_md TEXT NOT NULL,
+            created_at INTEGER NOT NULL,
+            updated_at INTEGER NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_report_templates_user
+            ON report_templates(user_id);
         ",
     )?;
+
+    if !column_exists(conn, "match_reports", "status")? {
+        conn.execute(
+            "ALTER TABLE match_reports ADD COLUMN status TEXT NOT NULL DEFAULT 'published'",
+            [],
+        )?;
+    }
+    if !column_exists(conn, "match_reports", "published_at")? {
+        conn.execute(
+            "ALTER TABLE match_reports ADD COLUMN published_at INTEGER",
+            [],
+        )?;
+    }
 
     // Migration one-shot depuis les anciennes colonnes matches.player*_report_md.
     if column_exists(conn, "matches", "player1_report_md")? {
@@ -744,6 +776,15 @@ fn migrate_match_reports(conn: &Connection) -> Result<()> {
             rusqlite::params![now],
         )?;
     }
+
+    conn.execute(
+        "
+        UPDATE match_reports
+        SET published_at = created_at
+        WHERE published_at IS NULL AND status = 'published'
+        ",
+        [],
+    )?;
 
     Ok(())
 }

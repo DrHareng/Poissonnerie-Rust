@@ -2,7 +2,7 @@
 import { computed, onMounted, ref } from 'vue'
 import { RouterLink, useRoute, useRouter } from 'vue-router'
 import { toast } from 'vue-sonner'
-import { Play, Swords, Trash2 } from '@lucide/vue'
+import { Play, Pencil, Swords, Trash2 } from '@lucide/vue'
 import {
   deleteMatch,
   fetchArmies,
@@ -10,7 +10,6 @@ import {
   fetchPackSecondaries,
   fetchScenarioPack,
   updateMatchArmyList,
-  updateMatchReport,
 } from '@/lib/api'
 import type {
   Army,
@@ -23,7 +22,6 @@ import ArmyLogo from '@/components/ArmyLogo.vue'
 import MatchArmyListCard from '@/components/MatchArmyListCard.vue'
 import MarkdownContent from '@/components/MarkdownContent.vue'
 import PlayerLink from '@/components/PlayerLink.vue'
-import AdminContentEditor from '@/components/AdminContentEditor.vue'
 import ContentHoverTip from '@/components/ContentHoverTip.vue'
 import CombatEspritPlayerHand from '@/components/partie/CombatEspritPlayerHand.vue'
 import { useAuth } from '@/composables/useAuth'
@@ -37,6 +35,7 @@ import { matchsTabs } from '@/lib/pageTitleTabs'
 import { externalHref } from '@/lib/utils'
 import PageTitleTabs from '@/components/PageTitleTabs.vue'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
+import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import {
   Card,
@@ -189,9 +188,41 @@ function canEditReport(playerName: string): boolean {
   )
 }
 
+function canWriteReport(playerName: string): boolean {
+  return Boolean(
+    match.value &&
+      match.value.status !== 'in_progress' &&
+      canEditReport(playerName),
+  )
+}
+
 function canEditArmyList(playerName: string): boolean {
   if (match.value?.tournament_id != null) return false
   return canEditReport(playerName)
+}
+
+function reportFor(playerName: string) {
+  if (!match.value) return null
+  const opts: Intl.CollatorOptions = { sensitivity: 'accent' }
+  if (playerName.localeCompare(match.value.player1, undefined, opts) === 0) {
+    return match.value.player1_report ?? null
+  }
+  if (playerName.localeCompare(match.value.player2, undefined, opts) === 0) {
+    return match.value.player2_report ?? null
+  }
+  return null
+}
+
+function crButtonLabel(playerName: string): string {
+  const report = reportFor(playerName)
+  if (report?.status === 'draft') return 'Continuer le CR'
+  if (report) return 'Modifier mon CR'
+  return 'Saisir un CR'
+}
+
+function openCr() {
+  if (!match.value) return
+  router.push({ name: 'match-cr', params: { id: String(match.value.id) } })
 }
 
 const isTournamentMatch = computed(() => match.value?.tournament_id != null)
@@ -271,18 +302,6 @@ async function loadMatch() {
 function resumePartie() {
   if (!match.value) return
   router.push({ name: 'partie-resume', params: { id: String(match.value.id) } })
-}
-
-async function persistPlayer1Report(payload: { body: string }) {
-  if (!match.value) return
-  match.value = await updateMatchReport(match.value.id, payload.body)
-  toast.success('Compte rendu enregistré')
-}
-
-async function persistPlayer2Report(payload: { body: string }) {
-  if (!match.value) return
-  match.value = await updateMatchReport(match.value.id, payload.body)
-  toast.success('Compte rendu enregistré')
 }
 
 async function persistPlayer1ArmyList(code: string, armyId?: number | null) {
@@ -607,69 +626,87 @@ onMounted(loadMatch)
       </Card>
 
       <div class="grid grid-cols-1 gap-4 lg:grid-cols-2">
-        <Card class="neon-panel relative">
+        <Card id="cr-player1" class="neon-panel relative scroll-mt-24">
           <CardHeader>
-            <CardTitle class="text-base">
-              CR — {{ match.player1_display_name ?? match.player1 }}
-            </CardTitle>
-            <CardDescription v-if="match.player1_report">
-              {{
-                reportDateLabel(
-                  match.player1_report.created_at,
-                  match.player1_report.updated_at,
-                )
-              }}
-            </CardDescription>
+            <div class="flex items-start justify-between gap-3">
+              <div class="space-y-1">
+                <CardTitle class="flex flex-wrap items-center gap-2 text-base">
+                  CR — {{ match.player1_display_name ?? match.player1 }}
+                  <Badge v-if="reportFor(match.player1)?.status === 'draft'" variant="secondary">
+                    Brouillon
+                  </Badge>
+                </CardTitle>
+                <CardDescription v-if="match.player1_report">
+                  {{
+                    reportDateLabel(
+                      match.player1_report.created_at,
+                      match.player1_report.updated_at,
+                    )
+                  }}
+                </CardDescription>
+              </div>
+              <Button
+                v-if="canWriteReport(match.player1)"
+                type="button"
+                size="sm"
+                variant="outline"
+                @click="openCr"
+              >
+                <Pencil class="size-3.5" />
+                {{ crButtonLabel(match.player1) }}
+              </Button>
+            </div>
           </CardHeader>
           <CardContent>
-            <AdminContentEditor
-              :can-edit="canEditReport(match.player1)"
-              :body="match.player1_report?.body_md ?? ''"
-              :rows="12"
-              simple-markdown
-              :persist="persistPlayer1Report"
-            >
-              <MarkdownContent
-                v-if="match.player1_report?.body_md?.trim()"
-                :source="match.player1_report.body_md"
-              />
-              <p v-else class="text-sm text-muted-foreground italic">
-                Aucun compte rendu pour l'instant.
-              </p>
-            </AdminContentEditor>
+            <MarkdownContent
+              v-if="match.player1_report?.body_md?.trim()"
+              :source="match.player1_report.body_md"
+            />
+            <p v-else class="text-sm text-muted-foreground italic">
+              Aucun compte rendu pour l'instant.
+            </p>
           </CardContent>
         </Card>
 
-        <Card class="neon-panel relative">
+        <Card id="cr-player2" class="neon-panel relative scroll-mt-24">
           <CardHeader>
-            <CardTitle class="text-base">
-              CR — {{ match.player2_display_name ?? match.player2 }}
-            </CardTitle>
-            <CardDescription v-if="match.player2_report">
-              {{
-                reportDateLabel(
-                  match.player2_report.created_at,
-                  match.player2_report.updated_at,
-                )
-              }}
-            </CardDescription>
+            <div class="flex items-start justify-between gap-3">
+              <div class="space-y-1">
+                <CardTitle class="flex flex-wrap items-center gap-2 text-base">
+                  CR — {{ match.player2_display_name ?? match.player2 }}
+                  <Badge v-if="reportFor(match.player2)?.status === 'draft'" variant="secondary">
+                    Brouillon
+                  </Badge>
+                </CardTitle>
+                <CardDescription v-if="match.player2_report">
+                  {{
+                    reportDateLabel(
+                      match.player2_report.created_at,
+                      match.player2_report.updated_at,
+                    )
+                  }}
+                </CardDescription>
+              </div>
+              <Button
+                v-if="canWriteReport(match.player2)"
+                type="button"
+                size="sm"
+                variant="outline"
+                @click="openCr"
+              >
+                <Pencil class="size-3.5" />
+                {{ crButtonLabel(match.player2) }}
+              </Button>
+            </div>
           </CardHeader>
           <CardContent>
-            <AdminContentEditor
-              :can-edit="canEditReport(match.player2)"
-              :body="match.player2_report?.body_md ?? ''"
-              :rows="12"
-              simple-markdown
-              :persist="persistPlayer2Report"
-            >
-              <MarkdownContent
-                v-if="match.player2_report?.body_md?.trim()"
-                :source="match.player2_report.body_md"
-              />
-              <p v-else class="text-sm text-muted-foreground italic">
-                Aucun compte rendu pour l'instant.
-              </p>
-            </AdminContentEditor>
+            <MarkdownContent
+              v-if="match.player2_report?.body_md?.trim()"
+              :source="match.player2_report.body_md"
+            />
+            <p v-else class="text-sm text-muted-foreground italic">
+              Aucun compte rendu pour l'instant.
+            </p>
           </CardContent>
         </Card>
       </div>

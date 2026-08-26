@@ -379,6 +379,9 @@ pub struct TournamentMatch {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub player2_army_list_code: Option<String>,
     pub played_at: Option<u64>,
+    /// Partie ELO / wizard liée (en cours ou terminée).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub elo_match_id: Option<u64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -1024,6 +1027,7 @@ mod tests {
             player1_army_list_code: None,
             player2_army_list_code: None,
             played_at: None,
+            elo_match_id: None,
         };
 
         assert_eq!(bracket_match_winner(&semi_draw).as_deref(), Some("Ayadan"));
@@ -1168,6 +1172,7 @@ mod tests {
                 player1_army_list_code: None,
                 player2_army_list_code: None,
                 played_at: None,
+                elo_match_id: None,
             },
         ];
 
@@ -1217,6 +1222,7 @@ mod tests {
                 player1_army_list_code: None,
                 player2_army_list_code: None,
                 played_at: None,
+                elo_match_id: None,
             },
             TournamentMatch {
                 id: 2,
@@ -1257,6 +1263,7 @@ mod tests {
                 player1_army_list_code: None,
                 player2_army_list_code: None,
                 played_at: None,
+                elo_match_id: None,
             },
         ];
 

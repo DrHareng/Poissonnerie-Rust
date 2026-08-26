@@ -6,11 +6,14 @@ import type {
   MatchOutcome,
   MatchRecord,
   PaginatedMatches,
+  PaginatedReports,
   Player,
   PlayerProfile,
   PlayerTournamentResult,
   RankedArmy,
   RankedPlayer,
+  ReportStatus,
+  ReportTemplate,
   Scenario,
   ScenarioDetail,
   ScenarioPack,
@@ -23,13 +26,14 @@ import type {
   TournamentRegistration,
   TournamentScenarioSlot,
 } from '@/types/elo'
+import { withBase } from '@/lib/basePath'
 
 const defaultFetchOptions: RequestInit = {
   credentials: 'include',
 }
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(path, {
+  const response = await fetch(withBase(path), {
     ...defaultFetchOptions,
     headers: {
       'Content-Type': 'application/json',
@@ -79,7 +83,7 @@ export function fetchArmyMatches(id: number, limit = 50): Promise<MatchRecord[]>
 }
 
 export async function fetchMe(): Promise<AuthUser | null> {
-  const response = await fetch('/api/auth/me', defaultFetchOptions)
+  const response = await fetch(withBase('/api/auth/me'), defaultFetchOptions)
   if (response.status === 401) {
     return null
   }
@@ -99,7 +103,7 @@ export async function fetchMe(): Promise<AuthUser | null> {
 }
 
 export function loginWithDiscord() {
-  window.location.href = '/api/auth/discord'
+  window.location.href = withBase('/api/auth/discord')
 }
 
 export function logout(): Promise<void> {
@@ -190,11 +194,51 @@ export function deleteMatch(id: number): Promise<void> {
   return request<void>(`/api/matches/${id}`, { method: 'DELETE' })
 }
 
-export function updateMatchReport(id: number, body_md: string): Promise<MatchRecord> {
+export function updateMatchReport(
+  id: number,
+  body_md: string,
+  status: ReportStatus,
+): Promise<MatchRecord> {
   return request<MatchRecord>(`/api/matches/${id}/report`, {
     method: 'PATCH',
-    body: JSON.stringify({ body_md }),
+    body: JSON.stringify({ body_md, status }),
   })
+}
+
+export function fetchRecentReports(limit = 5, offset = 0): Promise<PaginatedReports> {
+  const params = new URLSearchParams({
+    limit: String(limit),
+    offset: String(offset),
+  })
+  return request<PaginatedReports>(`/api/reports/recent?${params}`)
+}
+
+export function fetchReportTemplates(): Promise<ReportTemplate[]> {
+  return request<ReportTemplate[]>('/api/me/report-templates')
+}
+
+export function createReportTemplate(payload: {
+  name: string
+  body_md: string
+}): Promise<ReportTemplate> {
+  return request<ReportTemplate>('/api/me/report-templates', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  })
+}
+
+export function updateReportTemplate(
+  id: number,
+  payload: { name: string; body_md: string },
+): Promise<ReportTemplate> {
+  return request<ReportTemplate>(`/api/me/report-templates/${id}`, {
+    method: 'PATCH',
+    body: JSON.stringify(payload),
+  })
+}
+
+export function deleteReportTemplate(id: number): Promise<void> {
+  return request<void>(`/api/me/report-templates/${id}`, { method: 'DELETE' })
 }
 
 export function updateMatchArmyList(
@@ -602,6 +646,29 @@ export function submitTournamentMatch(
   })
 }
 
+export function startTournamentPartie(matchId: number): Promise<MatchRecord> {
+  return request<MatchRecord>(`/api/tournament-matches/${matchId}/start-partie`, {
+    method: 'POST',
+  })
+}
+
+export function submitTournamentFromPartie(
+  matchId: number,
+  payload: {
+    player1_objectives: number
+    player2_objectives: number
+    player1_survivors?: number
+    player2_survivors?: number
+    player1_list_slot: number
+    player2_list_slot: number
+  },
+): Promise<TournamentMatch> {
+  return request<TournamentMatch>(`/api/tournament-matches/${matchId}/submit-from-partie`, {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  })
+}
+
 export function confirmTournamentMatch(matchId: number): Promise<TournamentMatch> {
   return request<TournamentMatch>(`/api/tournament-matches/${matchId}/confirm`, {
     method: 'POST',
@@ -615,6 +682,12 @@ export function forfeitTournamentMatch(
   return request<TournamentMatch>(`/api/tournament-matches/${matchId}/forfeit`, {
     method: 'POST',
     body: JSON.stringify({ forfeit_player }),
+  })
+}
+
+export function cancelTournamentForfeit(matchId: number): Promise<TournamentMatch> {
+  return request<TournamentMatch>(`/api/tournament-matches/${matchId}/cancel-forfeit`, {
+    method: 'POST',
   })
 }
 

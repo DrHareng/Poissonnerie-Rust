@@ -1,10 +1,10 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { toast } from 'vue-sonner'
 import { Swords } from '@lucide/vue'
 import { COMBAT_ESPRIT_SLUG } from '@/lib/combatEspritDraft'
-import { completeMatch } from '@/lib/api'
+import { completeMatch, submitTournamentFromPartie } from '@/lib/api'
 import type { PartiePlayerSlot, PartieScenario, PartieScores } from '@/composables/usePartieFlow'
 import type { MatchOutcome } from '@/types/elo'
 import { useAuth } from '@/composables/useAuth'
@@ -20,6 +20,12 @@ const props = defineProps<{
   scenario: PartieScenario
   scores: PartieScores
   resolvedOutcome: MatchOutcome
+  /** Mode tournoi : listes obligatoires + soumission tournoi. */
+  tournamentMatchId?: number | null
+  player1HasList2?: boolean
+  player2HasList2?: boolean
+  listLabel?: string
+  tournamentId?: number | null
 }>()
 
 const emit = defineEmits<{
@@ -31,12 +37,38 @@ const emit = defineEmits<{
 const router = useRouter()
 const { isAuthenticated, login } = useAuth()
 const submitting = ref(false)
+const list1 = ref<number | undefined>(undefined)
+const list2 = ref<number | undefined>(undefined)
+
+watch(
+  () => [props.player1HasList2, props.player2HasList2] as const,
+  ([p1, p2]) => {
+    if (!p1) list1.value = 1
+    if (!p2) list2.value = 1
+  },
+  { immediate: true },
+)
 
 const isCombatEsprit = computed(
   () => props.scenario.slug === COMBAT_ESPRIT_SLUG,
 )
 
+const isTournament = computed(() => Boolean(props.tournamentMatchId))
+
+const canSubmit = computed(() => {
+  if (!isTournament.value) return true
+  return (
+    (list1.value === 1 || list1.value === 2)
+    && (list2.value === 1 || list2.value === 2)
+    && (list1.value !== 2 || props.player1HasList2)
+    && (list2.value !== 2 || props.player2HasList2)
+  )
+})
+
 const submitLabel = computed(() => {
+  if (isTournament.value) {
+    return 'Soumettre le résultat (confirmation adverse)'
+  }
   if (props.resolvedOutcome === 'player1_win') {
     return victoryLabel(props.player1.name)
   }
@@ -73,8 +105,32 @@ async function submit() {
     return
   }
 
+  if (!canSubmit.value) {
+    toast.error('Choisissez la liste de chaque joueur.')
+    return
+  }
+
   submitting.value = true
   try {
+    if (props.tournamentMatchId) {
+      await submitTournamentFromPartie(props.tournamentMatchId, {
+        player1_objectives: clampObjectives(props.scores.player1Objectives),
+        player1_survivors: clampSurvivors(props.scores.player1Survivors),
+        player2_objectives: clampObjectives(props.scores.player2Objectives),
+        player2_survivors: clampSurvivors(props.scores.player2Survivors),
+        player1_list_slot: list1.value!,
+        player2_list_slot: list2.value!,
+      })
+      toast.success('Résultat soumis — en attente de confirmation')
+      emit('recorded')
+      if (props.tournamentId) {
+        router.push(`/tournoi/${props.tournamentId}`)
+      } else {
+        router.push('/tournois')
+      }
+      return
+    }
+
     const record = await completeMatch(props.matchId, {
       outcome: props.resolvedOutcome,
       player1_objectives: clampObjectives(props.scores.player1Objectives),
@@ -105,6 +161,9 @@ async function submit() {
     <p class="page-description">
       Saisissez le résultat de la partie. Le vainqueur est déterminé par les points
       d'objectifs.
+      <span v-if="isTournament">
+        En tournoi, les listes d’armée sont obligatoires avant soumission.
+      </span>
     </p>
 
     <div
@@ -129,6 +188,42 @@ async function submit() {
         </a>
         <span v-else class="font-medium">{{ scenario.name ?? scenario.other }}</span>
       </p>
+    </div>
+
+    <div
+      v-if="isTournament"
+      class="grid grid-cols-1 gap-4 sm:grid-cols-2"
+    >
+      <div class="grid gap-2">
+        <Label>{{ player1.name }} — {{ listLabel || 'Liste' }}</Label>
+        <select
+          v-if="player1HasList2"
+          v-model.number="list1"
+          class="h-9 rounded-md border border-input bg-transparent px-2 text-sm"
+        >
+          <option :value="undefined" disabled>Choisir…</option>
+          <option :value="1">Liste 1</option>
+          <option :value="2">Liste 2</option>
+        </select>
+        <span v-else class="flex h-9 items-center text-sm text-muted-foreground">
+          Liste 1
+        </span>
+      </div>
+      <div class="grid gap-2">
+        <Label>{{ player2.name }} — {{ listLabel || 'Liste' }}</Label>
+        <select
+          v-if="player2HasList2"
+          v-model.number="list2"
+          class="h-9 rounded-md border border-input bg-transparent px-2 text-sm"
+        >
+          <option :value="undefined" disabled>Choisir…</option>
+          <option :value="1">Liste 1</option>
+          <option :value="2">Liste 2</option>
+        </select>
+        <span v-else class="flex h-9 items-center text-sm text-muted-foreground">
+          Liste 1
+        </span>
+      </div>
     </div>
 
     <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
@@ -205,7 +300,7 @@ async function submit() {
       <Button type="button" variant="outline" :disabled="submitting" @click="emit('back')">
         Précédent
       </Button>
-      <Button type="button" :disabled="submitting" @click="submit">
+      <Button type="button" :disabled="submitting || !canSubmit" @click="submit">
         <Swords class="size-4" />
         {{ submitting ? 'Enregistrement…' : submitLabel }}
       </Button>

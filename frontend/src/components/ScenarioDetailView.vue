@@ -18,6 +18,7 @@ import ImageViewer, {
 } from '@/components/ImageViewer.vue'
 import MarkdownContent from '@/components/MarkdownContent.vue'
 import { useAdminEditMode } from '@/composables/useAdminEditMode'
+import { withBase } from '@/lib/basePath'
 import {
   Card,
   CardContent,
@@ -44,7 +45,7 @@ const imageViewerItems = ref<ImageViewerItem[]>([])
 
 const mapSrc = computed(() =>
   scenario.value?.map_filename
-    ? `/scenario-maps/${scenario.value.map_filename}`
+    ? withBase(`/scenario-maps/${scenario.value.map_filename}`)
     : null,
 )
 

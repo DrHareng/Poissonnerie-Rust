@@ -84,8 +84,40 @@ export interface MatchScores {
   player2_survivors: number
 }
 
+export type ReportStatus = 'draft' | 'published'
+
 export interface MatchReport {
   id: number
+  body_md: string
+  status?: ReportStatus
+  published_at?: number | null
+  created_at: number
+  updated_at: number
+}
+
+export interface RecentMatchReport {
+  match_id: number
+  report_id: number
+  author_name: string
+  author_display_name: string
+  author_slot: 'player1' | 'player2'
+  opponent_name: string
+  opponent_display_name: string
+  author_army_id?: number | null
+  opponent_army_id?: number | null
+  scenario_name?: string | null
+  tournament_id?: number | null
+  tournament_phase?: string | null
+  tournament_name?: string | null
+  counts_for_elo?: boolean
+  excerpt: string
+  published_at: number
+  updated_at: number
+}
+
+export interface ReportTemplate {
+  id: number
+  name: string
   body_md: string
   created_at: number
   updated_at: number
@@ -300,6 +332,7 @@ export interface TournamentMatch {
   player1_army_list_code?: string | null
   player2_army_list_code?: string | null
   played_at?: number | null
+  elo_match_id?: number | null
 }
 
 export interface TournamentDetail extends Tournament {
@@ -343,6 +376,13 @@ export interface PlayerTournamentResult {
 
 export interface PaginatedMatches {
   items: MatchRecord[]
+  total: number
+  limit: number
+  offset: number
+}
+
+export interface PaginatedReports {
+  items: RecentMatchReport[]
   total: number
   limit: number
   offset: number

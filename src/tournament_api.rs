@@ -312,12 +312,24 @@ pub fn tournament_routes() -> axum::Router<AppState> {
             post(submit_tournament_match),
         )
         .route(
+            "/api/tournament-matches/{id}/start-partie",
+            post(start_tournament_partie),
+        )
+        .route(
+            "/api/tournament-matches/{id}/submit-from-partie",
+            post(submit_tournament_from_partie),
+        )
+        .route(
             "/api/tournament-matches/{id}/confirm",
             post(confirm_tournament_match),
         )
         .route(
             "/api/tournament-matches/{id}/forfeit",
             post(forfeit_tournament_match),
+        )
+        .route(
+            "/api/tournament-matches/{id}/cancel-forfeit",
+            post(cancel_tournament_forfeit),
         )
         .route(
             "/api/tournament-matches/{id}/unplayed",
@@ -1070,18 +1082,346 @@ async fn confirm_tournament_match(
     Ok(Json(tm))
 }
 
+#[derive(Debug, Deserialize)]
+struct SubmitFromPartieRequest {
+    player1_objectives: u8,
+    player2_objectives: u8,
+    #[serde(default)]
+    player1_survivors: u16,
+    #[serde(default)]
+    player2_survivors: u16,
+    player1_list_slot: u8,
+    player2_list_slot: u8,
+}
+
+async fn start_tournament_partie(
+    State(state): State<AppState>,
+    session: Session,
+    Path(id): Path<i64>,
+) -> Result<(StatusCode, Json<crate::display_name::EnrichedMatchRecord>), ApiError> {
+    let user = require_user(&state, &session).await?;
+    let tm = state
+        .tournaments
+        .get_match(id)
+        .map_err(|error| ApiError::bad_request(error.to_string()))?
+        .ok_or_else(|| ApiError::bad_request("match introuvable"))?;
+
+    let p1 = tm
+        .player1
+        .clone()
+        .ok_or_else(|| ApiError::bad_request("joueurs incomplets"))?;
+    let p2 = tm
+        .player2
+        .clone()
+        .ok_or_else(|| ApiError::bad_request("joueurs incomplets"))?;
+
+    let caller_player = {
+        let board = state.board.lock().unwrap();
+        board
+            .get_player_by_discord_username(&user.username)
+            .map(|p| p.name.clone())
+    };
+
+    if !user.is_admin {
+        let name = caller_player
+            .as_deref()
+            .ok_or_else(|| ApiError::unauthorized("profil joueur requis"))?;
+        let key = crate::normalize_name(name);
+        if crate::normalize_name(&p1) != key && crate::normalize_name(&p2) != key {
+            return Err(ApiError::unauthorized(
+                "seul un participant ou un admin peut démarrer cette partie",
+            ));
+        }
+    }
+
+    if tm.status == TournamentMatchStatus::Confirmed {
+        return Err(ApiError::bad_request("match déjà confirmé"));
+    }
+    if tm.is_forfeit || tm.is_unplayed {
+        return Err(ApiError::bad_request(
+            "impossible de démarrer une partie sur un forfait / non joué",
+        ));
+    }
+
+    // Reprendre une partie déjà liée.
+    if let Some(elo_id) = tm.elo_match_id {
+        let board = state.board.lock().unwrap();
+        if let Some(existing) = board.get_match(elo_id) {
+            if existing.status == crate::match_record::MatchStatus::InProgress {
+                let resolver =
+                    crate::display_name::PlayerDisplayResolver::new(&board, state.users.as_ref());
+                return Ok((StatusCode::OK, Json(resolver.enrich_match(existing.clone()))));
+            }
+        }
+    }
+
+    if tm.status != TournamentMatchStatus::Scheduled {
+        return Err(ApiError::bad_request(
+            "démarrez la partie uniquement sur un match à venir",
+        ));
+    }
+
+    if tm.phase != crate::tournament::TournamentPhase::Pool {
+        let r1 = state
+            .tournaments
+            .get_registration_for_player(tm.tournament_id, &p1)
+            .map_err(|error| ApiError::bad_request(error.to_string()))?;
+        let r2 = state
+            .tournaments
+            .get_registration_for_player(tm.tournament_id, &p2)
+            .map_err(|error| ApiError::bad_request(error.to_string()))?;
+        let ready = |reg: &Option<crate::tournament::TournamentRegistration>| {
+            reg.as_ref()
+                .and_then(|r| r.bracket_list_1.as_ref())
+                .is_some_and(|s| !s.trim().is_empty())
+        };
+        if !ready(&r1) || !ready(&r2) {
+            return Err(ApiError::bad_request(
+                "les deux joueurs doivent avoir saisi leurs listes d'arbre",
+            ));
+        }
+    }
+
+    let army1 = tm.player1_army_id.or_else(|| {
+        state
+            .tournaments
+            .get_registration_for_player(tm.tournament_id, &p1)
+            .ok()
+            .flatten()
+            .and_then(|r| r.army_id)
+    });
+    let army2 = tm.player2_army_id.or_else(|| {
+        state
+            .tournaments
+            .get_registration_for_player(tm.tournament_id, &p2)
+            .ok()
+            .flatten()
+            .and_then(|r| r.army_id)
+    });
+    let army1 = army1.ok_or_else(|| ApiError::bad_request("armée joueur 1 manquante"))?;
+    let army2 = army2.ok_or_else(|| ApiError::bad_request("armée joueur 2 manquante"))?;
+
+    state
+        .armies
+        .validate_selectable_id(army1)
+        .map_err(|error| ApiError::bad_request(error.to_string()))?;
+    state
+        .armies
+        .validate_selectable_id(army2)
+        .map_err(|error| ApiError::bad_request(error.to_string()))?;
+
+    let created_by = caller_player
+        .clone()
+        .unwrap_or_else(|| p1.clone());
+
+    let record = {
+        let mut board = state.board.lock().unwrap();
+        let record = board
+            .start_match_with_tournament(
+                &p1,
+                &p2,
+                army1,
+                army2,
+                &created_by,
+                Vec::new(),
+                Vec::new(),
+                false,
+                Some(tm.tournament_id),
+                Some(tm.phase.as_str().to_string()),
+                tm.scenario_id,
+                tm.scenario_name.clone(),
+            )
+            .map_err(|error| ApiError::bad_request(error.to_string()))?;
+        board
+            .save(&state.db_path)
+            .map_err(|error| ApiError::bad_request(error.to_string()))?;
+        let resolver =
+            crate::display_name::PlayerDisplayResolver::new(&board, state.users.as_ref());
+        resolver.enrich_match(record)
+    };
+
+    state
+        .tournaments
+        .set_elo_match_id(id, Some(record.record.id))
+        .map_err(|error| ApiError::bad_request(error.to_string()))?;
+
+    Ok((StatusCode::CREATED, Json(record)))
+}
+
+async fn submit_tournament_from_partie(
+    State(state): State<AppState>,
+    session: Session,
+    Path(id): Path<i64>,
+    Json(payload): Json<SubmitFromPartieRequest>,
+) -> Result<Json<crate::tournament::TournamentMatch>, ApiError> {
+    let user = require_user(&state, &session).await?;
+    let tm = state
+        .tournaments
+        .get_match(id)
+        .map_err(|error| ApiError::bad_request(error.to_string()))?
+        .ok_or_else(|| ApiError::bad_request("match introuvable"))?;
+
+    let elo_id = tm
+        .elo_match_id
+        .ok_or_else(|| ApiError::bad_request("aucune partie liée à ce match"))?;
+
+    let player_name = if user.is_admin {
+        None
+    } else {
+        let board = state.board.lock().unwrap();
+        let player = board
+            .get_player_by_discord_username(&user.username)
+            .ok_or_else(|| ApiError::unauthorized("profil joueur requis"))?;
+        let key = crate::normalize_name(&player.name);
+        let record = board
+            .get_match(elo_id)
+            .ok_or_else(|| ApiError::bad_request("partie introuvable"))?;
+        if crate::normalize_name(&record.player1) != key
+            && crate::normalize_name(&record.player2) != key
+        {
+            return Err(ApiError::unauthorized(
+                "vous ne participez pas à cette partie",
+            ));
+        }
+        Some(player.name.clone())
+    };
+
+    // Propager scénario / armées depuis la partie liée.
+    let (scenario_id, scenario_other, army1, army2) = {
+        let board = state.board.lock().unwrap();
+        let record = board
+            .get_match(elo_id)
+            .ok_or_else(|| ApiError::bad_request("partie introuvable"))?;
+        (
+            record.scenario_id,
+            record.scenario_other.clone(),
+            record.player1_army_id,
+            record.player2_army_id,
+        )
+    };
+
+    let submit = SubmitMatchRequest {
+        player1_objectives: payload.player1_objectives,
+        player2_objectives: payload.player2_objectives,
+        player1_survivors: payload.player1_survivors,
+        player2_survivors: payload.player2_survivors,
+        player1_army_id: army1,
+        player2_army_id: army2,
+        player1_list_slot: Some(payload.player1_list_slot),
+        player2_list_slot: Some(payload.player2_list_slot),
+        scenario_id,
+        scenario_other,
+    };
+
+    let tm = state
+        .tournaments
+        .submit_match(
+            id,
+            &submit,
+            user.id,
+            user.is_admin,
+            player_name.as_deref(),
+            state.k_factor,
+        )
+        .map_err(|error| ApiError::bad_request(error.to_string()))?;
+
+    // Clôturer la partie liée sans ELO (appliqué à la confirmation / finalisation poules).
+    {
+        let outcome = tm
+            .outcome
+            .ok_or_else(|| ApiError::bad_request("résultat manquant"))?;
+        let scores = MatchScores {
+            player1_objectives: tm.player1_objectives,
+            player1_survivors: tm.player1_survivors,
+            player2_objectives: tm.player2_objectives,
+            player2_survivors: tm.player2_survivors,
+        };
+        let mut board = state.board.lock().unwrap();
+        // Mettre à jour les codes liste sur la partie avant complete.
+        if let Some(code) = tm.player1_army_list_code.as_deref() {
+            let _ = board.update_match_army_list(elo_id, tm.player1.as_deref().unwrap_or(""), code, None);
+        }
+        if let Some(code) = tm.player2_army_list_code.as_deref() {
+            let _ = board.update_match_army_list(elo_id, tm.player2.as_deref().unwrap_or(""), code, None);
+        }
+        board
+            .complete_match(elo_id, outcome, state.k_factor, scores)
+            .map_err(|error| ApiError::bad_request(error.to_string()))?;
+        board
+            .save(&state.db_path)
+            .map_err(|error| ApiError::bad_request(error.to_string()))?;
+    }
+
+    if tm.status == TournamentMatchStatus::Confirmed
+        && !tm.is_forfeit
+        && tm.phase != crate::tournament::TournamentPhase::Pool
+    {
+        maybe_apply_bracket_match(&state, &tm)?;
+    }
+
+    Ok(Json(tm))
+}
+
 async fn forfeit_tournament_match(
     State(state): State<AppState>,
     session: Session,
     Path(id): Path<i64>,
     Json(payload): Json<ForfeitRequest>,
 ) -> Result<Json<crate::tournament::TournamentMatch>, ApiError> {
-    let admin = require_admin(&state, &session).await?;
+    let user = require_user(&state, &session).await?;
+    let player_name = {
+        let board = state.board.lock().unwrap();
+        board
+            .get_player_by_discord_username(&user.username)
+            .map(|p| p.name.clone())
+    };
+
     let tm = state
         .tournaments
-        .declare_forfeit(id, &payload.forfeit_player, admin.id, true)
+        .declare_forfeit(
+            id,
+            &payload.forfeit_player,
+            user.id,
+            user.is_admin,
+            player_name.as_deref(),
+        )
         .map_err(|error| ApiError::bad_request(error.to_string()))?;
-    Ok(Json(tm))
+
+    // Abandonner une partie en cours liée.
+    if let Some(elo_id) = tm.elo_match_id {
+        let mut board = state.board.lock().unwrap();
+        if board
+            .get_match(elo_id)
+            .is_some_and(|m| m.status == crate::match_record::MatchStatus::InProgress)
+        {
+            let _ = board.delete_match(elo_id);
+            let _ = board.save(&state.db_path);
+        }
+        drop(board);
+        let _ = state.tournaments.set_elo_match_id(id, None);
+    }
+
+    Ok(Json(
+        state
+            .tournaments
+            .get_match(id)
+            .ok()
+            .flatten()
+            .unwrap_or(tm),
+    ))
+}
+
+async fn cancel_tournament_forfeit(
+    State(state): State<AppState>,
+    session: Session,
+    Path(id): Path<i64>,
+) -> Result<Json<crate::tournament::TournamentMatch>, ApiError> {
+    require_admin(&state, &session).await?;
+    state
+        .tournaments
+        .cancel_forfeit(id, true)
+        .map(Json)
+        .map_err(|error| ApiError::bad_request(error.to_string()))
 }
 
 async fn unplayed_tournament_match(
@@ -1180,6 +1520,30 @@ fn apply_tournament_match_to_board(
         player2_objectives: tm.player2_objectives,
         player2_survivors: tm.player2_survivors,
     };
+
+    if let Some(elo_id) = tm.elo_match_id {
+        if board.get_match(elo_id).is_some() {
+            board
+                .apply_tournament_elo_to_existing_match(
+                    elo_id,
+                    outcome,
+                    update,
+                    scores,
+                    Some(tm.tournament_id),
+                    Some(tm.phase.as_str().to_string()),
+                    tournament_name,
+                    tm.player1_army_list_code.clone(),
+                    tm.player2_army_list_code.clone(),
+                    tm.scenario_id,
+                    tm.scenario_other.clone(),
+                    tm.scenario_name.clone(),
+                    tm.player1_army_id,
+                    tm.player2_army_id,
+                )
+                .map_err(|error| ApiError::bad_request(error.to_string()))?;
+            return Ok(());
+        }
+    }
 
     board
         .apply_match_update(

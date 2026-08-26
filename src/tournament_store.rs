@@ -1229,6 +1229,15 @@ impl TournamentStore {
         self.get_match_in_conn(&conn, match_id)
     }
 
+    pub fn get_registration_for_player(
+        &self,
+        tournament_id: i64,
+        player_name: &str,
+    ) -> Result<Option<TournamentRegistration>> {
+        let conn = self.conn.lock().unwrap();
+        self.registration_for_player_in_conn(&conn, tournament_id, &normalize_name(player_name))
+    }
+
     pub fn submit_match(
         &self,
         match_id: i64,
@@ -1475,19 +1484,38 @@ impl TournamentStore {
         forfeit_player: &str,
         user_id: i64,
         is_admin: bool,
+        user_player_name: Option<&str>,
     ) -> Result<TournamentMatch> {
-        if !is_admin {
-            bail!("seul un admin peut déclarer un forfait directement");
-        }
-
         let conn = self.conn.lock().unwrap();
         let tm = self
             .get_match_in_conn(&conn, match_id)?
             .context("match introuvable")?;
 
+        if !matches!(
+            tm.status,
+            TournamentMatchStatus::Scheduled | TournamentMatchStatus::Submitted
+        ) {
+            bail!("forfait impossible sur un match confirmé");
+        }
+        if tm.is_unplayed {
+            bail!("match déjà marqué non joué");
+        }
+
         let p1 = tm.player1.clone().context("joueur 1 manquant")?;
         let p2 = tm.player2.clone().context("joueur 2 manquant")?;
         let ff_key = normalize_name(forfeit_player);
+
+        if !is_admin {
+            let player_name = user_player_name.context("compte joueur requis")?;
+            if normalize_name(player_name) != ff_key {
+                bail!("vous ne pouvez déclarer forfait que pour vous-même");
+            }
+            let is_participant = normalize_name(player_name) == normalize_name(&p1)
+                || normalize_name(player_name) == normalize_name(&p2);
+            if !is_participant {
+                bail!("seul un participant ou un admin peut déclarer un forfait");
+            }
+        }
 
         let (winner, loser) = if ff_key == normalize_name(&p1) {
             (p2.clone(), p1.clone())
@@ -1501,15 +1529,17 @@ impl TournamentStore {
         let player1_army_id = registration_army_id_in_conn(&conn, tm.tournament_id, &p1)?;
         let player2_army_id = registration_army_id_in_conn(&conn, tm.tournament_id, &p2)?;
 
+        // Forfait en deux temps : soumis, puis confirmé par l'adversaire / un admin.
         conn.execute(
             "
             UPDATE tournament_matches SET
                 player1_objectives = 0, player2_objectives = 0,
                 player1_survivors = 0, player2_survivors = 0,
                 player1_tournament_points = ?1, player2_tournament_points = ?2,
-                outcome = ?3, is_forfeit = 1, forfeit_player = ?4,
+                outcome = ?3, is_forfeit = 1, is_unplayed = 0, forfeit_player = ?4,
                 player1_elo_delta = 0, player2_elo_delta = 0,
-                status = ?5, confirmed_by_user_id = ?6, confirmed_at = ?7,
+                status = ?5, submitted_by_user_id = ?6, submitted_at = ?7,
+                confirmed_by_user_id = NULL, confirmed_at = NULL,
                 player1_army_id = ?8, player2_army_id = ?9,
                 played_at = ?7
             WHERE id = ?10
@@ -1531,7 +1561,7 @@ impl TournamentStore {
                     "player2_win"
                 },
                 loser,
-                TournamentMatchStatus::Confirmed.as_str(),
+                TournamentMatchStatus::Submitted.as_str(),
                 user_id,
                 now,
                 player1_army_id,
@@ -1541,7 +1571,51 @@ impl TournamentStore {
         )?;
         drop(conn);
 
-        self.apply_confirmed_match(match_id, 32.0)?;
+        self.get_match(match_id)?.context("match introuvable")
+    }
+
+    /// Annule un forfait (soumis ou confirmé) et remet le match jouable. Admin only.
+    pub fn cancel_forfeit(&self, match_id: i64, is_admin: bool) -> Result<TournamentMatch> {
+        if !is_admin {
+            bail!("seul un admin peut annuler un forfait");
+        }
+
+        let conn = self.conn.lock().unwrap();
+        let tm = self
+            .get_match_in_conn(&conn, match_id)?
+            .context("match introuvable")?;
+        if !tm.is_forfeit {
+            bail!("ce match n'est pas un forfait");
+        }
+
+        conn.execute(
+            "
+            UPDATE tournament_matches SET
+                player1_objectives = 0, player2_objectives = 0,
+                player1_survivors = 0, player2_survivors = 0,
+                player1_tournament_points = 0, player2_tournament_points = 0,
+                outcome = NULL, is_forfeit = 0, forfeit_player = NULL,
+                player1_elo_delta = 0, player2_elo_delta = 0,
+                player1_rating_used = NULL, player2_rating_used = NULL,
+                elo_applied_at = NULL,
+                status = ?1, submitted_by_user_id = NULL, submitted_at = NULL,
+                confirmed_by_user_id = NULL, confirmed_at = NULL,
+                played_at = NULL
+            WHERE id = ?2
+            ",
+            params![TournamentMatchStatus::Scheduled.as_str(), match_id],
+        )?;
+        drop(conn);
+
+        // Si le forfait était confirmé en arbre, reconstruire la progression.
+        if tm.status == TournamentMatchStatus::Confirmed && tm.phase != TournamentPhase::Pool {
+            let conn = self.conn.lock().unwrap();
+            self.rebuild_bracket_progression(&conn, tm.tournament_id)?;
+        }
+        if tm.status == TournamentMatchStatus::Confirmed && tm.phase == TournamentPhase::Pool {
+            self.recompute_tournament_standings(tm.tournament_id, 32.0)?;
+        }
+
         self.get_match(match_id)?.context("match introuvable")
     }
 
@@ -3342,7 +3416,8 @@ impl TournamentStore {
                    tm.scenario_id, tm.scenario_other,
                    COALESCE(s.name, tm.scenario_other),
                    tm.player1_army_id, tm.player2_army_id, tm.played_at, tm.is_unplayed,
-                   tm.player1_army_list_code, tm.player2_army_list_code
+                   tm.player1_army_list_code, tm.player2_army_list_code,
+                   tm.elo_match_id
             FROM tournament_matches tm
             LEFT JOIN scenarios s ON s.id = tm.scenario_id
             WHERE tm.id = ?1
@@ -3353,6 +3428,30 @@ impl TournamentStore {
             return Ok(Some(row_to_tournament_match(row)?));
         }
         Ok(None)
+    }
+
+    pub fn find_match_by_elo_match_id(&self, elo_match_id: u64) -> Result<Option<TournamentMatch>> {
+        let conn = self.conn.lock().unwrap();
+        let id: Option<i64> = conn
+            .query_row(
+                "SELECT id FROM tournament_matches WHERE elo_match_id = ?1",
+                params![elo_match_id as i64],
+                |row| row.get(0),
+            )
+            .optional()?;
+        match id {
+            Some(id) => self.get_match_in_conn(&conn, id),
+            None => Ok(None),
+        }
+    }
+
+    pub fn set_elo_match_id(&self, match_id: i64, elo_match_id: Option<u64>) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "UPDATE tournament_matches SET elo_match_id = ?1 WHERE id = ?2",
+            params![elo_match_id.map(|id| id as i64), match_id],
+        )?;
+        Ok(())
     }
 
     fn registration_for_player_in_conn(
@@ -3560,6 +3659,9 @@ fn row_to_tournament_match(row: &rusqlite::Row<'_>) -> rusqlite::Result<Tourname
         is_unplayed: row.get::<_, i64>(32)? != 0,
         player1_army_list_code: row.get(33)?,
         player2_army_list_code: row.get(34)?,
+        elo_match_id: row
+            .get::<_, Option<i64>>(35)?
+            .map(|id| id as u64),
     })
 }
 

@@ -17,8 +17,8 @@ use tower_sessions::{Expiry, Session, SessionManagerLayer};
 use crate::{
     auth::{self, AuthConfig, CallbackQuery},
     default_db_path, scenario::ScenarioStore, session_store::SqliteSessionStore, tournament_api,
-    ArmyStore, Leaderboard, MatchOutcome, MatchRecord, MatchScores, Player, TournamentStore, User,
-    UserStore, DEFAULT_K_FACTOR,
+    ArmyStore, Leaderboard, MatchOutcome, MatchRecord, MatchScores, Player, ReportStatus,
+    ReportTemplateStore, TournamentStore, User, UserStore, DEFAULT_K_FACTOR,
 };
 use crate::tournament::TournamentStatus;
 use crate::user::{LocalProfileUpdate, UiPrefsUpdate, UserResponse};
@@ -32,6 +32,7 @@ pub struct AppState {
     pub users: Arc<UserStore>,
     pub tournaments: Arc<TournamentStore>,
     pub scenarios: Arc<ScenarioStore>,
+    pub report_templates: Arc<ReportTemplateStore>,
     pub auth: Option<AuthConfig>,
     pub db_path: PathBuf,
     pub k_factor: f64,
@@ -159,6 +160,14 @@ struct MatchListResponse {
     offset: usize,
 }
 
+#[derive(Debug, Serialize)]
+struct ReportListResponse {
+    items: Vec<EnrichedRecentMatchReport>,
+    total: usize,
+    limit: usize,
+    offset: usize,
+}
+
 #[derive(Debug, Deserialize)]
 struct UpdateProfileRequest {
     #[serde(default)]
@@ -259,6 +268,15 @@ pub fn router(state: AppState) -> Result<Router> {
         .route("/api/matches/{id}/complete", post(complete_match))
         .route("/api/matches/{id}/report", patch(update_match_report))
         .route("/api/matches/{id}/army-list", patch(update_match_army_list))
+        .route("/api/reports/recent", get(list_recent_reports))
+        .route(
+            "/api/me/report-templates",
+            get(list_report_templates).post(create_report_template),
+        )
+        .route(
+            "/api/me/report-templates/{id}",
+            patch(update_report_template).delete(delete_report_template),
+        )
         .route("/api/health", get(health))
         .merge(tournament_api::tournament_routes())
         .layer(cors_layer())
@@ -589,6 +607,7 @@ async fn get_army(
 
 async fn get_army_matches(
     State(state): State<AppState>,
+    session: Session,
     Path(id): Path<u32>,
     Query(query): Query<MatchListQuery>,
 ) -> Result<Json<Vec<crate::display_name::EnrichedMatchRecord>>, ApiError> {
@@ -598,13 +617,23 @@ async fn get_army_matches(
         .map_err(|error| ApiError::bad_request(error.to_string()))?
         .ok_or_else(|| ApiError::bad_request(format!("sectorielle introuvable : {}", id)))?;
 
+    let viewer = viewer_player_name(&state, &session).await;
+    let mut records = {
+        let board = state.board.lock().unwrap();
+        let limit = query.limit.clamp(1, 100);
+        board
+            .army_matches(id, limit)
+            .into_iter()
+            .cloned()
+            .collect::<Vec<_>>()
+    };
+    for record in &mut records {
+        prepare_match_for_viewer(&state, record, viewer.as_deref());
+    }
     let board = state.board.lock().unwrap();
     let resolver = crate::display_name::PlayerDisplayResolver::new(&board, state.users.as_ref());
-    let limit = query.limit.clamp(1, 100);
-    let matches = board
-        .army_matches(id, limit)
+    let matches = records
         .into_iter()
-        .cloned()
         .map(|record| resolver.enrich_match(record))
         .collect();
     Ok(Json(matches))
@@ -649,6 +678,38 @@ fn mask_tournament_elo_lists(
     }
 }
 
+fn mask_draft_reports(record: &mut MatchRecord, viewer_player: Option<&str>) {
+    let viewer_key = viewer_player.map(crate::normalize_name);
+    let can_see = |player_name: &str| {
+        viewer_key
+            .as_ref()
+            .is_some_and(|key| crate::normalize_name(player_name) == *key)
+    };
+    if record
+        .player1_report
+        .as_ref()
+        .is_some_and(|report| report.status == ReportStatus::Draft && !can_see(&record.player1))
+    {
+        record.player1_report = None;
+    }
+    if record
+        .player2_report
+        .as_ref()
+        .is_some_and(|report| report.status == ReportStatus::Draft && !can_see(&record.player2))
+    {
+        record.player2_report = None;
+    }
+}
+
+fn prepare_match_for_viewer(
+    state: &AppState,
+    record: &mut MatchRecord,
+    viewer_player: Option<&str>,
+) {
+    mask_tournament_elo_lists(state, record, viewer_player);
+    mask_draft_reports(record, viewer_player);
+}
+
 async fn list_matches(
     State(state): State<AppState>,
     session: Session,
@@ -670,7 +731,7 @@ async fn list_matches(
     };
 
     for record in &mut records {
-        mask_tournament_elo_lists(&state, record, viewer.as_deref());
+        prepare_match_for_viewer(&state, record, viewer.as_deref());
     }
 
     let board = state.board.lock().unwrap();
@@ -778,7 +839,7 @@ async fn get_player_matches(
             .collect::<Vec<_>>()
     };
     for record in &mut records {
-        mask_tournament_elo_lists(&state, record, viewer.as_deref());
+        prepare_match_for_viewer(&state, record, viewer.as_deref());
     }
     let board = state.board.lock().unwrap();
     let resolver = crate::display_name::PlayerDisplayResolver::new(&board, state.users.as_ref());
@@ -914,7 +975,7 @@ async fn get_match(
             .ok_or_else(|| ApiError::bad_request("match introuvable"))?
             .clone()
     };
-    mask_tournament_elo_lists(&state, &mut record, viewer.as_deref());
+    prepare_match_for_viewer(&state, &mut record, viewer.as_deref());
     let board = state.board.lock().unwrap();
     let resolver = crate::display_name::PlayerDisplayResolver::new(&board, state.users.as_ref());
     Ok(Json(resolver.enrich_match(record)))
@@ -1159,6 +1220,22 @@ async fn delete_match(
 #[derive(Debug, Deserialize)]
 struct UpdateMatchReportRequest {
     body_md: String,
+    #[serde(default)]
+    status: ReportStatus,
+}
+
+#[derive(Debug, Deserialize)]
+struct ReportTemplateBody {
+    name: String,
+    body_md: String,
+}
+
+#[derive(Debug, Serialize)]
+struct EnrichedRecentMatchReport {
+    #[serde(flatten)]
+    report: crate::RecentMatchReport,
+    author_display_name: String,
+    opponent_display_name: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -1180,25 +1257,23 @@ async fn update_match_report(
         board
             .get_player_by_discord_username(&user.username)
             .ok_or_else(|| {
-                ApiError::unauthorized("un profil joueur Poissonnerie est requis pour publier un CR")
+                ApiError::unauthorized(
+                    "un profil joueur Poissonnerie est requis pour rédiger un CR",
+                )
             })?
             .clone()
     };
 
-    let body_md = payload.body_md.trim();
-    if body_md.is_empty() {
-        return Err(ApiError::bad_request("le compte rendu ne peut pas être vide"));
-    }
-
     let mut board = state.board.lock().unwrap();
     board
-        .update_match_report(id, &player.name, body_md)
+        .update_match_report(id, &player.name, &payload.body_md, payload.status)
         .map_err(|error| ApiError::bad_request(error.to_string()))?;
     board
         .save(&state.db_path)
         .map_err(|error| ApiError::bad_request(error.to_string()))?;
 
-    let record = board.get_match(id).unwrap().clone();
+    let mut record = board.get_match(id).unwrap().clone();
+    prepare_match_for_viewer(&state, &mut record, Some(&player.name));
     let resolver = crate::display_name::PlayerDisplayResolver::new(&board, state.users.as_ref());
     Ok(Json(resolver.enrich_match(record)))
 }
@@ -1237,9 +1312,87 @@ async fn update_match_army_list(
         .save(&state.db_path)
         .map_err(|error| ApiError::bad_request(error.to_string()))?;
 
-    let record = board.get_match(id).unwrap().clone();
+    let mut record = board.get_match(id).unwrap().clone();
+    prepare_match_for_viewer(&state, &mut record, Some(&player.name));
     let resolver = crate::display_name::PlayerDisplayResolver::new(&board, state.users.as_ref());
     Ok(Json(resolver.enrich_match(record)))
+}
+
+async fn list_recent_reports(
+    State(state): State<AppState>,
+    Query(query): Query<MatchListQuery>,
+) -> Json<ReportListResponse> {
+    let limit = query.limit.clamp(1, 100);
+    let offset = query.offset;
+    let board = state.board.lock().unwrap();
+    let resolver = crate::display_name::PlayerDisplayResolver::new(&board, state.users.as_ref());
+    let (reports, total) = board.recent_published_reports(limit, offset);
+    let items = reports
+        .into_iter()
+        .map(|report| EnrichedRecentMatchReport {
+            author_display_name: resolver.resolve(&report.author_name),
+            opponent_display_name: resolver.resolve(&report.opponent_name),
+            report,
+        })
+        .collect();
+    Json(ReportListResponse {
+        items,
+        total,
+        limit,
+        offset,
+    })
+}
+
+async fn list_report_templates(
+    State(state): State<AppState>,
+    session: Session,
+) -> Result<Json<Vec<crate::ReportTemplate>>, ApiError> {
+    let user = require_user(&state, &session).await?;
+    let templates = state
+        .report_templates
+        .list_for_user(user.id)
+        .map_err(|error| ApiError::bad_request(error.to_string()))?;
+    Ok(Json(templates))
+}
+
+async fn create_report_template(
+    State(state): State<AppState>,
+    session: Session,
+    Json(payload): Json<ReportTemplateBody>,
+) -> Result<(StatusCode, Json<crate::ReportTemplate>), ApiError> {
+    let user = require_user(&state, &session).await?;
+    let template = state
+        .report_templates
+        .create(user.id, &payload.name, &payload.body_md)
+        .map_err(|error| ApiError::bad_request(error.to_string()))?;
+    Ok((StatusCode::CREATED, Json(template)))
+}
+
+async fn update_report_template(
+    State(state): State<AppState>,
+    session: Session,
+    Path(id): Path<i64>,
+    Json(payload): Json<ReportTemplateBody>,
+) -> Result<Json<crate::ReportTemplate>, ApiError> {
+    let user = require_user(&state, &session).await?;
+    let template = state
+        .report_templates
+        .update(user.id, id, &payload.name, &payload.body_md)
+        .map_err(|error| ApiError::bad_request(error.to_string()))?;
+    Ok(Json(template))
+}
+
+async fn delete_report_template(
+    State(state): State<AppState>,
+    session: Session,
+    Path(id): Path<i64>,
+) -> Result<StatusCode, ApiError> {
+    let user = require_user(&state, &session).await?;
+    state
+        .report_templates
+        .delete(user.id, id)
+        .map_err(|error| ApiError::bad_request(error.to_string()))?;
+    Ok(StatusCode::NO_CONTENT)
 }
 
 pub fn default_state() -> anyhow::Result<AppState> {
@@ -1249,6 +1402,7 @@ pub fn default_state() -> anyhow::Result<AppState> {
     let users = UserStore::open(&db_path)?;
     let tournaments = TournamentStore::open(&db_path)?;
     let scenarios = ScenarioStore::open(&db_path)?;
+    let report_templates = ReportTemplateStore::open(&db_path)?;
     let auth = AuthConfig::from_env().ok();
     Ok(AppState {
         board: Arc::new(Mutex::new(board)),
@@ -1256,6 +1410,7 @@ pub fn default_state() -> anyhow::Result<AppState> {
         users: Arc::new(users),
         tournaments: Arc::new(tournaments),
         scenarios: Arc::new(scenarios),
+        report_templates: Arc::new(report_templates),
         auth,
         db_path,
         k_factor: DEFAULT_K_FACTOR,

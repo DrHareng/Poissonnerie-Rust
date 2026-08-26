@@ -1,5 +1,7 @@
 /** Minimal Markdown → HTML for scenario rules content. */
 
+import { withBase } from '@/lib/basePath'
+
 export type MarkdownOptions = {
   /** Resolve display label for `[[slug]]` when no custom label is given. */
   ruleLabel?: (slug: string) => string
@@ -156,6 +158,6 @@ function renderScenarioImage(rawFilename: string): string {
   if (!file) {
     return escapeHtml(`[img]${rawFilename}[img]`)
   }
-  const src = `/scenario/${encodeURIComponent(file).replace(/%2F/gi, '')}`
+  const src = withBase(`/scenario/${encodeURIComponent(file).replace(/%2F/gi, '')}`)
   return `<img class="md-scenario-img" src="${src}" alt="${escapeHtml(file)}" loading="lazy" />`
 }

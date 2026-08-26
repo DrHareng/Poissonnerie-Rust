@@ -46,6 +46,7 @@ async fn main() -> Result<()> {
         users: Arc::new(users),
         tournaments: Arc::new(poissonnerie_elo::TournamentStore::open(&args.db)?),
         scenarios: Arc::new(poissonnerie_elo::ScenarioStore::open(&args.db)?),
+        report_templates: Arc::new(poissonnerie_elo::ReportTemplateStore::open(&args.db)?),
         auth,
         db_path: args.db,
         k_factor: args.k,
