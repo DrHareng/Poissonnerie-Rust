@@ -68,6 +68,12 @@ struct AddPlayerRequest {
 }
 
 #[derive(Debug, Deserialize)]
+struct ClaimPlayerRequest {
+    #[serde(default)]
+    name: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
 struct StartMatchRequest {
     player1: String,
     player2: String,
@@ -256,6 +262,7 @@ pub fn router(state: AppState) -> Result<Router> {
         .route("/api/armies/{id}", get(get_army))
         .route("/api/ranking", get(get_ranking))
         .route("/api/players", post(add_player))
+        .route("/api/players/me", post(claim_player))
         .route("/api/players/{name}", get(get_player))
         .route("/api/players/{name}/matches", get(get_player_matches))
         .route("/api/matches", get(list_matches).post(record_match))
@@ -848,6 +855,44 @@ async fn get_player_matches(
         .map(|record| resolver.enrich_match(record))
         .collect();
     Ok(Json(matches))
+}
+
+async fn claim_player(
+    State(state): State<AppState>,
+    session: Session,
+    Json(payload): Json<ClaimPlayerRequest>,
+) -> Result<(StatusCode, Json<Player>), ApiError> {
+    let user = require_user(&state, &session).await?;
+
+    let mut board = state.board.lock().unwrap();
+    if board.player_exists_for_discord_username(&user.username) {
+        return Err(ApiError::bad_request(
+            "un joueur est déjà associé à ce compte",
+        ));
+    }
+
+    let name = payload
+        .name
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
+        .unwrap_or_else(|| user.effective_display_name().to_string());
+
+    if name.is_empty() {
+        return Err(ApiError::bad_request("indiquez un pseudo"));
+    }
+
+    board
+        .add_player_for_discord_username(&name, &user.username)
+        .map_err(|error| ApiError::bad_request(error.to_string()))?;
+
+    let player = board.get_player(&name).unwrap().clone();
+    board
+        .save(&state.db_path)
+        .map_err(|error| ApiError::bad_request(error.to_string()))?;
+
+    Ok((StatusCode::CREATED, Json(player)))
 }
 
 async fn add_player(

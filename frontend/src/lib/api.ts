@@ -154,6 +154,13 @@ export function addPlayer(payload: { name: string; discord_username: string }): 
   })
 }
 
+export function claimPlayerProfile(payload?: { name?: string }): Promise<Player> {
+  return request<Player>('/api/players/me', {
+    method: 'POST',
+    body: JSON.stringify(payload ?? {}),
+  })
+}
+
 export function recordMatch(
   player1: string,
   player2: string,

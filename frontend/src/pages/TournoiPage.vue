@@ -5,6 +5,7 @@ import { Check, Trash2, X } from '@lucide/vue'
 import { toast } from 'vue-sonner'
 import {
   adminRegisterForTournament,
+  claimPlayerProfile,
   assignBracketScenarios,
   cancelTournamentForfeit,
   closeTournamentRegistration,
@@ -78,7 +79,7 @@ import { Label } from '@/components/ui/label'
 const props = defineProps<{ id: string }>()
 const route = useRoute()
 const router = useRouter()
-const { isAdmin, hasPlayer, player, isAuthenticated, user } = useAuth()
+const { isAdmin, hasPlayer, player, isAuthenticated, user, refresh: refreshAuth } = useAuth()
 const { setCustomSide } = useAppSidePanel()
 
 const detail = ref<TournamentDetail | null>(null)
@@ -95,6 +96,8 @@ const savingListValidator = ref(false)
 const bracketList1 = ref('')
 const bracketList2 = ref('')
 const registering = ref(false)
+const claimPlayerName = ref('')
+const claimingProfile = ref(false)
 const validatingLists = ref(false)
 const unregistering = ref(false)
 const adminAdding = ref(false)
@@ -526,6 +529,15 @@ async function persistTournamentDetails(payload: { name?: string; body: string }
   toast.success('Tournoi mis à jour')
 }
 
+watch(
+  user,
+  (current) => {
+    if (!current || claimPlayerName.value.trim()) return
+    claimPlayerName.value = current.effective_display_name || current.display_name
+  },
+  { immediate: true },
+)
+
 async function register() {
   registering.value = true
   try {
@@ -536,6 +548,25 @@ async function register() {
     toast.error(error instanceof Error ? error.message : 'Erreur')
   } finally {
     registering.value = false
+  }
+}
+
+async function claimAndRegister() {
+  const trimmedName = claimPlayerName.value.trim()
+  if (!trimmedName) {
+    toast.error('Indiquez un pseudo.')
+    return
+  }
+
+  claimingProfile.value = true
+  try {
+    await claimPlayerProfile({ name: trimmedName })
+    await refreshAuth()
+    await register()
+  } catch (error) {
+    toast.error(error instanceof Error ? error.message : 'Erreur')
+  } finally {
+    claimingProfile.value = false
   }
 }
 
@@ -1777,6 +1808,36 @@ onMounted(refresh)
               >
                 En tant que validateur de listes, vous ne pouvez pas vous inscrire à ce tournoi.
               </p>
+
+              <div
+                v-else-if="isAuthenticated && !hasPlayer && !isListValidator && detail.status === 'registration_open'"
+                class="grid gap-3 rounded-lg border p-3"
+              >
+                <p class="text-sm text-muted-foreground">
+                  Pour vous inscrire, créez d'abord votre profil joueur Poissonnerie (lié à votre
+                  compte Discord).
+                </p>
+                <div class="grid gap-2 sm:max-w-md">
+                  <Label for="claim-player-name">Pseudo</Label>
+                  <Input
+                    id="claim-player-name"
+                    v-model="claimPlayerName"
+                    placeholder="Votre pseudo en jeu"
+                    autocomplete="off"
+                  />
+                </div>
+                <Button
+                  class="w-fit"
+                  :disabled="claimingProfile || registering"
+                  @click="claimAndRegister"
+                >
+                  {{
+                    claimingProfile || registering
+                      ? 'Inscription…'
+                      : "Créer mon profil et m'inscrire"
+                  }}
+                </Button>
+              </div>
 
               <div v-else-if="myRegistration" class="grid gap-3">
                 <div class="flex flex-wrap items-center gap-3">
