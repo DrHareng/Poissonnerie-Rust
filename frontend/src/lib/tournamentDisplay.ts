@@ -25,6 +25,37 @@ export function registrationStatusLabel(reg: {
   return registrationStatusLabels[reg.status] ?? reg.status
 }
 
+export function registrationWaitingForLists(reg: {
+  status: RegistrationStatus
+  has_army_lists?: boolean
+}): boolean {
+  return (
+    !reg.has_army_lists
+    && (reg.status === 'pending' || reg.status === 'waitlisted')
+  )
+}
+
+/** Listes saisies ou inscription validée. */
+export function registrationListsValidated(reg: {
+  status: RegistrationStatus
+  has_army_lists?: boolean
+}): boolean {
+  return reg.status === 'approved' || !!reg.has_army_lists
+}
+
+export function registrationListItemClass(reg: {
+  status: RegistrationStatus
+  has_army_lists?: boolean
+}): string | undefined {
+  if (registrationWaitingForLists(reg)) {
+    return 'registration-list-item--waiting-lists'
+  }
+  if (registrationListsValidated(reg)) {
+    return 'registration-list-item--lists-validated'
+  }
+  return undefined
+}
+
 /** Validé (0) puis le reste ; « en attente des listes » en dernier (2). */
 export function registrationSortTier(reg: RegistrationSortInput): number {
   if (reg.status === 'approved') return 0

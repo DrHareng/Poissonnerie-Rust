@@ -403,7 +403,7 @@ watch(
         <Teleport defer to="#app-side-panel">
           <Card
             v-if="showScenarioListSide"
-            class="neon-panel flex h-full min-h-0 flex-col"
+            class="neon-panel flex h-full max-h-full min-h-0 flex-col overflow-hidden"
           >
             <CardHeader class="shrink-0 pb-3">
               <CardTitle>Scénarios</CardTitle>
@@ -411,7 +411,7 @@ watch(
                 {{ page.pack.name }}
               </CardDescription>
             </CardHeader>
-            <CardContent class="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto">
+            <div class="shrink-0 px-3 pb-3">
               <button
                 type="button"
                 class="scenario-side-draw"
@@ -421,6 +421,8 @@ watch(
                 <Dices class="size-4" />
                 Tirer au sort
               </button>
+            </div>
+            <CardContent class="min-h-0 flex-1 overflow-y-auto pt-0">
               <nav
                 class="scenario-side-list"
                 aria-label="Scénarios du pack"
@@ -448,7 +450,7 @@ watch(
             <CardHeader class="pb-3">
               <CardTitle>Scénarios</CardTitle>
             </CardHeader>
-            <CardContent class="grid gap-3">
+            <div class="shrink-0 px-3 pb-3">
               <button
                 type="button"
                 class="scenario-side-draw"
@@ -458,6 +460,8 @@ watch(
                 <Dices class="size-4" />
                 Tirer au sort
               </button>
+            </div>
+            <CardContent class="pt-0">
               <nav
                 class="scenario-side-list"
                 aria-label="Scénarios du pack"

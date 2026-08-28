@@ -1004,6 +1004,14 @@
     @apply min-w-0;
   }
 
+  .registration-list-item--waiting-lists .player-link {
+    @apply !text-accent;
+  }
+
+  .registration-list-item--lists-validated .player-link {
+    @apply !text-primary;
+  }
+
   .scenario-subtabs {
     @apply min-w-0 flex-1 flex-wrap overflow-x-visible;
   }

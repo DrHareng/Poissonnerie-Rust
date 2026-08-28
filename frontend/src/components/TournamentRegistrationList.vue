@@ -2,6 +2,7 @@
 import { computed } from 'vue'
 import PlayerLink from '@/components/PlayerLink.vue'
 import {
+  registrationListItemClass,
   registrationStatusLabel,
   sortRegistrationsForDisplay,
   type RegistrationSortInput,
@@ -28,6 +29,7 @@ const sortedRegistrations = computed(() =>
       v-for="reg in sortedRegistrations"
       :key="reg.player_name"
       class="min-w-0"
+      :class="registrationListItemClass(reg)"
     >
       <PlayerLink
         :name="reg.player_name"
