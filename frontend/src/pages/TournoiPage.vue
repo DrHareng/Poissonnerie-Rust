@@ -59,7 +59,13 @@ import AdminContentEditor from '@/components/AdminContentEditor.vue'
 import MarkdownContent from '@/components/MarkdownContent.vue'
 import TournamentPoolScenarioLinks from '@/components/TournamentPoolScenarioLinks.vue'
 import type { TournamentMatchForm } from '@/components/TournamentMatchCard.vue'
-import { formatRegistrationSummary, tournamentRegistrationCapacity } from '@/lib/tournamentDisplay'
+import TournamentDescriptionWithRegistrants from '@/components/TournamentDescriptionWithRegistrants.vue'
+import {
+  formatRegistrationSummary,
+  registrationStatusLabel,
+  sortRegistrationsForDisplay,
+  tournamentRegistrationCapacity,
+} from '@/lib/tournamentDisplay'
 import { phaseLabels } from '@/lib/tournamentPhase'
 import { tournoisTabs } from '@/lib/pageTitleTabs'
 import { normalizeArmyListCode } from '@/lib/armyList'
@@ -295,18 +301,21 @@ const bracketPhases = computed(() =>
     .filter((section) => section.matches.length > 0),
 )
 
-const pendingRegistrations = computed(
-  () => detail.value?.registrations.filter((r) => r.status === 'pending') ?? [],
+const pendingRegistrations = computed(() =>
+  sortRegistrationsForDisplay(
+    detail.value?.registrations.filter((r) => r.status === 'pending') ?? [],
+  ),
 )
 
 /** Inscriptions avec listes validées, pour consultation par le validateur. */
-const validatorListRegistrations = computed(
-  () =>
+const validatorListRegistrations = computed(() =>
+  sortRegistrationsForDisplay(
     detail.value?.registrations.filter(
       (r) =>
         (r.status === 'approved' || r.status === 'waitlisted')
         && (r.has_army_lists || !!r.army_list_1),
     ) ?? [],
+  ),
 )
 
 const availableUsersForValidator = computed(() => {
@@ -329,11 +338,12 @@ const armiesRevealed = computed(
   () => detail.value?.status === 'started' || detail.value?.status === 'completed',
 )
 
-const activeRegistrations = computed(
-  () =>
+const activeRegistrations = computed(() =>
+  sortRegistrationsForDisplay(
     detail.value?.registrations.filter((r) =>
       ['approved', 'waitlisted', 'pending'].includes(r.status),
     ) ?? [],
+  ),
 )
 
 const availablePlayersForAdmin = computed(() => {
@@ -408,8 +418,10 @@ const isFullRoundOf16Format = computed(
     && (detail.value?.pool_count ?? 0) >= 8,
 )
 
-const approvedRegistrations = computed(
-  () => detail.value?.registrations.filter((r) => r.status === 'approved') ?? [],
+const approvedRegistrations = computed(() =>
+  sortRegistrationsForDisplay(
+    detail.value?.registrations.filter((r) => r.status === 'approved') ?? [],
+  ),
 )
 
 const registrationByPlayer = computed(() => {
@@ -449,15 +461,6 @@ const statusLabels: Record<string, string> = {
   scheduled: 'À jouer',
   submitted: 'En attente de confirmation',
   confirmed: 'Confirmé',
-}
-
-function registrationStatusLabel(reg: TournamentRegistration) {
-  const waitingLists =
-    !reg.has_army_lists
-    && (reg.status === 'pending' || reg.status === 'waitlisted')
-  if (waitingLists) return 'En attente des listes'
-  if (reg.status === 'pending') return 'En attente de validation'
-  return statusLabels[reg.status] ?? reg.status
 }
 
 async function refresh() {
@@ -587,6 +590,14 @@ const canEditRegistrationLists = computed(() => {
     || detail.value.status === 'draft'
   )
 })
+
+const showRegistrationListsSide = computed(
+  () => !!myRegistration.value && canEditRegistrationLists.value,
+)
+
+const showCustomSide = computed(
+  () => showRegistrationListsSide.value || showMyMatchesSide.value,
+)
 
 watch(
   () =>
@@ -1304,7 +1315,7 @@ watch(tournamentTabs, (tabs) => {
   }
 }, { immediate: true })
 watch(
-  showMyMatchesSide,
+  showCustomSide,
   (active) => setCustomSide(active),
   { immediate: true },
 )
@@ -1362,7 +1373,109 @@ onMounted(refresh)
       <div class="tournament-tab-panels page-panel-scroll">
         <Teleport defer to="#app-side-panel">
           <Card
-            v-if="showMyMatchesSide"
+            v-if="showRegistrationListsSide"
+            class="neon-panel flex h-full min-h-0 flex-col"
+          >
+            <CardHeader class="shrink-0">
+              <CardTitle>Mon inscription</CardTitle>
+              <CardDescription>
+                {{
+                  needsRegistrationLists
+                    ? 'Saisissez vos codes de listes Army pour valider l’inscription.'
+                    : 'Modifiez vos listes jusqu’au démarrage du tournoi.'
+                }}
+              </CardDescription>
+            </CardHeader>
+            <CardContent class="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto">
+              <div class="flex flex-wrap items-center gap-2">
+                <Badge variant="outline">
+                  {{ registrationStatusLabel(myRegistration!) }}
+                  <span v-if="myRegistration?.waitlist_position">
+                    (#{{ myRegistration.waitlist_position }})
+                  </span>
+                </Badge>
+                <ArmyLogo
+                  v-if="myRegistration && showArmyForRegistration(myRegistration)"
+                  :army-id="myRegistration.army_id!"
+                  :title="'Votre sectorielle'"
+                />
+                <span
+                  v-else-if="myRegistration?.army_id || !armiesRevealed"
+                  class="text-sm text-muted-foreground"
+                >
+                  Sectorielle secrète jusqu'au démarrage
+                </span>
+              </div>
+              <p class="text-sm text-muted-foreground">
+                Une URL est acceptée et convertie en code.
+              </p>
+              <div class="grid gap-2">
+                <Label for="side-register-list-1">Liste 1 (code)</Label>
+                <div class="flex flex-wrap items-center gap-2">
+                  <Input
+                    id="side-register-list-1"
+                    v-model="registerList1"
+                    class="min-w-0 flex-1"
+                    placeholder="Code Army…"
+                  />
+                  <ArmyListQuickActions :code="registerList1" />
+                </div>
+              </div>
+              <div class="grid gap-2">
+                <Label for="side-register-list-2">Liste 2 (optionnel)</Label>
+                <div class="flex flex-wrap items-center gap-2">
+                  <Input
+                    id="side-register-list-2"
+                    v-model="registerList2"
+                    class="min-w-0 flex-1"
+                    placeholder="Code Army… (optionnel)"
+                  />
+                  <ArmyListQuickActions :code="registerList2" />
+                </div>
+                <p
+                  v-if="myRegistration?.has_army_lists && !registerList2.trim()"
+                  class="text-sm text-muted-foreground italic"
+                >
+                  pas de liste 2
+                </p>
+              </div>
+              <div class="flex flex-wrap gap-2">
+                <Button
+                  class="w-fit"
+                  :disabled="validatingLists"
+                  @click="validateRegistrationLists"
+                >
+                  {{
+                    validatingLists
+                      ? 'Enregistrement…'
+                      : needsRegistrationLists
+                        ? "Valider l'inscription"
+                        : 'Mettre à jour les listes'
+                  }}
+                </Button>
+                <Button
+                  v-if="myRegistration?.has_army_lists"
+                  variant="outline"
+                  class="w-fit"
+                  :disabled="validatingLists"
+                  @click="clearRegistrationLists"
+                >
+                  Supprimer les listes
+                </Button>
+              </div>
+              <Button
+                v-if="canUnregister"
+                variant="outline"
+                class="w-fit"
+                :disabled="unregistering"
+                @click="unregister"
+              >
+                {{ unregistering ? 'Désinscription…' : 'Se désinscrire' }}
+              </Button>
+            </CardContent>
+          </Card>
+          <Card
+            v-else-if="showMyMatchesSide"
             class="neon-panel flex h-full min-h-0 flex-col"
           >
             <CardHeader class="shrink-0">
@@ -1402,7 +1515,110 @@ onMounted(refresh)
         </Teleport>
 
         <Card
-          v-if="showMyMatchesSide"
+          v-if="showRegistrationListsSide"
+          class="neon-panel mb-4 lg:hidden"
+        >
+          <CardHeader>
+            <CardTitle>Mon inscription</CardTitle>
+            <CardDescription>
+              {{
+                needsRegistrationLists
+                  ? 'Saisissez vos codes de listes Army pour valider l’inscription.'
+                  : 'Modifiez vos listes jusqu’au démarrage du tournoi.'
+              }}
+            </CardDescription>
+          </CardHeader>
+          <CardContent class="grid gap-3">
+            <div class="flex flex-wrap items-center gap-2">
+              <Badge variant="outline">
+                {{ registrationStatusLabel(myRegistration!) }}
+                <span v-if="myRegistration?.waitlist_position">
+                  (#{{ myRegistration.waitlist_position }})
+                </span>
+              </Badge>
+              <ArmyLogo
+                v-if="myRegistration && showArmyForRegistration(myRegistration)"
+                :army-id="myRegistration.army_id!"
+                :title="'Votre sectorielle'"
+              />
+              <span
+                v-else-if="myRegistration?.army_id || !armiesRevealed"
+                class="text-sm text-muted-foreground"
+              >
+                Sectorielle secrète jusqu'au démarrage
+              </span>
+            </div>
+            <p class="text-sm text-muted-foreground">
+              Une URL est acceptée et convertie en code.
+            </p>
+            <div class="grid gap-2">
+              <Label for="mobile-register-list-1">Liste 1 (code)</Label>
+              <div class="flex flex-wrap items-center gap-2">
+                <Input
+                  id="mobile-register-list-1"
+                  v-model="registerList1"
+                  class="min-w-0 flex-1"
+                  placeholder="Code Army…"
+                />
+                <ArmyListQuickActions :code="registerList1" />
+              </div>
+            </div>
+            <div class="grid gap-2">
+              <Label for="mobile-register-list-2">Liste 2 (optionnel)</Label>
+              <div class="flex flex-wrap items-center gap-2">
+                <Input
+                  id="mobile-register-list-2"
+                  v-model="registerList2"
+                  class="min-w-0 flex-1"
+                  placeholder="Code Army… (optionnel)"
+                />
+                <ArmyListQuickActions :code="registerList2" />
+              </div>
+              <p
+                v-if="myRegistration?.has_army_lists && !registerList2.trim()"
+                class="text-sm text-muted-foreground italic"
+              >
+                pas de liste 2
+              </p>
+            </div>
+            <div class="flex flex-wrap gap-2">
+              <Button
+                class="w-fit"
+                :disabled="validatingLists"
+                @click="validateRegistrationLists"
+              >
+                {{
+                  validatingLists
+                    ? 'Enregistrement…'
+                    : needsRegistrationLists
+                      ? "Valider l'inscription"
+                      : 'Mettre à jour les listes'
+                }}
+              </Button>
+              <Button
+                v-if="myRegistration?.has_army_lists"
+                variant="outline"
+                class="w-fit"
+                :disabled="validatingLists"
+                @click="clearRegistrationLists"
+              >
+                Supprimer les listes
+              </Button>
+            </div>
+            <Button
+              v-if="canUnregister"
+              variant="outline"
+              class="w-fit"
+              :disabled="unregistering"
+              @click="unregister"
+            >
+              {{ unregistering ? 'Désinscription…' : 'Se désinscrire' }}
+            </Button>
+          </CardContent>
+        </Card>
+
+        <Card
+          v-else-if="showMyMatchesSide"
           class="neon-panel mb-4 lg:hidden"
         >
           <CardHeader>
@@ -1779,12 +1995,12 @@ onMounted(refresh)
               </CardDescription>
             </CardHeader>
             <CardContent class="grid gap-4">
-              <div
-                v-if="detail.description?.trim()"
-                class="tournament-description prose prose-sm max-w-none text-muted-foreground"
-              >
-                <MarkdownContent :source="detail.description" />
-              </div>
+              <TournamentDescriptionWithRegistrants
+                v-if="detail.description?.trim() || activeRegistrations.length > 0"
+                :description="detail.description"
+                :registrations="activeRegistrations"
+                show-status
+              />
 
               <div
                 v-if="(detail.pool_scenarios?.length ?? 0) > 0"
@@ -1839,7 +2055,7 @@ onMounted(refresh)
                 </Button>
               </div>
 
-              <div v-else-if="myRegistration" class="grid gap-3">
+              <div v-else-if="myRegistration && !showRegistrationListsSide" class="grid gap-3">
                 <div class="flex flex-wrap items-center gap-3">
                   <Badge variant="outline">
                     {{ registrationStatusLabel(myRegistration) }}
@@ -1858,73 +2074,6 @@ onMounted(refresh)
                   >
                     Sectorielle secrète jusqu'au démarrage
                   </span>
-                </div>
-
-                <div
-                  v-if="canEditRegistrationLists"
-                  class="grid gap-3 rounded-lg border p-3"
-                >
-                  <p class="text-sm text-muted-foreground">
-                    {{
-                      needsRegistrationLists
-                        ? 'Saisissez vos codes de listes Army pour valider l’inscription. Une URL est acceptée et convertie en code.'
-                        : 'Vous pouvez modifier vos listes jusqu’au démarrage du tournoi. Une URL est acceptée et convertie en code.'
-                    }}
-                  </p>
-                  <div class="grid gap-2 sm:max-w-2xl">
-                    <Label for="register-list-1">Liste 1 (code)</Label>
-                    <div class="flex flex-wrap items-center gap-2">
-                      <Input
-                        id="register-list-1"
-                        v-model="registerList1"
-                        class="min-w-0 flex-1"
-                        placeholder="Code Army…"
-                      />
-                      <ArmyListQuickActions :code="registerList1" />
-                    </div>
-                  </div>
-                  <div class="grid gap-2 sm:max-w-2xl">
-                    <Label for="register-list-2">Liste 2 (optionnel)</Label>
-                    <div class="flex flex-wrap items-center gap-2">
-                      <Input
-                        id="register-list-2"
-                        v-model="registerList2"
-                        class="min-w-0 flex-1"
-                        placeholder="Code Army… (optionnel)"
-                      />
-                      <ArmyListQuickActions :code="registerList2" />
-                    </div>
-                    <p
-                      v-if="myRegistration.has_army_lists && !registerList2.trim()"
-                      class="text-sm text-muted-foreground italic"
-                    >
-                      pas de liste 2
-                    </p>
-                  </div>
-                  <div class="flex flex-wrap gap-2">
-                    <Button
-                      class="w-fit"
-                      :disabled="validatingLists"
-                      @click="validateRegistrationLists"
-                    >
-                      {{
-                        validatingLists
-                          ? 'Enregistrement…'
-                          : needsRegistrationLists
-                            ? "Valider l'inscription"
-                            : 'Mettre à jour les listes'
-                      }}
-                    </Button>
-                    <Button
-                      v-if="myRegistration.has_army_lists"
-                      variant="outline"
-                      class="w-fit"
-                      :disabled="validatingLists"
-                      @click="clearRegistrationLists"
-                    >
-                      Supprimer les listes
-                    </Button>
-                  </div>
                 </div>
 
                 <Button
@@ -1988,39 +2137,6 @@ onMounted(refresh)
                 >
                   {{ savingBracketLists ? 'Enregistrement...' : 'Enregistrer les listes' }}
                 </Button>
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card
-            v-if="activeRegistrations.length > 0"
-            class="neon-panel"
-          >
-            <CardHeader>
-              <CardTitle>Inscrits</CardTitle>
-              <CardDescription v-if="!armiesRevealed">
-                Sectorielles visibles après le démarrage du tournoi.
-              </CardDescription>
-            </CardHeader>
-            <CardContent class="grid gap-2 sm:grid-cols-2">
-              <div
-                v-for="reg in activeRegistrations"
-                :key="reg.id"
-                class="flex items-center justify-between rounded border px-3 py-2 text-sm"
-              >
-                <div class="flex items-center gap-2">
-                  <PlayerLink
-                    :name="reg.player_name"
-                    :display-name="reg.player_display_name"
-                  />
-                  <ArmyLogo
-                    v-if="showArmyForRegistration(reg)"
-                    :army-id="reg.army_id!"
-                  />
-                </div>
-                <Badge variant="outline" class="text-xs">
-                  {{ registrationStatusLabel(reg) }}
-                </Badge>
               </div>
             </CardContent>
           </Card>

@@ -7,6 +7,8 @@ const props = defineProps<{
   match: MatchRecord
   /** Largeur mini commune des badges score (en `ch`), partagée sur une colonne. */
   badgeMinCh?: number
+  /** Met en évidence la défaite (badge adversaire rouge). */
+  emphasizeDefeat?: boolean
 }>()
 
 const badgeStyle = computed(() =>
@@ -30,7 +32,7 @@ const inProgressStyle = computed(() =>
 function badgeVariant(
   match: MatchRecord,
   player: 'player1' | 'player2',
-): 'default' | 'secondary' | 'outline' {
+): 'default' | 'secondary' | 'outline' | 'destructive' {
   if (!match.outcome || match.status === 'in_progress') {
     return 'secondary'
   }
@@ -41,9 +43,20 @@ function badgeVariant(
     return 'default'
   }
   if (player === 'player2' && match.outcome === 'player2_win') {
-    return 'default'
+    return props.emphasizeDefeat ? 'outline' : 'default'
   }
   return 'outline'
+}
+
+function badgeClass(match: MatchRecord, player: 'player1' | 'player2') {
+  if (
+    props.emphasizeDefeat
+    && match.outcome === 'player2_win'
+    && player === 'player2'
+  ) {
+    return 'match-result-badge--loss'
+  }
+  return undefined
 }
 
 function scoreLabel(objectives: number, survivors: number) {
@@ -73,16 +86,22 @@ function scoreLabel(objectives: number, survivors: number) {
   >
     <Badge
       :variant="badgeVariant(match, 'player1')"
-      class="justify-center tabular-nums"
-      :class="badgeMinCh == null ? 'justify-self-end' : undefined"
+      :class="[
+        'justify-center tabular-nums',
+        badgeClass(match, 'player1'),
+        badgeMinCh == null ? 'justify-self-end' : undefined,
+      ]"
       :style="badgeStyle"
     >
       {{ scoreLabel(match.player1_objectives, match.player1_survivors) }}
     </Badge>
     <Badge
       :variant="badgeVariant(match, 'player2')"
-      class="justify-center tabular-nums"
-      :class="badgeMinCh == null ? 'justify-self-start' : undefined"
+      :class="[
+        'justify-center tabular-nums',
+        badgeClass(match, 'player2'),
+        badgeMinCh == null ? 'justify-self-start' : undefined,
+      ]"
       :style="badgeStyle"
     >
       {{ scoreLabel(match.player2_objectives, match.player2_survivors) }}

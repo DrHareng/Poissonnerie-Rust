@@ -25,7 +25,8 @@ import MarkdownContent from '@/components/MarkdownContent.vue'
 import TournamentPoolScenarioLinks from '@/components/TournamentPoolScenarioLinks.vue'
 import { useArmies } from '@/composables/useArmies'
 import { casualMatchContextLabel } from '@/lib/matchElo'
-import { formatRegistrationSummary, tournamentRegistrationCapacity } from '@/lib/tournamentDisplay'
+import { formatRegistrationSummary, isTournamentRegistrationPhase, tournamentRegistrationCapacity } from '@/lib/tournamentDisplay'
+import TournamentDescriptionWithRegistrants from '@/components/TournamentDescriptionWithRegistrants.vue'
 import { phaseLabel } from '@/lib/tournamentPhase'
 import { Badge } from '@/components/ui/badge'
 import {
@@ -352,8 +353,16 @@ onMounted(async () => {
                   {{ tournament.display_status }}
                 </Badge>
               </div>
+              <TournamentDescriptionWithRegistrants
+                v-if="
+                  isTournamentRegistrationPhase(tournament.status)
+                  && (tournament.description?.trim() || (tournament.registrations?.length ?? 0) > 0)
+                "
+                :description="tournament.description"
+                :registrations="tournament.registrations ?? []"
+              />
               <div
-                v-if="tournament.description?.trim()"
+                v-else-if="tournament.description?.trim()"
                 class="prose prose-sm max-w-none text-left text-muted-foreground"
               >
                 <MarkdownContent :source="tournament.description" />

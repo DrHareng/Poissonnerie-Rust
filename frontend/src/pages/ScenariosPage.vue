@@ -32,11 +32,13 @@ import ImageViewer, {
 import MarkdownContent from '@/components/MarkdownContent.vue'
 import ScenarioDetailView from '@/components/ScenarioDetailView.vue'
 import { useAdminEditMode } from '@/composables/useAdminEditMode'
+import { useAppSidePanel } from '@/composables/useAppSidePanel'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import {
   Card,
   CardContent,
+  CardDescription,
   CardHeader,
   CardTitle,
 } from '@/components/ui/card'
@@ -49,6 +51,7 @@ const TAB_IDS: ScenarioTabId[] = ['liste', 'regles', 'secondaires']
 const route = useRoute()
 const router = useRouter()
 const { canEditContent } = useAdminEditMode()
+const { setCustomSide } = useAppSidePanel()
 const page = ref<ScenarioPackPage | null>(null)
 const secondaries = ref<SecondaryObjective[]>([])
 const commonRules = ref<CommonRule[]>([])
@@ -73,6 +76,10 @@ const tabs = [
 
 const activeTabLabel = computed(
   () => tabs.find((tab) => tab.id === activeTab.value)?.label ?? 'Scénarios',
+)
+
+const showScenarioListSide = computed(
+  () => activeTab.value === 'liste' && !loading.value && !!page.value,
 )
 
 const displayedSecondaries = computed(() => {
@@ -355,6 +362,12 @@ watch(activeTab, (tab) => {
     document.title = pageTitle(activeTabLabel.value)
   }
 })
+
+watch(
+  showScenarioListSide,
+  (active) => setCustomSide(active),
+  { immediate: true },
+)
 </script>
 
 <template>
@@ -387,34 +400,84 @@ watch(activeTab, (tab) => {
 
     <template v-else-if="page">
       <div class="tournament-tab-panels page-panel-scroll">
-        <template v-if="activeTab === 'liste'">
-          <nav
-            class="tournament-tabs scenario-subtabs"
-            aria-label="Scénarios du pack"
+        <Teleport defer to="#app-side-panel">
+          <Card
+            v-if="showScenarioListSide"
+            class="neon-panel flex h-full min-h-0 flex-col"
           >
-            <button
-              v-for="scenario in page.scenarios"
-              :key="scenario.id"
-              type="button"
-              class="tournament-tab"
-              :class="{
-                'tournament-tab--active':
-                  selectedScenarioSlug === scenario.slug,
-              }"
-              @click="setSelectedScenario(scenario.slug)"
-            >
-              {{ scenario.name }}
-            </button>
-            <button
-              type="button"
-              class="tournament-tab scenario-draw-tab"
-              :disabled="page.scenarios.length === 0"
-              @click="drawScenario"
-            >
-              <Dices class="size-4" />
-              Tirer au sort
-            </button>
-          </nav>
+            <CardHeader class="shrink-0 pb-3">
+              <CardTitle>Scénarios</CardTitle>
+              <CardDescription>
+                {{ page.pack.name }}
+              </CardDescription>
+            </CardHeader>
+            <CardContent class="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto">
+              <button
+                type="button"
+                class="scenario-side-draw"
+                :disabled="page.scenarios.length === 0"
+                @click="drawScenario"
+              >
+                <Dices class="size-4" />
+                Tirer au sort
+              </button>
+              <nav
+                class="scenario-side-list"
+                aria-label="Scénarios du pack"
+              >
+                <button
+                  v-for="scenario in page.scenarios"
+                  :key="scenario.id"
+                  type="button"
+                  class="scenario-side-item"
+                  :class="{
+                    'scenario-side-item--active':
+                      selectedScenarioSlug === scenario.slug,
+                  }"
+                  @click="setSelectedScenario(scenario.slug)"
+                >
+                  {{ scenario.name }}
+                </button>
+              </nav>
+            </CardContent>
+          </Card>
+        </Teleport>
+
+        <template v-if="activeTab === 'liste'">
+          <Card class="neon-panel mb-4 lg:hidden">
+            <CardHeader class="pb-3">
+              <CardTitle>Scénarios</CardTitle>
+            </CardHeader>
+            <CardContent class="grid gap-3">
+              <button
+                type="button"
+                class="scenario-side-draw"
+                :disabled="page.scenarios.length === 0"
+                @click="drawScenario"
+              >
+                <Dices class="size-4" />
+                Tirer au sort
+              </button>
+              <nav
+                class="scenario-side-list"
+                aria-label="Scénarios du pack"
+              >
+                <button
+                  v-for="scenario in page.scenarios"
+                  :key="`mobile-${scenario.id}`"
+                  type="button"
+                  class="scenario-side-item"
+                  :class="{
+                    'scenario-side-item--active':
+                      selectedScenarioSlug === scenario.slug,
+                  }"
+                  @click="setSelectedScenario(scenario.slug)"
+                >
+                  {{ scenario.name }}
+                </button>
+              </nav>
+            </CardContent>
+          </Card>
 
           <ScenarioDetailView
             v-if="selectedScenarioSlug"

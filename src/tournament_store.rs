@@ -18,7 +18,7 @@ use crate::tournament::{
     tournament_points_for_player, BracketFormat, PlayerTournamentResult, Pool, PoolPlayer,
     RegistrationStatus, Tournament, TournamentDetail, TournamentListEntry, TournamentMatch,
     TournamentMatchStatus, TournamentPhase, TournamentPlayerSnapshot, TournamentRegistration,
-    TournamentScenarioSlot, TournamentStatus, POOLS_EIGHT_CAPACITY, POOLS_FOUR_CAPACITY,
+    TournamentRegistrationPreview, TournamentScenarioSlot, TournamentStatus, POOLS_EIGHT_CAPACITY, POOLS_FOUR_CAPACITY,
     POOL_SCENARIO_LETTERS, compute_display_status, compute_top_four, registration_counts,
 };
 
@@ -247,6 +247,30 @@ impl TournamentStore {
                     .filter(|m| m.phase != TournamentPhase::Pool)
                     .collect();
                 let pool_scenarios = self.list_scenarios_in_conn(&conn, tournament.id, "pool")?;
+                let registration_previews = if matches!(
+                    tournament.status,
+                    TournamentStatus::RegistrationOpen | TournamentStatus::RegistrationClosed
+                ) {
+                    registrations
+                        .iter()
+                        .filter(|registration| {
+                            matches!(
+                                registration.status,
+                                RegistrationStatus::Pending
+                                    | RegistrationStatus::Approved
+                                    | RegistrationStatus::Waitlisted
+                            )
+                        })
+                        .map(|registration| TournamentRegistrationPreview {
+                            player_name: registration.player_name.clone(),
+                            player_display_name: registration.player_display_name.clone(),
+                            status: registration.status,
+                            has_army_lists: registration.has_army_lists,
+                        })
+                        .collect()
+                } else {
+                    Vec::new()
+                };
 
                 Ok(TournamentListEntry {
                     tournament,
@@ -256,6 +280,7 @@ impl TournamentStore {
                     top_four,
                     bracket_matches,
                     pool_scenarios,
+                    registrations: registration_previews,
                 })
             })
             .collect()

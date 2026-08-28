@@ -467,6 +467,20 @@
     box-shadow: 0 0 10px oklch(0.62 0.22 25 / 35%);
   }
 
+  .match-result-badge--loss {
+    @apply border-destructive bg-destructive text-white;
+    box-shadow: 0 0 10px oklch(0.62 0.22 25 / 35%);
+  }
+
+  .match-elo-delta--loss {
+    @apply font-semibold text-destructive;
+  }
+
+  .match-elo-delta--gain {
+    @apply font-semibold text-primary;
+    text-shadow: 0 0 12px oklch(0.8 0.14 195 / 45%);
+  }
+
   .wnd-bar-empty {
     @apply h-full w-full bg-muted/20;
   }
@@ -992,6 +1006,30 @@
 
   .scenario-subtabs {
     @apply min-w-0 flex-1 flex-wrap overflow-x-visible;
+  }
+
+  .scenario-side-draw {
+    @apply inline-flex w-full items-center justify-center gap-2 rounded-lg border-2 border-accent/50 bg-accent/15 px-4 py-2.5 text-sm font-semibold tracking-wide text-accent uppercase shadow-[0_0_24px_-6px_oklch(0.68_0.24_340_/_45%)];
+  }
+
+  .scenario-side-draw:hover:not(:disabled) {
+    @apply border-accent bg-accent/25 text-accent;
+  }
+
+  .scenario-side-draw:disabled {
+    @apply pointer-events-none opacity-50;
+  }
+
+  .scenario-side-list {
+    @apply flex min-w-0 flex-col items-stretch gap-1;
+  }
+
+  .scenario-side-item {
+    @apply w-full rounded-md border border-transparent px-3 py-2 text-left text-sm font-medium text-muted-foreground transition hover:border-primary/25 hover:bg-primary/5 hover:text-foreground;
+  }
+
+  .scenario-side-item--active {
+    @apply border-primary/30 bg-primary/15 text-primary shadow-sm;
   }
 
   .scenario-draw-tab {

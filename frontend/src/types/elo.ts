@@ -358,6 +358,13 @@ export interface TournamentTopFourEntry {
   army_id?: number | null
 }
 
+export interface TournamentRegistrationPreview {
+  player_name: string
+  player_display_name?: string | null
+  status: RegistrationStatus
+  has_army_lists?: boolean
+}
+
 export interface TournamentListEntry extends Tournament {
   registered_count: number
   waitlist_count: number
@@ -365,6 +372,7 @@ export interface TournamentListEntry extends Tournament {
   top_four?: TournamentTopFourEntry[]
   bracket_matches?: TournamentMatch[]
   pool_scenarios?: TournamentScenarioSlot[]
+  registrations?: TournamentRegistrationPreview[]
 }
 
 export interface PlayerTournamentResult {

@@ -412,6 +412,16 @@ pub struct TournamentTopFourEntry {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct TournamentRegistrationPreview {
+    pub player_name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub player_display_name: Option<String>,
+    pub status: RegistrationStatus,
+    #[serde(default)]
+    pub has_army_lists: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct TournamentListEntry {
     #[serde(flatten)]
     pub tournament: Tournament,
@@ -427,6 +437,9 @@ pub struct TournamentListEntry {
     /// Scénarios de poules (pour affichage sous la description).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub pool_scenarios: Vec<TournamentScenarioSlot>,
+    /// Inscrits actifs (phase d'inscription uniquement).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub registrations: Vec<TournamentRegistrationPreview>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

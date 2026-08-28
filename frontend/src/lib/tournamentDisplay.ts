@@ -1,4 +1,62 @@
-import type { TournamentTopFourEntry } from '@/types/elo'
+import type { RegistrationStatus, TournamentTopFourEntry } from '@/types/elo'
+
+export interface RegistrationSortInput {
+  player_name: string
+  player_display_name?: string | null
+  status: RegistrationStatus
+  has_army_lists?: boolean
+}
+
+const registrationStatusLabels: Record<string, string> = {
+  approved: 'Validé',
+  waitlisted: "Liste d'attente",
+  rejected: 'Refusé',
+}
+
+export function registrationStatusLabel(reg: {
+  status: RegistrationStatus
+  has_army_lists?: boolean
+}): string {
+  const waitingLists =
+    !reg.has_army_lists
+    && (reg.status === 'pending' || reg.status === 'waitlisted')
+  if (waitingLists) return 'En attente des listes'
+  if (reg.status === 'pending') return 'En attente de validation'
+  return registrationStatusLabels[reg.status] ?? reg.status
+}
+
+/** Validé (0) puis le reste ; « en attente des listes » en dernier (2). */
+export function registrationSortTier(reg: RegistrationSortInput): number {
+  if (reg.status === 'approved') return 0
+  if (
+    !reg.has_army_lists
+    && (reg.status === 'pending' || reg.status === 'waitlisted')
+  ) {
+    return 2
+  }
+  return 1
+}
+
+export function compareRegistrationsForDisplay(
+  a: RegistrationSortInput,
+  b: RegistrationSortInput,
+): number {
+  const tierDiff = registrationSortTier(a) - registrationSortTier(b)
+  if (tierDiff !== 0) return tierDiff
+  const nameA = (a.player_display_name ?? a.player_name).toLocaleLowerCase('fr')
+  const nameB = (b.player_display_name ?? b.player_name).toLocaleLowerCase('fr')
+  return nameA.localeCompare(nameB, 'fr')
+}
+
+export function sortRegistrationsForDisplay<T extends RegistrationSortInput>(
+  registrations: T[],
+): T[] {
+  return [...registrations].sort(compareRegistrationsForDisplay)
+}
+
+export function isTournamentRegistrationPhase(status: string): boolean {
+  return status === 'registration_open' || status === 'registration_closed'
+}
 
 export function formatRegistrationSummary(
   registered: number,

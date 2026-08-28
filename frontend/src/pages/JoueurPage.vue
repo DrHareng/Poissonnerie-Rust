@@ -2,7 +2,6 @@
 import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter, RouterLink } from 'vue-router'
 import { useTitle } from '@vueuse/core'
-import { ChevronLeft, ChevronRight, Eye } from '@lucide/vue'
 import { toast } from 'vue-sonner'
 import {
   fetchPlayer,
@@ -12,25 +11,20 @@ import {
   updateProfile,
 } from '@/lib/api'
 import { pageTitle } from '@/lib/pageTitle'
-import { formatMatchRecordedDate } from '@/lib/tournamentMatchDisplay'
-import { matchCountsForElo } from '@/lib/matchElo'
 import { classementTabs } from '@/lib/pageTitleTabs'
 import { useAuth } from '@/composables/useAuth'
 import { useAppSidePanel } from '@/composables/useAppSidePanel'
 import type {
-  MatchOutcome,
   MatchRecord,
   PlayerProfile,
   PlayerTournamentResult,
   RankedPlayer,
 } from '@/types/elo'
-import MatchResultBadges from '@/components/MatchResultBadges.vue'
-import MatchContextCell from '@/components/MatchContextCell.vue'
+import RecentMatchesList from '@/components/RecentMatchesList.vue'
 import PageTitleTabs from '@/components/PageTitleTabs.vue'
 import WinDrawLossBar from '@/components/WinDrawLossBar.vue'
 import ArmyLogo from '@/components/ArmyLogo.vue'
 import { useArmies } from '@/composables/useArmies'
-import PlayerLink from '@/components/PlayerLink.vue'
 import PlayerPreferencesForm from '@/components/PlayerPreferencesForm.vue'
 import { Button } from '@/components/ui/button'
 import {
@@ -40,14 +34,6 @@ import {
   CardHeader,
   CardTitle,
 } from '@/components/ui/card'
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '@/components/ui/table'
 
 const route = useRoute()
 const router = useRouter()
@@ -93,56 +79,6 @@ function normalize(name: string) {
   return name.trim().toLowerCase()
 }
 
-function isSamePlayer(a: string, b: string) {
-  return normalize(a) === normalize(b)
-}
-
-function flipOutcome(outcome: MatchOutcome | null | undefined): MatchOutcome {
-  if (!outcome || outcome === 'draw') return 'draw'
-  if (outcome === 'player1_win') return 'player2_win'
-  return 'player1_win'
-}
-
-function normalizeMatchForPlayer(match: MatchRecord, name: string): MatchRecord {
-  if (isSamePlayer(match.player1, name)) {
-    return match
-  }
-
-  return {
-    ...match,
-    player1: match.player2,
-    player2: match.player1,
-    player1_display_name: match.player2_display_name,
-    player2_display_name: match.player1_display_name,
-    player1_old: match.player2_old,
-    player1_new: match.player2_new,
-    player2_old: match.player1_old,
-    player2_new: match.player1_new,
-    player1_objectives: match.player2_objectives,
-    player1_survivors: match.player2_survivors,
-    player2_objectives: match.player1_objectives,
-    player2_survivors: match.player1_survivors,
-    player1_army_id: match.player2_army_id,
-    player2_army_id: match.player1_army_id,
-    outcome: flipOutcome(match.outcome),
-  }
-}
-
-const matchRows = computed(() => {
-  if (!player.value) return []
-
-  return matches.value
-    .filter((match) => match.status !== 'in_progress')
-    .map((match) => {
-      const normalized = normalizeMatchForPlayer(match, player.value!.name)
-      return {
-        id: match.id,
-        date: formatMatchRecordedDate(match.recorded_at) ?? '—',
-        normalized,
-      }
-    })
-})
-
 const isOwnProfile = computed(() => Boolean(profile.value?.is_own_profile))
 
 watch(
@@ -153,26 +89,7 @@ watch(
   { immediate: true },
 )
 
-const matchesTotalPages = computed(() =>
-  Math.max(1, Math.ceil(matchRows.value.length / MATCHES_PAGE_SIZE)),
-)
-
-const pagedMatchRows = computed(() => {
-  const start = (matchesPage.value - 1) * MATCHES_PAGE_SIZE
-  return matchRows.value.slice(start, start + MATCHES_PAGE_SIZE)
-})
-
-const matchesPageStart = computed(() => {
-  if (matchRows.value.length === 0) return 0
-  return (matchesPage.value - 1) * MATCHES_PAGE_SIZE + 1
-})
-
-const matchesPageEnd = computed(() =>
-  Math.min(matchesPage.value * MATCHES_PAGE_SIZE, matchRows.value.length),
-)
-
 function goToMatchesPage(nextPage: number) {
-  if (nextPage < 1 || nextPage > matchesTotalPages.value) return
   matchesPage.value = nextPage
 }
 
@@ -472,121 +389,19 @@ onMounted(refresh)
           <CardTitle>Historique des parties</CardTitle>
         </CardHeader>
         <CardContent class="lg:min-h-0 lg:flex-1 lg:overflow-y-auto">
-          <div
-            v-if="loadingMatches"
-            class="rounded-lg border border-dashed p-8 text-center text-muted-foreground"
-          >
-            Chargement des parties...
-          </div>
-
-          <div
-            v-else-if="matchRows.length === 0"
-            class="rounded-lg border border-dashed p-8 text-center text-muted-foreground"
-          >
-            Aucune partie enregistrée pour ce joueur.
-          </div>
-
-          <template v-else>
-            <Table>
-              <TableHeader class="sticky top-0 z-10 bg-card/95 backdrop-blur">
-                <TableRow>
-                  <TableHead>Date</TableHead>
-                  <TableHead class="text-right">Joueur</TableHead>
-                  <TableHead class="w-10" aria-hidden="true" />
-                  <TableHead>Contexte</TableHead>
-                  <TableHead class="text-center">Résultat</TableHead>
-                  <TableHead class="w-10" aria-hidden="true" />
-                  <TableHead>Adversaire</TableHead>
-                  <TableHead class="text-right">ELO</TableHead>
-                  <TableHead class="w-12 text-right">
-                    <span class="sr-only">Actions</span>
-                  </TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                <TableRow v-for="row in pagedMatchRows" :key="row.id">
-                  <TableCell class="whitespace-nowrap text-muted-foreground">
-                    {{ row.date }}
-                  </TableCell>
-                  <TableCell class="text-right font-medium">
-                    {{ profile?.display_name ?? player.display_name }}
-                  </TableCell>
-                  <TableCell class="w-10 px-2">
-                    <ArmyLogo :army-id="row.normalized.player1_army_id" />
-                  </TableCell>
-                  <TableCell>
-                    <MatchContextCell :match="row.normalized" />
-                  </TableCell>
-                  <TableCell>
-                    <MatchResultBadges :match="row.normalized" />
-                  </TableCell>
-                  <TableCell class="w-10 px-2">
-                    <ArmyLogo :army-id="row.normalized.player2_army_id" />
-                  </TableCell>
-                  <TableCell>
-                    <PlayerLink
-                      :name="row.normalized.player2"
-                      :display-name="row.normalized.player2_display_name"
-                    />
-                  </TableCell>
-                  <TableCell class="text-right tabular-nums">
-                    <template v-if="matchCountsForElo(row.normalized.counts_for_elo)">
-                      {{ Math.round(row.normalized.player1_old) }}
-                      →
-                      <span class="elo-score">{{ Math.round(row.normalized.player1_new) }}</span>
-                    </template>
-                    <span v-else class="text-muted-foreground">—</span>
-                  </TableCell>
-                  <TableCell class="text-right">
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="icon-sm"
-                      :title="`Voir le match #${row.id}`"
-                      :aria-label="`Voir le match #${row.id}`"
-                      @click="
-                        router.push({ name: 'match', params: { id: String(row.id) } })
-                      "
-                    >
-                      <Eye class="size-4" />
-                    </Button>
-                  </TableCell>
-                </TableRow>
-              </TableBody>
-            </Table>
-
-            <div
-              v-if="matchesTotalPages > 1"
-              class="mt-3 flex flex-col gap-3 border-t border-border pt-3 sm:flex-row sm:items-center sm:justify-between"
-            >
-              <p class="text-sm text-muted-foreground">
-                {{ matchesPageStart }}–{{ matchesPageEnd }} sur {{ matchRows.length }}
-              </p>
-              <div class="flex items-center gap-2">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  :disabled="matchesPage <= 1 || loadingMatches"
-                  @click="goToMatchesPage(matchesPage - 1)"
-                >
-                  <ChevronLeft class="size-4" />
-                  Précédent
-                </Button>
-                <span class="min-w-24 text-center text-sm text-muted-foreground">
-                  Page {{ matchesPage }} / {{ matchesTotalPages }}
-                </span>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  :disabled="matchesPage >= matchesTotalPages || loadingMatches"
-                  @click="goToMatchesPage(matchesPage + 1)"
-                >
-                  Suivant
-                  <ChevronRight class="size-4" />
-                </Button>
-              </div>
-            </div>
-          </template>
+          <RecentMatchesList
+            v-if="player"
+            :matches="matches"
+            :loading="loadingMatches"
+            :page="matchesPage"
+            :page-size="MATCHES_PAGE_SIZE"
+            :perspective-player="player.name"
+            show-elo
+            client-side
+            bare
+            empty-message="Aucune partie enregistrée pour ce joueur."
+            @page-change="goToMatchesPage"
+          />
         </CardContent>
       </Card>
     </template>
