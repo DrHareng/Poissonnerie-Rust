@@ -26,7 +26,6 @@ import WinDrawLossBar from '@/components/WinDrawLossBar.vue'
 import ArmyLogo from '@/components/ArmyLogo.vue'
 import { useArmies } from '@/composables/useArmies'
 import PlayerPreferencesForm from '@/components/PlayerPreferencesForm.vue'
-import { Button } from '@/components/ui/button'
 import {
   Card,
   CardContent,
