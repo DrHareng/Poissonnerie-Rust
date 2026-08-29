@@ -21,6 +21,8 @@ export const SIDE_IMAGES = [
   { id: 'side_07', src: withBase('/brand/side_07.png'), name: 'Filets de l\'Olympe' },
 
   { id: 'side_08', src: withBase('/brand/side_08.png'), name: 'Rivages de Jade' },
+
+  { id: 'side_09', src: withBase('/brand/side_09.png'), name: 'Kosmoflot' },
 ] as const
 
 
