@@ -73,7 +73,7 @@ function openSectorielle(armyId: number) {
         Statistiques par sectorielle
       </CardTitle>
       <CardDescription>
-        Classées par nombre de parties classées.
+        Classées par win rate décroissant.
       </CardDescription>
     </CardHeader>
     <CardContent>

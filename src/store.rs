@@ -1292,14 +1292,10 @@ impl Leaderboard {
         let mut ranking: Vec<PlayerArmyStats> = stats.into_values().collect();
         ranking.sort_by(|left, right| {
             right
-                .total()
-                .cmp(&left.total())
-                .then_with(|| {
-                    right
-                        .win_rate()
-                        .partial_cmp(&left.win_rate())
-                        .unwrap_or(std::cmp::Ordering::Equal)
-                })
+                .win_rate()
+                .partial_cmp(&left.win_rate())
+                .unwrap_or(std::cmp::Ordering::Equal)
+                .then_with(|| right.total().cmp(&left.total()))
                 .then_with(|| left.army_id.cmp(&right.army_id))
         });
         Ok(ranking)
@@ -2409,22 +2405,22 @@ mod tests {
 
         let stats = board.player_army_stats("Alice").unwrap();
         assert_eq!(stats.len(), 2);
-        assert_eq!(stats[0].army_id, 101);
+        assert_eq!(stats[0].army_id, 102);
         assert_eq!(stats[0].wins, 1);
         assert_eq!(stats[0].draws, 0);
-        assert_eq!(stats[0].losses, 1);
-        assert_eq!(stats[0].total(), 2);
-        let expected_101 = (first.player1_new - first.player1_old)
-            + (second.player1_new - second.player1_old);
-        assert!((stats[0].elo_delta - expected_101).abs() < 1e-9);
+        assert_eq!(stats[0].losses, 0);
+        assert_eq!(stats[0].total(), 1);
+        let expected_102 = third.player2_new - third.player2_old;
+        assert!((stats[0].elo_delta - expected_102).abs() < 1e-9);
 
-        assert_eq!(stats[1].army_id, 102);
+        assert_eq!(stats[1].army_id, 101);
         assert_eq!(stats[1].wins, 1);
         assert_eq!(stats[1].draws, 0);
-        assert_eq!(stats[1].losses, 0);
-        assert_eq!(stats[1].total(), 1);
-        let expected_102 = third.player2_new - third.player2_old;
-        assert!((stats[1].elo_delta - expected_102).abs() < 1e-9);
+        assert_eq!(stats[1].losses, 1);
+        assert_eq!(stats[1].total(), 2);
+        let expected_101 = (first.player1_new - first.player1_old)
+            + (second.player1_new - second.player1_old);
+        assert!((stats[1].elo_delta - expected_101).abs() < 1e-9);
     }
 
     #[test]

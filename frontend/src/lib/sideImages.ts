@@ -23,6 +23,8 @@ export const SIDE_IMAGES = [
   { id: 'side_08', src: withBase('/brand/side_08.png'), name: 'Rivages de Jade' },
 
   { id: 'side_09', src: withBase('/brand/side_09.png'), name: 'Kosmoflot' },
+
+  { id: 'side_10', src: withBase('/brand/side_10.png'), name: 'Jardins du Triumvirat' },
 ] as const
 
 
