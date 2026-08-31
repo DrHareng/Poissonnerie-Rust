@@ -36,7 +36,12 @@ export const matchsTabs: PageTitleTab[] = [
 export const tournoisTabs: PageTitleTab[] = [
   {
     to: { name: 'tournois' },
-    label: 'Tournois',
+    label: 'En cours',
     activeNames: ['tournois'],
+  },
+  {
+    to: { name: 'tournois-termines' },
+    label: 'Terminés',
+    activeNames: ['tournois-termines'],
   },
 ]

@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
@@ -10,6 +11,7 @@ use crate::migrate::migrate;
 const METADATA_URL: &str = "https://api.corvusbelli.com/army/infinity/fr/metadata";
 const ORIGIN: &str = "https://infinityuniverse.com";
 const REFERER: &str = "https://infinityuniverse.com/army/infinity";
+const SHORT_NAMES_PATH: &str = "data/army-short-names.json";
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
 pub struct Army {
@@ -19,6 +21,8 @@ pub struct Army {
     pub slug: String,
     pub logo_url: String,
     pub discontinued: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub short_name: Option<String>,
 }
 
 /// Sectorielles de renfort (id se terminant par 99) — exclues des listes de saisie.
@@ -73,11 +77,13 @@ impl ArmyStore {
             conn: Mutex::new(conn),
         };
         store.init_schema()?;
+        store.seed_short_names()?;
         Ok(store)
     }
 
     fn init_schema(&self) -> Result<()> {
-        self.conn.lock().unwrap().execute_batch(
+        let conn = self.conn.lock().unwrap();
+        conn.execute_batch(
             "
             CREATE TABLE IF NOT EXISTS armies (
                 id INTEGER PRIMARY KEY,
@@ -86,11 +92,44 @@ impl ArmyStore {
                 slug TEXT NOT NULL,
                 logo_url TEXT NOT NULL,
                 discontinued INTEGER NOT NULL DEFAULT 0,
+                short_name TEXT,
                 synced_at INTEGER NOT NULL
             );
             CREATE INDEX IF NOT EXISTS idx_armies_parent ON armies(parent_id);
             ",
         )?;
+        if !army_column_exists(&conn, "short_name")? {
+            conn.execute("ALTER TABLE armies ADD COLUMN short_name TEXT", [])?;
+        }
+        Ok(())
+    }
+
+    fn seed_short_names(&self) -> Result<()> {
+        let path = Path::new(SHORT_NAMES_PATH);
+        if !path.exists() {
+            return Ok(());
+        }
+
+        let content = std::fs::read_to_string(path)
+            .with_context(|| format!("impossible de lire {}", path.display()))?;
+        let seeds: HashMap<String, String> =
+            serde_json::from_str(&content).context("JSON invalide dans army-short-names.json")?;
+
+        let conn = self.conn.lock().unwrap();
+        for (slug, short_name) in seeds {
+            let short = short_name.trim();
+            if short.is_empty() {
+                continue;
+            }
+            conn.execute(
+                "
+                UPDATE armies
+                SET short_name = ?1
+                WHERE lower(slug) = lower(?2) AND short_name IS NULL
+                ",
+                params![short, slug],
+            )?;
+        }
         Ok(())
     }
 
@@ -124,7 +163,7 @@ impl ArmyStore {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(
             "
-            SELECT id, parent_id, name, slug, logo_url, discontinued
+            SELECT id, parent_id, name, slug, logo_url, discontinued, short_name
             FROM armies
             WHERE id = ?1
             ",
@@ -152,7 +191,7 @@ impl ArmyStore {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(
             "
-            SELECT id, parent_id, name, slug, logo_url, discontinued
+            SELECT id, parent_id, name, slug, logo_url, discontinued, short_name
             FROM armies
             ORDER BY parent_id, name
             ",
@@ -197,7 +236,20 @@ fn row_to_army(row: &rusqlite::Row<'_>) -> rusqlite::Result<Army> {
         slug: row.get(3)?,
         logo_url: row.get(4)?,
         discontinued: row.get::<_, i32>(5)? != 0,
+        short_name: row.get(6)?,
     })
+}
+
+fn army_column_exists(conn: &Connection, column: &str) -> Result<bool> {
+    let mut stmt = conn.prepare("PRAGMA table_info(armies)")?;
+    let mut rows = stmt.query([])?;
+    while let Some(row) = rows.next()? {
+        let name: String = row.get(1)?;
+        if name == column {
+            return Ok(true);
+        }
+    }
+    Ok(false)
 }
 
 pub fn fetch_factions_from_api() -> Result<Vec<Army>> {
@@ -233,6 +285,7 @@ pub fn fetch_factions_from_api() -> Result<Vec<Army>> {
             slug: faction.slug,
             logo_url: faction.logo,
             discontinued: faction.discontinued,
+            short_name: None,
         })
         .collect())
 }
@@ -252,6 +305,8 @@ pub fn sync_armies(store: &ArmyStore) -> Result<SyncReport> {
         stored += 1;
     }
 
+    store.seed_short_names()?;
+
     Ok(SyncReport {
         fetched: factions.len(),
         stored,
@@ -266,6 +321,17 @@ pub struct SyncReport {
     pub stored: usize,
     pub skipped_reinforcement: usize,
     pub selectable: usize,
+}
+
+#[cfg(test)]
+impl ArmyStore {
+    fn set_short_name(&self, id: u32, short_name: &str) -> Result<()> {
+        self.conn.lock().unwrap().execute(
+            "UPDATE armies SET short_name = ?1 WHERE id = ?2",
+            params![short_name, id],
+        )?;
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -297,6 +363,7 @@ mod tests {
             slug: "code-capital".into(),
             logo_url: "https://example.com/logo.svg".into(),
             discontinued: false,
+            short_name: None,
         };
         assert!(!is_listable(&reinforcement));
 
@@ -307,6 +374,7 @@ mod tests {
             slug: "test".into(),
             logo_url: "https://example.com/logo.svg".into(),
             discontinued: true,
+            short_name: None,
         };
         assert!(is_listable(&discontinued));
     }
@@ -328,11 +396,23 @@ mod tests {
             slug: "panoceania".into(),
             logo_url: "https://example.com/panoceania.svg".into(),
             discontinued: false,
+            short_name: None,
         };
         store.upsert(&army, 1).unwrap();
 
         let loaded = store.get(101).unwrap().unwrap();
         assert_eq!(loaded, army);
+
+        store.set_short_name(101, "Pano").unwrap();
+        let updated = Army {
+            name: "PanOcéanie (API)".into(),
+            short_name: Some("Pano".into()),
+            ..army.clone()
+        };
+        store.upsert(&updated, 2).unwrap();
+        let after_sync = store.get(101).unwrap().unwrap();
+        assert_eq!(after_sync.name, "PanOcéanie (API)");
+        assert_eq!(after_sync.short_name.as_deref(), Some("Pano"));
         assert_eq!(store.list_selectable().unwrap().len(), 1);
 
         let _ = std::fs::remove_dir_all(dir);

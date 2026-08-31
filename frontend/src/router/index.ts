@@ -103,7 +103,13 @@ export const router = createRouter({
       path: '/tournois',
       name: 'tournois',
       component: TournoisPage,
-      meta: { title: 'Tournois' },
+      meta: { title: 'Tournois en cours' },
+    },
+    {
+      path: '/tournois/termines',
+      name: 'tournois-termines',
+      component: TournoisPage,
+      meta: { title: 'Tournois terminés' },
     },
     {
       path: '/tournoi/:id',

@@ -5,6 +5,7 @@ export interface Army {
   slug: string
   logo_url: string
   discontinued: boolean
+  short_name?: string | null
 }
 
 export interface PlayerArmyUsage {
@@ -60,6 +61,24 @@ export interface RankedPlayer extends Player {
 export interface RankedArmy {
   rank: number
   army_id: number
+  wins: number
+  draws: number
+  losses: number
+  win_rate: number
+}
+
+export interface PlayerArmyStats {
+  army_id: number
+  wins: number
+  draws: number
+  losses: number
+  win_rate: number
+  elo_delta: number
+}
+
+export interface ArmyPlayerStats {
+  player_name: string
+  display_name: string
   wins: number
   draws: number
   losses: number

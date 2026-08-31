@@ -89,6 +89,10 @@ export function isTournamentRegistrationPhase(status: string): boolean {
   return status === 'registration_open' || status === 'registration_closed'
 }
 
+export function isTournamentCompleted(status: string): boolean {
+  return status === 'completed'
+}
+
 export function formatRegistrationSummary(
   registered: number,
   waitlist: number,
@@ -125,7 +129,9 @@ export function topFourDisplayRows(
   const second = byRank.get(2)
   if (second) rows.push({ label: '2', entries: [second] })
 
-  const semiFinalists = entries.filter((entry) => entry.rank === 3 || entry.rank === 4)
+  const semiFinalists = entries
+    .filter((entry) => entry.rank === 3 || entry.rank === 4)
+    .sort((a, b) => a.rank - b.rank)
   if (semiFinalists.length > 0) {
     rows.push({ label: '3-4', entries: semiFinalists })
   }

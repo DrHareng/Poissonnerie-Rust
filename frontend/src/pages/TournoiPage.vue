@@ -1343,20 +1343,6 @@ onMounted(refresh)
         :current="{ label: detail.name }"
       />
 
-      <section class="page-header">
-        <p class="page-description">
-          {{ detail.display_status }}
-          —
-          {{
-            formatRegistrationSummary(
-              detail.registered_count,
-              detail.waitlist_count,
-              tournamentRegistrationCapacity(detail.pool_count),
-            )
-          }}
-        </p>
-      </section>
-
       <nav class="tournament-tabs" aria-label="Sections du tournoi">
         <button
           v-for="tab in tournamentTabs"

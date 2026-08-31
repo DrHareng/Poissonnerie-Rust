@@ -1,6 +1,7 @@
 import type {
   ApiError,
   Army,
+  ArmyPlayerStats,
   AuthUser,
   CommonRule,
   MatchOutcome,
@@ -8,6 +9,7 @@ import type {
   PaginatedMatches,
   PaginatedReports,
   Player,
+  PlayerArmyStats,
   PlayerProfile,
   PlayerTournamentResult,
   RankedArmy,
@@ -83,6 +85,10 @@ export function fetchArmyMatches(id: number, limit = 50): Promise<MatchRecord[]>
   return request<MatchRecord[]>(`/api/armies/${id}/matches?limit=${limit}`)
 }
 
+export function fetchArmyPlayers(id: number): Promise<ArmyPlayerStats[]> {
+  return request<ArmyPlayerStats[]>(`/api/armies/${id}/players`)
+}
+
 export async function fetchMe(): Promise<AuthUser | null> {
   const response = await fetch(withBase('/api/auth/me'), defaultFetchOptions)
   if (response.status === 401) {
@@ -125,11 +131,13 @@ export function updateProfile(payload: {
 
 export type SecondaryViewMode = 'liste' | 'cartes'
 export type ArmySortMode = 'win_rate' | 'matches'
+export type TournamentCompletedViewMode = 'detailed' | 'compressed'
 
 export interface UserPrefs {
   secondary_view_mode: SecondaryViewMode
   scenario_slug?: string | null
   army_sort_mode: ArmySortMode
+  tournament_completed_view_mode: TournamentCompletedViewMode
 }
 
 export function fetchPrefs(): Promise<UserPrefs> {
@@ -140,6 +148,7 @@ export function updatePrefs(payload: {
   secondary_view_mode?: SecondaryViewMode
   scenario_slug?: string
   army_sort_mode?: ArmySortMode
+  tournament_completed_view_mode?: TournamentCompletedViewMode
 }): Promise<UserPrefs> {
   return request<UserPrefs>('/api/prefs', {
     method: 'PATCH',
@@ -328,6 +337,12 @@ export function fetchPlayer(name: string): Promise<PlayerProfile> {
 export function fetchPlayerMatches(name: string, limit = 200): Promise<MatchRecord[]> {
   return request<MatchRecord[]>(
     `/api/players/${encodeURIComponent(name)}/matches?limit=${limit}`,
+  )
+}
+
+export function fetchPlayerArmies(name: string): Promise<PlayerArmyStats[]> {
+  return request<PlayerArmyStats[]>(
+    `/api/players/${encodeURIComponent(name)}/armies`,
   )
 }
 

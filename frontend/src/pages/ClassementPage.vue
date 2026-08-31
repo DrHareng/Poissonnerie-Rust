@@ -59,31 +59,6 @@ onMounted(refreshRanking)
       ariaLabel="Sections du classement"
     />
 
-    <section class="page-header">
-      <div class="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
-        <p class="page-description">
-          Consultez le classement ELO et ajoutez de nouveaux participants.
-        </p>
-        <div class="flex flex-col gap-3 sm:flex-row sm:items-center shrink-0">
-          <div class="relative w-full sm:w-64">
-            <Search
-              class="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground"
-            />
-            <Input
-              v-model="searchQuery"
-              placeholder="rechercher par nom"
-              autocomplete="off"
-              class="pl-8"
-            />
-          </div>
-          <Button v-if="isAdmin && !showForm" @click="showForm = true">
-            <Plus class="size-4" />
-            Nouveau joueur
-          </Button>
-        </div>
-      </div>
-    </section>
-
     <Alert v-if="!apiOnline" variant="destructive" class="neon-panel-accent">
       <AlertTitle>API indisponible</AlertTitle>
       <AlertDescription>
@@ -104,6 +79,24 @@ onMounted(refreshRanking)
       :loading="loading"
       :search-query="searchQuery"
       @select="openPlayerPage"
-    />
+    >
+      <template #header-actions>
+        <div class="relative w-full sm:w-64">
+          <Search
+            class="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground"
+          />
+          <Input
+            v-model="searchQuery"
+            placeholder="rechercher par nom"
+            autocomplete="off"
+            class="pl-8"
+          />
+        </div>
+        <Button v-if="isAdmin && !showForm" @click="showForm = true">
+          <Plus class="size-4" />
+          Nouveau joueur
+        </Button>
+      </template>
+    </RankingTable>
   </div>
 </template>

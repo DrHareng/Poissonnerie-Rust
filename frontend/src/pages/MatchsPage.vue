@@ -213,16 +213,6 @@ onMounted(async () => {
       ariaLabel="Sections des matchs"
     />
 
-    <section class="page-header">
-      <p class="page-description">
-        {{
-          isReportsTab
-            ? 'Consultez les comptes rendus publiés.'
-            : 'Consultez les résultats enregistrés.'
-        }}
-      </p>
-    </section>
-
     <Alert v-if="!apiOnline" variant="destructive" class="neon-panel-accent">
       <AlertTitle>API indisponible</AlertTitle>
       <AlertDescription>

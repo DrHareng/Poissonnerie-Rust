@@ -15,7 +15,6 @@ import { Button } from '@/components/ui/button'
 import {
   Card,
   CardContent,
-  CardDescription,
   CardHeader,
   CardTitle,
 } from '@/components/ui/card'
@@ -155,9 +154,6 @@ function setSortMode(mode: ArmySortMode) {
           </div>
         </div>
       </CardTitle>
-      <CardDescription>
-        Win rate calculé sur l'ensemble des parties enregistrées avec une sectorielle.
-      </CardDescription>
     </CardHeader>
     <CardContent class="lg:min-h-0 lg:flex-1 lg:overflow-y-auto">
       <div

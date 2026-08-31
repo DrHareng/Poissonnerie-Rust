@@ -3953,4 +3953,34 @@ mod tests {
         assert_eq!(final_match.player1.as_deref(), Some("Ayadan"));
         assert_eq!(final_match.player2.as_deref(), Some("Kantain"));
     }
+
+    #[test]
+    fn coupe_10_top_four_includes_kantain() {
+        use crate::tournament::compute_top_four;
+
+        let path = Path::new("data/poissonnerie.db");
+        if !path.exists() {
+            return;
+        }
+
+        let store = TournamentStore::open(path).unwrap();
+        let tournament = store
+            .list()
+            .unwrap()
+            .into_iter()
+            .find(|t| t.name.contains("Poissonnerie 10"))
+            .expect("coupe 10 introuvable");
+
+        let conn = store.conn.lock().unwrap();
+        let matches = store.list_matches_in_conn(&conn, tournament.id).unwrap();
+        drop(conn);
+
+        let top_four = compute_top_four(&matches);
+        let names: Vec<_> = top_four.iter().map(|e| e.player_name.as_str()).collect();
+        assert!(
+            names.iter().any(|n| n.eq_ignore_ascii_case("Kantain")),
+            "Kantain devrait être dans le top 4, got {names:?}"
+        );
+        assert_eq!(top_four.len(), 4, "le top 4 devrait avoir 4 entrées");
+    }
 }

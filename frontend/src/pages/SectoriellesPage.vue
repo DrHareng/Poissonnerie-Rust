@@ -46,12 +46,6 @@ onMounted(refreshRanking)
       ariaLabel="Sections du classement"
     />
 
-    <section class="page-header">
-      <p class="page-description">
-        Classement des factions jouées dans les parties enregistrées (win rate ou nombre de parties).
-      </p>
-    </section>
-
     <Alert v-if="!apiOnline" variant="destructive" class="neon-panel-accent">
       <AlertTitle>API indisponible</AlertTitle>
       <AlertDescription>

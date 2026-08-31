@@ -7,9 +7,9 @@ import {
   LogIn,
   LogOut,
   Map,
-  Medal,
   Pencil,
   Play,
+  Podium,
   Swords,
   Trophy,
   User,
@@ -39,8 +39,8 @@ const { menuLabel: inProgressMenuLabel, menuRoute: inProgressRoute } =
 const links = [
   { to: '/scenarios', label: 'Scénarios', icon: Map },
   { to: '/matchs', label: 'Matchs', icon: Swords },
-  { to: '/tournois', label: 'Tournois', icon: Medal },
-  { to: '/classement', label: 'Classement', icon: Trophy },
+  { to: '/tournois', label: 'Tournois', icon: Trophy },
+  { to: '/classement', label: 'Classement', icon: Podium },
 ]
 
 const activePath = computed(() => route.path)

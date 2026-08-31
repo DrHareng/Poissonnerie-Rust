@@ -405,6 +405,13 @@ pub fn migrate(conn: &Connection) -> Result<()> {
         conn.execute("ALTER TABLE users ADD COLUMN army_sort_mode TEXT", [])?;
     }
 
+    if !column_exists(conn, "users", "tournament_completed_view_mode")? {
+        conn.execute(
+            "ALTER TABLE users ADD COLUMN tournament_completed_view_mode TEXT",
+            [],
+        )?;
+    }
+
     if !column_exists(conn, "matches", "counts_for_elo")? {
         conn.execute(
             "ALTER TABLE matches ADD COLUMN counts_for_elo INTEGER NOT NULL DEFAULT 1",

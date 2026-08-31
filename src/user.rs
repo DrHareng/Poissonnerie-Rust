@@ -20,6 +20,7 @@ pub struct User {
     pub secondary_view_mode: Option<String>,
     pub scenario_slug: Option<String>,
     pub army_sort_mode: Option<String>,
+    pub tournament_completed_view_mode: Option<String>,
     pub is_admin: bool,
     pub created_at: u64,
     pub last_login_at: u64,
@@ -103,6 +104,7 @@ pub struct UiPrefsUpdate {
     pub secondary_view_mode: Option<String>,
     pub scenario_slug: Option<String>,
     pub army_sort_mode: Option<String>,
+    pub tournament_completed_view_mode: Option<String>,
 }
 
 pub struct UserStore {
@@ -218,19 +220,24 @@ impl UserStore {
             .or(current.secondary_view_mode);
         let scenario_slug = update.scenario_slug.or(current.scenario_slug);
         let army_sort_mode = update.army_sort_mode.or(current.army_sort_mode);
+        let tournament_completed_view_mode = update
+            .tournament_completed_view_mode
+            .or(current.tournament_completed_view_mode);
 
         conn.execute(
             "
             UPDATE users
             SET secondary_view_mode = ?1,
                 scenario_slug = ?2,
-                army_sort_mode = ?3
-            WHERE id = ?4
+                army_sort_mode = ?3,
+                tournament_completed_view_mode = ?4
+            WHERE id = ?5
             ",
             params![
                 secondary_view_mode,
                 scenario_slug,
                 army_sort_mode,
+                tournament_completed_view_mode,
                 user_id
             ],
         )?;
@@ -260,7 +267,7 @@ impl UserStore {
             "
             SELECT id, discord_id, username, display_name, avatar_url,
                    local_display_name, local_avatar_url, secondary_view_mode,
-                   scenario_slug, army_sort_mode, is_admin,
+                   scenario_slug, army_sort_mode, tournament_completed_view_mode, is_admin,
                    created_at, last_login_at
             FROM users
             ORDER BY lower(COALESCE(NULLIF(TRIM(local_display_name), ''), display_name)) ASC
@@ -275,7 +282,7 @@ impl UserStore {
             "
             SELECT id, discord_id, username, display_name, avatar_url,
                    local_display_name, local_avatar_url, secondary_view_mode,
-                   scenario_slug, army_sort_mode, is_admin,
+                   scenario_slug, army_sort_mode, tournament_completed_view_mode, is_admin,
                    created_at, last_login_at
             FROM users
             WHERE id = ?1
@@ -297,7 +304,7 @@ impl UserStore {
             "
             SELECT id, discord_id, username, display_name, avatar_url,
                    local_display_name, local_avatar_url, secondary_view_mode,
-                   scenario_slug, army_sort_mode, is_admin,
+                   scenario_slug, army_sort_mode, tournament_completed_view_mode, is_admin,
                    created_at, last_login_at
             FROM users
             WHERE discord_id = ?1
@@ -319,7 +326,7 @@ impl UserStore {
             "
             SELECT id, discord_id, username, display_name, avatar_url,
                    local_display_name, local_avatar_url, secondary_view_mode,
-                   scenario_slug, army_sort_mode, is_admin,
+                   scenario_slug, army_sort_mode, tournament_completed_view_mode, is_admin,
                    created_at, last_login_at
             FROM users
             WHERE lower(username) = lower(?1)
@@ -356,9 +363,10 @@ fn row_to_user(row: &rusqlite::Row<'_>) -> rusqlite::Result<User> {
         secondary_view_mode: row.get(7)?,
         scenario_slug: row.get(8)?,
         army_sort_mode: row.get(9)?,
-        is_admin: row.get::<_, i64>(10)? != 0,
-        created_at: row.get(11)?,
-        last_login_at: row.get(12)?,
+        tournament_completed_view_mode: row.get(10)?,
+        is_admin: row.get::<_, i64>(11)? != 0,
+        created_at: row.get(12)?,
+        last_login_at: row.get(13)?,
     })
 }
 

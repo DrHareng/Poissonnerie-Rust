@@ -31,7 +31,8 @@ pub use scenario::{strip_scenario_prefix, Scenario, ScenarioStore};
 pub use store::{
     fix_tournament_player_army, fix_tournament_player_army_opts, merge_players, normalize_name,
     recompute_elo_from_matches,
-    ArmyMatchStats, FixTournamentArmyReport, Leaderboard, MergePlayersReport, PlayerArmyUsage,
+    ArmyMatchStats, ArmyPlayerStats, FixTournamentArmyReport, Leaderboard, MergePlayersReport,
+    PlayerArmyStats, PlayerArmyUsage,
 };
 pub use tournament::{
     BracketFormat, PlayerTournamentResult, Pool, Tournament, TournamentDetail,

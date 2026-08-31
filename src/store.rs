@@ -37,6 +37,23 @@ pub struct ArmyMatchStats {
     pub losses: u32,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct PlayerArmyStats {
+    pub army_id: u32,
+    pub wins: u32,
+    pub draws: u32,
+    pub losses: u32,
+    pub elo_delta: f64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ArmyPlayerStats {
+    pub player_name: String,
+    pub wins: u32,
+    pub draws: u32,
+    pub losses: u32,
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct InProgressMatchUpdate {
     pub scenario_id: Option<i64>,
@@ -63,13 +80,37 @@ impl ArmyMatchStats {
     }
 
     pub fn win_rate(&self) -> f64 {
-        let total = self.total();
-        if total == 0 {
-            0.0
-        } else {
-            let effective_wins = self.wins as f64 + 0.5 * self.draws as f64;
-            (effective_wins / total as f64) * 100.0
-        }
+        win_rate(self.wins, self.draws, self.losses)
+    }
+}
+
+impl PlayerArmyStats {
+    pub fn total(&self) -> u32 {
+        self.wins + self.draws + self.losses
+    }
+
+    pub fn win_rate(&self) -> f64 {
+        win_rate(self.wins, self.draws, self.losses)
+    }
+}
+
+impl ArmyPlayerStats {
+    pub fn total(&self) -> u32 {
+        self.wins + self.draws + self.losses
+    }
+
+    pub fn win_rate(&self) -> f64 {
+        win_rate(self.wins, self.draws, self.losses)
+    }
+}
+
+fn win_rate(wins: u32, draws: u32, losses: u32) -> f64 {
+    let total = wins + draws + losses;
+    if total == 0 {
+        0.0
+    } else {
+        let effective_wins = wins as f64 + 0.5 * draws as f64;
+        (effective_wins / total as f64) * 100.0
     }
 }
 
@@ -1189,6 +1230,135 @@ impl Leaderboard {
         Ok(top)
     }
 
+    pub fn player_army_stats(&self, name: &str) -> Result<Vec<PlayerArmyStats>> {
+        let key = normalize_name(name);
+        if !self.players.contains_key(&key) {
+            bail!("joueur introuvable : {}", name);
+        }
+
+        let mut stats: HashMap<u32, PlayerArmyStats> = HashMap::new();
+
+        for record in &self.matches {
+            if record.status != MatchStatus::Completed || !record.counts_for_elo {
+                continue;
+            }
+            let Some(outcome) = record.outcome else {
+                continue;
+            };
+
+            let (army_id, won, elo_delta) = if normalize_name(&record.player1) == key {
+                (
+                    record.player1_army_id,
+                    match outcome {
+                        MatchOutcome::Player1Win => Some(true),
+                        MatchOutcome::Player2Win => Some(false),
+                        MatchOutcome::Draw => None,
+                    },
+                    record.player1_new - record.player1_old,
+                )
+            } else if normalize_name(&record.player2) == key {
+                (
+                    record.player2_army_id,
+                    match outcome {
+                        MatchOutcome::Player2Win => Some(true),
+                        MatchOutcome::Player1Win => Some(false),
+                        MatchOutcome::Draw => None,
+                    },
+                    record.player2_new - record.player2_old,
+                )
+            } else {
+                continue;
+            };
+
+            let Some(army_id) = army_id else {
+                continue;
+            };
+
+            let entry = stats.entry(army_id).or_insert(PlayerArmyStats {
+                army_id,
+                wins: 0,
+                draws: 0,
+                losses: 0,
+                elo_delta: 0.0,
+            });
+            match won {
+                Some(true) => entry.wins += 1,
+                Some(false) => entry.losses += 1,
+                None => entry.draws += 1,
+            }
+            entry.elo_delta += elo_delta;
+        }
+
+        let mut ranking: Vec<PlayerArmyStats> = stats.into_values().collect();
+        ranking.sort_by(|left, right| {
+            right
+                .total()
+                .cmp(&left.total())
+                .then_with(|| {
+                    right
+                        .win_rate()
+                        .partial_cmp(&left.win_rate())
+                        .unwrap_or(std::cmp::Ordering::Equal)
+                })
+                .then_with(|| left.army_id.cmp(&right.army_id))
+        });
+        Ok(ranking)
+    }
+
+    pub fn army_player_stats(&self, army_id: u32) -> Vec<ArmyPlayerStats> {
+        let mut stats: HashMap<String, ArmyPlayerStats> = HashMap::new();
+
+        for record in &self.matches {
+            if record.status != MatchStatus::Completed || !record.counts_for_elo {
+                continue;
+            }
+            let Some(outcome) = record.outcome else {
+                continue;
+            };
+
+            if record.player1_army_id == Some(army_id) {
+                let key = normalize_name(&record.player1);
+                let entry = stats.entry(key).or_insert_with(|| ArmyPlayerStats {
+                    player_name: record.player1.clone(),
+                    wins: 0,
+                    draws: 0,
+                    losses: 0,
+                });
+                match outcome {
+                    MatchOutcome::Player1Win => entry.wins += 1,
+                    MatchOutcome::Player2Win => entry.losses += 1,
+                    MatchOutcome::Draw => entry.draws += 1,
+                }
+            }
+
+            if record.player2_army_id == Some(army_id) {
+                let key = normalize_name(&record.player2);
+                let entry = stats.entry(key).or_insert_with(|| ArmyPlayerStats {
+                    player_name: record.player2.clone(),
+                    wins: 0,
+                    draws: 0,
+                    losses: 0,
+                });
+                match outcome {
+                    MatchOutcome::Player2Win => entry.wins += 1,
+                    MatchOutcome::Player1Win => entry.losses += 1,
+                    MatchOutcome::Draw => entry.draws += 1,
+                }
+            }
+        }
+
+        let mut ranking: Vec<ArmyPlayerStats> = stats.into_values().collect();
+        ranking.sort_by(|left, right| {
+            right
+                .win_rate()
+                .partial_cmp(&left.win_rate())
+                .unwrap_or(std::cmp::Ordering::Equal)
+                .then_with(|| right.total().cmp(&left.total()))
+                .then_with(|| left.player_name.to_lowercase().cmp(&right.player_name.to_lowercase()))
+        });
+        ranking
+    }
+
     pub fn army_ranking(&self) -> Vec<ArmyMatchStats> {
         let mut stats: HashMap<u32, ArmyMatchStats> = HashMap::new();
 
@@ -1575,19 +1745,19 @@ pub fn fix_tournament_player_army_opts(
             &format!(
                 "
             UPDATE tournament_matches SET player1_army_id = ?1
-            WHERE tournament_id = ?2 AND player1 = ?3{phase_filter}
+            WHERE tournament_id = ?2 AND lower(player1) = ?3{phase_filter}
             "
             ),
-            params![army_id, tournament_id, name],
+            params![army_id, tournament_id, key],
         )? as u32;
         let p2 = conn.execute(
             &format!(
                 "
             UPDATE tournament_matches SET player2_army_id = ?1
-            WHERE tournament_id = ?2 AND player2 = ?3{phase_filter}
+            WHERE tournament_id = ?2 AND lower(player2) = ?3{phase_filter}
             "
             ),
-            params![army_id, tournament_id, name],
+            params![army_id, tournament_id, key],
         )? as u32;
         p1 + p2
     };
@@ -1602,19 +1772,19 @@ pub fn fix_tournament_player_army_opts(
             &format!(
                 "
             UPDATE matches SET player1_army_id = ?1
-            WHERE tournament_id = ?2 AND player1 = ?3{phase_filter}
+            WHERE tournament_id = ?2 AND lower(player1) = ?3{phase_filter}
             "
             ),
-            params![army_id, tournament_id, name],
+            params![army_id, tournament_id, key],
         )? as u32;
         let p2 = conn.execute(
             &format!(
                 "
             UPDATE matches SET player2_army_id = ?1
-            WHERE tournament_id = ?2 AND player2 = ?3{phase_filter}
+            WHERE tournament_id = ?2 AND lower(player2) = ?3{phase_filter}
             "
             ),
-            params![army_id, tournament_id, name],
+            params![army_id, tournament_id, key],
         )? as u32;
         p1 + p2
     };
@@ -2169,6 +2339,155 @@ mod tests {
         assert_eq!(top[0].matches, 2);
         assert_eq!(top[1].army_id, 102);
         assert_eq!(top[1].matches, 1);
+    }
+
+    #[test]
+    fn player_army_stats_aggregates_outcomes_and_elo_from_player_perspective() {
+        use crate::player::MatchOutcome;
+
+        let mut board = Leaderboard::default();
+        board.add_player("Alice").unwrap();
+        board.add_player("Bob").unwrap();
+
+        let first = board
+            .record_match(
+                "Alice",
+                "Bob",
+                MatchOutcome::Player1Win,
+                32.0,
+                MatchScores::default(),
+                Some(101),
+                Some(201),
+                None,
+                None,
+                None,
+            )
+            .unwrap();
+        let second = board
+            .record_match(
+                "Alice",
+                "Bob",
+                MatchOutcome::Player2Win,
+                32.0,
+                MatchScores::default(),
+                Some(101),
+                Some(201),
+                None,
+                None,
+                None,
+            )
+            .unwrap();
+        let third = board
+            .record_match(
+                "Bob",
+                "Alice",
+                MatchOutcome::Player2Win,
+                32.0,
+                MatchScores::default(),
+                Some(201),
+                Some(102),
+                None,
+                None,
+                None,
+            )
+            .unwrap();
+        let _friendly = board
+            .record_match(
+                "Alice",
+                "Bob",
+                MatchOutcome::Player1Win,
+                32.0,
+                MatchScores::default(),
+                Some(101),
+                Some(201),
+                None,
+                None,
+                None,
+            )
+            .unwrap();
+        board.matches[0].counts_for_elo = false;
+
+        let stats = board.player_army_stats("Alice").unwrap();
+        assert_eq!(stats.len(), 2);
+        assert_eq!(stats[0].army_id, 101);
+        assert_eq!(stats[0].wins, 1);
+        assert_eq!(stats[0].draws, 0);
+        assert_eq!(stats[0].losses, 1);
+        assert_eq!(stats[0].total(), 2);
+        let expected_101 = (first.player1_new - first.player1_old)
+            + (second.player1_new - second.player1_old);
+        assert!((stats[0].elo_delta - expected_101).abs() < 1e-9);
+
+        assert_eq!(stats[1].army_id, 102);
+        assert_eq!(stats[1].wins, 1);
+        assert_eq!(stats[1].draws, 0);
+        assert_eq!(stats[1].losses, 0);
+        assert_eq!(stats[1].total(), 1);
+        let expected_102 = third.player2_new - third.player2_old;
+        assert!((stats[1].elo_delta - expected_102).abs() < 1e-9);
+    }
+
+    #[test]
+    fn army_player_stats_aggregates_per_player_including_mirrors() {
+        use crate::player::MatchOutcome;
+
+        let mut board = Leaderboard::default();
+        board.add_player("Alice").unwrap();
+        board.add_player("Bob").unwrap();
+
+        board
+            .record_match(
+                "Alice",
+                "Bob",
+                MatchOutcome::Player1Win,
+                32.0,
+                MatchScores::default(),
+                Some(101),
+                Some(201),
+                None,
+                None,
+                None,
+            )
+            .unwrap();
+        board
+            .record_match(
+                "Alice",
+                "Bob",
+                MatchOutcome::Player2Win,
+                32.0,
+                MatchScores::default(),
+                Some(101),
+                Some(201),
+                None,
+                None,
+                None,
+            )
+            .unwrap();
+        board
+            .record_match(
+                "Alice",
+                "Bob",
+                MatchOutcome::Player1Win,
+                32.0,
+                MatchScores::default(),
+                Some(101),
+                Some(101),
+                None,
+                None,
+                None,
+            )
+            .unwrap();
+
+        let stats = board.army_player_stats(101);
+        assert_eq!(stats.len(), 2);
+        assert_eq!(stats[0].player_name, "Alice");
+        assert_eq!(stats[0].wins, 2);
+        assert_eq!(stats[0].losses, 1);
+        assert_eq!(stats[0].total(), 3);
+        assert_eq!(stats[1].player_name, "Bob");
+        assert_eq!(stats[1].wins, 0);
+        assert_eq!(stats[1].losses, 1);
+        assert_eq!(stats[1].total(), 1);
     }
 
     #[test]

@@ -3,34 +3,20 @@ import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useTitle } from '@vueuse/core'
 import { toast } from 'vue-sonner'
-import { fetchArmyMatches, fetchArmyStats } from '@/lib/api'
+import { fetchArmyMatches, fetchArmyPlayers, fetchArmyStats } from '@/lib/api'
 import { pageTitle } from '@/lib/pageTitle'
-import { formatMatchRecordedDate } from '@/lib/tournamentMatchDisplay'
-import { matchCountsForElo } from '@/lib/matchElo'
 import { classementTabs } from '@/lib/pageTitleTabs'
-import type { MatchOutcome, MatchRecord, RankedArmy } from '@/types/elo'
-import MatchResultBadges from '@/components/MatchResultBadges.vue'
-import MatchContextCell from '@/components/MatchContextCell.vue'
+import type { ArmyPlayerStats, MatchRecord, RankedArmy } from '@/types/elo'
 import PageTitleTabs from '@/components/PageTitleTabs.vue'
 import WinDrawLossBar from '@/components/WinDrawLossBar.vue'
 import ArmyLogo from '@/components/ArmyLogo.vue'
 import PlayerLink from '@/components/PlayerLink.vue'
+import RecentMatchesList from '@/components/RecentMatchesList.vue'
 import { useArmies } from '@/composables/useArmies'
 import {
   Card,
   CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
 } from '@/components/ui/card'
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '@/components/ui/table'
 
 const route = useRoute()
 const router = useRouter()
@@ -38,55 +24,23 @@ const { ensureLoaded, getArmy } = useArmies()
 
 const army = ref<RankedArmy | null>(null)
 const matches = ref<MatchRecord[]>([])
+const players = ref<ArmyPlayerStats[]>([])
 const loading = ref(true)
 const loadingMatches = ref(true)
+const matchesPage = ref(1)
+
+const MATCHES_PAGE_SIZE = 5
 
 const armyId = computed(() => Number(route.params.id))
-
-function flipOutcome(outcome: MatchOutcome | null | undefined): MatchOutcome {
-  if (!outcome || outcome === 'draw') return 'draw'
-  if (outcome === 'player1_win') return 'player2_win'
-  return 'player1_win'
-}
-
-function normalizeMatchForArmy(match: MatchRecord, sectorialId: number): MatchRecord {
-  if (match.player1_army_id === sectorialId) {
-    return match
-  }
-
-  return {
-    ...match,
-    player1: match.player2,
-    player2: match.player1,
-    player1_display_name: match.player2_display_name,
-    player2_display_name: match.player1_display_name,
-    player1_old: match.player2_old,
-    player1_new: match.player2_new,
-    player2_old: match.player1_old,
-    player2_new: match.player1_new,
-    player1_objectives: match.player2_objectives,
-    player1_survivors: match.player2_survivors,
-    player2_objectives: match.player1_objectives,
-    player2_survivors: match.player1_survivors,
-    player1_army_id: match.player2_army_id,
-    player2_army_id: match.player1_army_id,
-    outcome: flipOutcome(match.outcome),
-  }
-}
-
-const matchRows = computed(() => {
-  if (!army.value) return []
-
-  return matches.value.map((match) => ({
-    id: match.id,
-    date: formatMatchRecordedDate(match.recorded_at) ?? '—',
-    normalized: normalizeMatchForArmy(match, army.value!.army_id),
-  }))
-})
 
 const armyName = computed(
   () => getArmy(armyId.value)?.name ?? `Sectorielle #${armyId.value}`,
 )
+
+const armyMatchesCount = computed(() => {
+  if (!army.value) return 0
+  return army.value.wins + army.value.draws + army.value.losses
+})
 
 const title = useTitle()
 
@@ -105,19 +59,43 @@ function formatWinRate(winRate: number) {
   })} %`
 }
 
+function plural(count: number, singular: string, pluralLabel: string) {
+  return count > 1 ? pluralLabel : singular
+}
+
+function playerRecordLabel(entry: ArmyPlayerStats) {
+  const total = entry.wins + entry.draws + entry.losses
+  const parties = `${total} ${plural(total, 'partie', 'parties')}`
+  const victoires = `${entry.wins} ${plural(entry.wins, 'victoire', 'victoires')}`
+  const nuls = `${entry.draws} ${plural(entry.draws, 'nul', 'nuls')}`
+  const defaites = `${entry.losses} ${plural(entry.losses, 'défaite', 'défaites')}`
+  return `Winrate : ${formatWinRate(entry.win_rate)}, ${parties}, ${victoires}, ${nuls}, ${defaites}`
+}
+
+function goToMatchesPage(nextPage: number) {
+  matchesPage.value = nextPage
+}
+
 async function loadArmy() {
   const id = armyId.value
   if (!Number.isFinite(id) || id <= 0) {
     army.value = null
+    players.value = []
     return
   }
 
   loading.value = true
   try {
     await ensureLoaded()
-    army.value = await fetchArmyStats(id)
+    const [stats, armyPlayers] = await Promise.all([
+      fetchArmyStats(id),
+      fetchArmyPlayers(id),
+    ])
+    army.value = stats
+    players.value = armyPlayers
   } catch (error) {
     army.value = null
+    players.value = []
     toast.error(error instanceof Error ? error.message : 'Sectorielle introuvable')
     router.push('/sectorielles')
   } finally {
@@ -129,14 +107,17 @@ async function loadMatches() {
   const id = armyId.value
   if (!Number.isFinite(id) || id <= 0) {
     matches.value = []
+    matchesPage.value = 1
     return
   }
 
   loadingMatches.value = true
   try {
     matches.value = await fetchArmyMatches(id)
+    matchesPage.value = 1
   } catch {
     matches.value = []
+    matchesPage.value = 1
   } finally {
     loadingMatches.value = false
   }
@@ -166,98 +147,129 @@ onMounted(refresh)
         :current="{ label: armyName }"
       />
 
-      <section class="page-header">
-        <div class="flex items-center gap-3">
-          <ArmyLogo :army-id="army.army_id" class="!size-10" />
-          <p class="page-description">
-            Rang #{{ army.rank }} — {{ formatWinRate(army.win_rate) }} win rate
-          </p>
+      <div class="grid shrink-0 gap-3 lg:grid-cols-2">
+        <Card size="sm" class="neon-panel">
+          <CardContent class="flex h-full flex-col justify-center gap-3 py-2">
+            <div class="flex items-center gap-3">
+              <ArmyLogo :army-id="army.army_id" class="!size-12" />
+              <div class="min-w-0">
+                <h1
+                  class="truncate text-lg font-semibold leading-tight"
+                  :title="armyName"
+                >
+                  {{ armyName }}
+                </h1>
+                <p class="truncate text-xs text-muted-foreground">
+                  Rang #{{ army.rank }}
+                </p>
+              </div>
+            </div>
+
+            <dl class="grid grid-cols-5 gap-2">
+              <div class="rounded border px-2 py-1.5">
+                <dt class="text-[11px] text-muted-foreground">Win rate</dt>
+                <dd class="elo-score font-display text-base font-semibold">
+                  {{ formatWinRate(army.win_rate) }}
+                </dd>
+              </div>
+              <div class="rounded border px-2 py-1.5">
+                <dt class="text-[11px] text-muted-foreground">Parties</dt>
+                <dd class="font-display text-base font-semibold text-primary">
+                  {{ armyMatchesCount }}
+                </dd>
+              </div>
+              <div class="rounded border px-2 py-1.5">
+                <dt class="text-[11px] text-muted-foreground">Victoires</dt>
+                <dd class="font-display text-base font-semibold">
+                  {{ army.wins }}
+                </dd>
+              </div>
+              <div class="rounded border px-2 py-1.5">
+                <dt class="text-[11px] text-muted-foreground">Nuls</dt>
+                <dd class="font-display text-base font-semibold">
+                  {{ army.draws }}
+                </dd>
+              </div>
+              <div class="rounded border px-2 py-1.5">
+                <dt class="text-[11px] text-muted-foreground">Défaites</dt>
+                <dd class="font-display text-base font-semibold">
+                  {{ army.losses }}
+                </dd>
+              </div>
+            </dl>
+
+            <WinDrawLossBar
+              bar-only
+              :wins="army.wins"
+              :draws="army.draws"
+              :losses="army.losses"
+            />
+          </CardContent>
+        </Card>
+
+        <div class="lg:relative lg:min-h-0">
+          <Card
+            size="sm"
+            class="neon-panel flex min-h-0 flex-col lg:absolute lg:inset-0"
+          >
+            <CardContent class="flex min-h-0 flex-1 flex-col gap-1.5 overflow-hidden py-2">
+              <p class="shrink-0 text-sm font-semibold leading-none">
+                Joueurs
+              </p>
+              <ul
+                v-if="players.length > 0"
+                class="min-h-0 flex-1 space-y-1 overflow-y-auto"
+              >
+                <li
+                  v-for="entry in players"
+                  :key="entry.player_name"
+                  class="flex min-w-0 items-center gap-2 overflow-hidden rounded border px-2 py-1.5 text-xs"
+                >
+                  <span class="min-w-0 shrink-0 truncate font-medium">
+                    <PlayerLink
+                      :name="entry.player_name"
+                      :display-name="entry.display_name"
+                    />
+                  </span>
+                  <span
+                    class="min-w-0 flex-1 truncate tabular-nums text-muted-foreground"
+                    :title="playerRecordLabel(entry)"
+                  >
+                    {{ playerRecordLabel(entry) }}
+                  </span>
+                  <div class="w-24 shrink-0 sm:w-32">
+                    <WinDrawLossBar
+                      bar-only
+                      :wins="entry.wins"
+                      :draws="entry.draws"
+                      :losses="entry.losses"
+                    />
+                  </div>
+                </li>
+              </ul>
+              <p
+                v-else
+                class="rounded border border-dashed px-3 py-4 text-center text-xs text-muted-foreground"
+              >
+                Aucun joueur n'a encore joué cette sectorielle.
+              </p>
+            </CardContent>
+          </Card>
         </div>
-      </section>
+      </div>
 
-      <WinDrawLossBar
-        :wins="army.wins"
-        :draws="army.draws"
-        :losses="army.losses"
+      <RecentMatchesList
+        :matches="matches"
+        :loading="loadingMatches"
+        :page="matchesPage"
+        :page-size="MATCHES_PAGE_SIZE"
+        :perspective-army-id="army.army_id"
+        title="Historique des parties"
+        description="Toutes les parties enregistrées avec cette sectorielle."
+        empty-message="Aucune partie enregistrée pour cette sectorielle."
+        client-side
+        @page-change="goToMatchesPage"
       />
-
-      <Card class="neon-panel page-panel-scroll">
-        <CardHeader class="lg:shrink-0">
-          <CardTitle>Historique des parties</CardTitle>
-          <CardDescription>
-            Toutes les parties enregistrées avec cette sectorielle.
-          </CardDescription>
-        </CardHeader>
-        <CardContent class="lg:min-h-0 lg:flex-1 lg:overflow-y-auto">
-          <div
-            v-if="loadingMatches"
-            class="rounded-lg border border-dashed p-8 text-center text-muted-foreground"
-          >
-            Chargement des parties...
-          </div>
-
-          <div
-            v-else-if="matches.length === 0"
-            class="rounded-lg border border-dashed p-8 text-center text-muted-foreground"
-          >
-            Aucune partie enregistrée pour cette sectorielle.
-          </div>
-
-          <Table v-else>
-            <TableHeader class="sticky top-0 z-10 bg-card/95 backdrop-blur">
-              <TableRow>
-                <TableHead>Date</TableHead>
-                <TableHead class="text-right">Joueur</TableHead>
-                <TableHead class="w-10" aria-hidden="true" />
-                <TableHead>Contexte</TableHead>
-                <TableHead class="text-center">Résultat</TableHead>
-                <TableHead class="w-10" aria-hidden="true" />
-                <TableHead>Adversaire</TableHead>
-                <TableHead class="text-right">ELO</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              <TableRow v-for="row in matchRows" :key="row.id">
-                <TableCell class="whitespace-nowrap text-muted-foreground">
-                  {{ row.date }}
-                </TableCell>
-                <TableCell class="text-right">
-                  <PlayerLink
-                    :name="row.normalized.player1"
-                    :display-name="row.normalized.player1_display_name"
-                  />
-                </TableCell>
-                <TableCell class="w-10 px-2">
-                  <ArmyLogo :army-id="row.normalized.player1_army_id" />
-                </TableCell>
-                <TableCell>
-                  <MatchContextCell :match="row.normalized" />
-                </TableCell>
-                <TableCell>
-                  <MatchResultBadges :match="row.normalized" />
-                </TableCell>
-                <TableCell class="w-10 px-2">
-                  <ArmyLogo :army-id="row.normalized.player2_army_id" />
-                </TableCell>
-                <TableCell>
-                  <PlayerLink
-                    :name="row.normalized.player2"
-                    :display-name="row.normalized.player2_display_name"
-                  />
-                </TableCell>
-                <TableCell class="text-right tabular-nums">
-                  <template v-if="matchCountsForElo(row.normalized.counts_for_elo)">
-                    {{ Math.round(row.normalized.player1_old) }}
-                    →
-                    <span class="elo-score">{{ Math.round(row.normalized.player1_new) }}</span>
-                  </template>
-                  <span v-else class="text-muted-foreground">—</span>
-                </TableCell>
-              </TableRow>
-            </TableBody>
-          </Table>
-        </CardContent>
-      </Card>
     </template>
   </div>
 </template>

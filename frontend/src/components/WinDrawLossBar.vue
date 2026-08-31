@@ -6,6 +6,8 @@ const props = defineProps<{
   draws: number
   losses: number
   compact?: boolean
+  /** Barre seule (tooltip au survol), pour une ligne compacte. */
+  barOnly?: boolean
 }>()
 
 const total = computed(() => props.wins + props.draws + props.losses)
@@ -42,8 +44,8 @@ const segments = computed(() => {
 </script>
 
 <template>
-  <div class="wnd-bar" :class="{ 'wnd-bar--compact': compact }">
-    <p v-if="!compact" class="wnd-bar-summary">
+  <div class="wnd-bar" :class="{ 'wnd-bar--compact': compact || barOnly }">
+    <p v-if="!compact && !barOnly" class="wnd-bar-summary">
       {{ detailLabel }}
     </p>
     <div class="wnd-bar-track" :title="detailLabel">
@@ -58,7 +60,7 @@ const segments = computed(() => {
       </template>
       <div v-else class="wnd-bar-empty" />
     </div>
-    <p v-if="compact" class="wnd-bar-ratio">
+    <p v-if="compact && !barOnly" class="wnd-bar-ratio">
       {{ detailLabel }}
     </p>
   </div>

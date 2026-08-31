@@ -45,6 +45,17 @@ export function normalizeMatchForPlayer(
   }
 }
 
+/** Place le joueur de la sectorielle en J1. En miroir, conserve le J1 d’origine. */
+export function normalizeMatchForArmy(
+  match: MatchRecord,
+  armyId: number,
+): MatchRecord {
+  if (match.player1_army_id === armyId || match.player2_army_id !== armyId) {
+    return match
+  }
+  return normalizeMatchForPlayer(match, match.player2)
+}
+
 export function playerMatchEloDelta(match: MatchRecord): number | null {
   if (match.player1_old == null || match.player1_new == null) return null
   return match.player1_new - match.player1_old

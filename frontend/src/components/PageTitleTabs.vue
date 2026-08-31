@@ -7,10 +7,14 @@ const props = defineProps<{
   tabs: PageTitleTab[]
   ariaLabel: string
   /** Onglet détail courant, affiché après les onglets parents avec le préfixe « > ». */
-  current?: { label: string; to?: RouteLocationRaw } | null
+  current?: { label: string; title?: string; to?: RouteLocationRaw } | null
 }>()
 
-type DisplayTab = PageTitleTab & { isCurrent?: boolean }
+type DisplayTab = PageTitleTab & {
+  isCurrent?: boolean
+  title?: string
+  detailLabel?: string
+}
 
 const route = useRoute()
 
@@ -24,6 +28,8 @@ const displayTabs = computed((): DisplayTab[] => {
     {
       to: props.current?.to ?? route.fullPath,
       label: prefixed,
+      detailLabel: label,
+      title: props.current?.title,
       activeNames: [],
       isCurrent: true,
     },
@@ -60,10 +66,17 @@ function isActive(tab: DisplayTab) {
       :key="tab.label"
       :to="tab.to"
       class="page-title-tab"
-      :class="{ 'page-title-tab--active': isActive(tab) }"
+      :class="{
+        'page-title-tab--active': isActive(tab),
+        'page-title-tab--detail': tab.isCurrent,
+      }"
       :aria-current="isActive(tab) ? 'page' : undefined"
+      :title="tab.title ?? tab.detailLabel"
     >
-      {{ tab.label }}
+      <template v-if="tab.isCurrent && tab.detailLabel">
+        <span class="page-title-tab-detail">&gt; {{ tab.detailLabel }}</span>
+      </template>
+      <template v-else>{{ tab.label }}</template>
     </RouterLink>
   </nav>
 </template>

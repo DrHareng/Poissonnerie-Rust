@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { FileText, History, Medal, Trophy } from '@lucide/vue'
+import { FileText, History, Podium, Trophy } from '@lucide/vue'
 import { toast } from 'vue-sonner'
 import {
   fetchRanking,
@@ -179,7 +179,7 @@ onMounted(async () => {
         <CardHeader class="pb-3">
           <div class="flex items-center justify-between gap-3">
             <CardTitle class="flex items-center gap-2">
-              <Trophy class="size-5 text-primary" />
+              <Podium class="size-5 text-primary" />
               Top 10
             </CardTitle>
             <RouterLink
@@ -306,7 +306,7 @@ onMounted(async () => {
           <CardHeader class="pb-3">
             <div class="flex items-center justify-between gap-3">
               <CardTitle class="flex items-center gap-2">
-                <Medal class="size-5 text-primary" />
+                <Trophy class="size-5 text-primary" />
                 Dernier tournoi
               </CardTitle>
               <RouterLink

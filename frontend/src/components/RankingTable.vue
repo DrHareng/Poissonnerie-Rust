@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted } from 'vue'
-import { Trophy } from '@lucide/vue'
+import { Podium } from '@lucide/vue'
 import type { PlayerArmyUsage, RankedPlayer } from '@/types/elo'
 import ArmyLogo from '@/components/ArmyLogo.vue'
 import WinDrawLossBar from '@/components/WinDrawLossBar.vue'
@@ -9,7 +9,6 @@ import { Badge } from '@/components/ui/badge'
 import {
   Card,
   CardContent,
-  CardDescription,
   CardHeader,
   CardTitle,
 } from '@/components/ui/card'
@@ -75,13 +74,18 @@ function armyTooltip(usage: PlayerArmyUsage) {
 <template>
   <Card class="neon-panel page-panel-scroll">
     <CardHeader class="lg:shrink-0">
-      <CardTitle class="flex items-center gap-2">
-        <Trophy class="size-5 text-primary" />
-        Classement ELO
+      <CardTitle class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div class="flex items-center gap-2">
+          <Podium class="size-5 text-primary" />
+          Classement ELO
+        </div>
+        <div
+          v-if="$slots['header-actions']"
+          class="flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:items-center"
+        >
+          <slot name="header-actions" />
+        </div>
       </CardTitle>
-      <CardDescription>
-        Cliquez sur un joueur pour voir le détail de ses parties.
-      </CardDescription>
     </CardHeader>
     <CardContent class="lg:min-h-0 lg:flex-1 lg:overflow-y-auto">
       <div

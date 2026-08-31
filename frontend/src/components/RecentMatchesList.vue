@@ -10,6 +10,7 @@ import ArmyListQuickActions from '@/components/ArmyListQuickActions.vue'
 import PlayerLink from '@/components/PlayerLink.vue'
 import { matchCountsForElo } from '@/lib/matchElo'
 import {
+  normalizeMatchForArmy,
   normalizeMatchForPlayer,
   playerMatchEloDelta,
 } from '@/lib/matchPlayerPerspective'
@@ -41,6 +42,8 @@ const props = withDefaults(
     totalPages?: number
     /** Normalise les matchs pour afficher ce joueur en J1. */
     perspectivePlayer?: string
+    /** Normalise les matchs pour afficher le joueur de cette sectorielle en J1. */
+    perspectiveArmyId?: number | null
     /** Colonne évolution ELO (J1). */
     showElo?: boolean
     title?: string
@@ -70,6 +73,10 @@ const preparedMatches = computed(() => {
     list = list
       .filter((match) => match.status !== 'in_progress')
       .map((match) => normalizeMatchForPlayer(match, props.perspectivePlayer!))
+  } else if (props.perspectiveArmyId != null) {
+    list = list.map((match) =>
+      normalizeMatchForArmy(match, props.perspectiveArmyId!),
+    )
   }
   return list
 })
@@ -141,8 +148,11 @@ function formatEloCell(match: MatchRecord) {
 
 <template>
   <Card
-    class="neon-panel page-panel-scroll"
-    :class="{ 'border-0 bg-transparent shadow-none': bare }"
+    class="neon-panel"
+    :class="{
+      'page-panel-scroll': !bare,
+      'border-0 bg-transparent shadow-none': bare,
+    }"
   >
     <CardHeader v-if="!bare" class="lg:shrink-0">
       <CardTitle class="flex items-center gap-2">
@@ -154,8 +164,7 @@ function formatEloCell(match: MatchRecord) {
       </CardDescription>
     </CardHeader>
     <CardContent
-      class="lg:min-h-0 lg:flex-1 lg:overflow-y-auto"
-      :class="{ 'px-0': bare }"
+      :class="bare ? 'px-0' : 'lg:min-h-0 lg:flex-1 lg:overflow-y-auto'"
     >
       <div
         v-if="loading"
@@ -211,7 +220,7 @@ function formatEloCell(match: MatchRecord) {
               <TableCell>
                 <MatchResultBadges
                   :match="match"
-                  :emphasize-defeat="!!perspectivePlayer"
+                  :emphasize-defeat="!!perspectivePlayer || perspectiveArmyId != null"
                 />
               </TableCell>
               <TableCell class="px-2">

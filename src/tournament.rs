@@ -891,15 +891,7 @@ pub fn compute_top_four(matches: &[TournamentMatch]) -> Vec<TournamentTopFourEnt
         },
     ];
 
-    let semi_losers: Vec<String> = matches
-        .iter()
-        .filter(|m| {
-            m.phase == TournamentPhase::Semi
-                && m.status == TournamentMatchStatus::Confirmed
-                && !m.is_forfeit
-        })
-        .filter_map(|m| bracket_match_loser(m))
-        .collect();
+    let semi_losers = phase_losers(matches, TournamentPhase::Semi);
 
     for (index, player_name) in semi_losers.into_iter().take(2).enumerate() {
         entries.push(TournamentTopFourEntry {
@@ -1291,5 +1283,116 @@ mod tests {
         assert_eq!(placements.get("Shas'O Kassad"), Some(&2));
         // Perdant du quart = Azazel, déjà classé 1er via la finale → pas d'écrasement en Top 8
         assert_eq!(placements.get("Arkille"), None);
+    }
+
+    #[test]
+    fn compute_top_four_includes_forfeit_semi_losers() {
+        fn semi(
+            id: i64,
+            slot: u32,
+            p1: &str,
+            p2: &str,
+            outcome: MatchOutcome,
+            is_forfeit: bool,
+        ) -> TournamentMatch {
+            TournamentMatch {
+                id,
+                tournament_id: 1,
+                phase: TournamentPhase::Semi,
+                pool_id: None,
+                bracket_slot: Some(slot),
+                player1: Some(p1.into()),
+                player2: Some(p2.into()),
+                player1_display_name: None,
+                player2_display_name: None,
+                player1_objectives: 0,
+                player2_objectives: 0,
+                player1_survivors: 0,
+                player2_survivors: 0,
+                player1_tournament_points: 0,
+                player2_tournament_points: 0,
+                outcome: Some(outcome),
+                is_forfeit,
+                is_unplayed: false,
+                forfeit_player: if is_forfeit {
+                    Some(p2.into())
+                } else {
+                    None
+                },
+                forfeit_player_display_name: None,
+                player1_elo_delta: 0.0,
+                player2_elo_delta: 0.0,
+                player1_rating_used: None,
+                player2_rating_used: None,
+                elo_applied_at: None,
+                status: TournamentMatchStatus::Confirmed,
+                submitted_by_user_id: None,
+                submitted_at: None,
+                confirmed_by_user_id: None,
+                confirmed_at: None,
+                scenario_id: None,
+                scenario_other: None,
+                scenario_name: None,
+                player1_army_id: None,
+                player2_army_id: None,
+                player1_army_list_code: None,
+                player2_army_list_code: None,
+                played_at: None,
+                elo_match_id: None,
+            }
+        }
+
+        let matches = vec![
+            TournamentMatch {
+                id: 100,
+                tournament_id: 1,
+                phase: TournamentPhase::Final,
+                pool_id: None,
+                bracket_slot: Some(0),
+                player1: Some("Dr Hareng".into()),
+                player2: Some("Badgage".into()),
+                player1_display_name: None,
+                player2_display_name: None,
+                player1_objectives: 6,
+                player2_objectives: 2,
+                player1_survivors: 100,
+                player2_survivors: 40,
+                player1_tournament_points: 5,
+                player2_tournament_points: 0,
+                outcome: Some(MatchOutcome::Player1Win),
+                is_forfeit: false,
+                is_unplayed: false,
+                forfeit_player: None,
+                forfeit_player_display_name: None,
+                player1_elo_delta: 0.0,
+                player2_elo_delta: 0.0,
+                player1_rating_used: None,
+                player2_rating_used: None,
+                elo_applied_at: None,
+                status: TournamentMatchStatus::Confirmed,
+                submitted_by_user_id: None,
+                submitted_at: None,
+                confirmed_by_user_id: None,
+                confirmed_at: None,
+                scenario_id: None,
+                scenario_other: None,
+                scenario_name: None,
+                player1_army_id: None,
+                player2_army_id: None,
+                player1_army_list_code: None,
+                player2_army_list_code: None,
+                played_at: None,
+                elo_match_id: None,
+            },
+            semi(1, 0, "Dr Hareng", "Arkille", MatchOutcome::Player1Win, false),
+            semi(2, 1, "Badgage", "Kantain", MatchOutcome::Player1Win, true),
+        ];
+
+        let top_four = compute_top_four(&matches);
+        assert_eq!(top_four.len(), 4);
+        assert_eq!(top_four[0].player_name, "Dr Hareng");
+        assert_eq!(top_four[1].player_name, "Badgage");
+        assert_eq!(top_four[2].player_name, "Arkille");
+        assert_eq!(top_four[3].player_name, "Kantain");
     }
 }

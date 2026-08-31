@@ -192,6 +192,7 @@ struct PrefsResponse {
     #[serde(skip_serializing_if = "Option::is_none")]
     scenario_slug: Option<String>,
     army_sort_mode: String,
+    tournament_completed_view_mode: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -202,6 +203,8 @@ struct UpdatePrefsRequest {
     scenario_slug: Option<String>,
     #[serde(default)]
     army_sort_mode: Option<String>,
+    #[serde(default)]
+    tournament_completed_view_mode: Option<String>,
 }
 
 fn default_match_limit() -> usize {
@@ -259,11 +262,13 @@ pub fn router(state: AppState) -> Result<Router> {
         .route("/api/armies", get(list_armies))
         .route("/api/armies/ranking", get(get_army_ranking))
         .route("/api/armies/{id}/matches", get(get_army_matches))
+        .route("/api/armies/{id}/players", get(get_army_players))
         .route("/api/armies/{id}", get(get_army))
         .route("/api/ranking", get(get_ranking))
         .route("/api/players", post(add_player))
         .route("/api/players/me", post(claim_player))
         .route("/api/players/{name}", get(get_player))
+        .route("/api/players/{name}/armies", get(get_player_armies))
         .route("/api/players/{name}/matches", get(get_player_matches))
         .route("/api/matches", get(list_matches).post(record_match))
         .route("/api/matches/start", post(start_match))
@@ -440,9 +445,23 @@ async fn update_prefs(
         ui_update.army_sort_mode = Some(mode.to_string());
     }
 
+    if let Some(raw) = payload.tournament_completed_view_mode.as_deref() {
+        let mode = auth::parse_tournament_completed_view_mode(raw)
+            .ok_or_else(|| ApiError::bad_request("affichage tournois terminés invalide"))?;
+        session
+            .insert(
+                auth::SESSION_TOURNAMENT_COMPLETED_VIEW_MODE,
+                mode.to_string(),
+            )
+            .await
+            .map_err(|error| ApiError::bad_request(error.to_string()))?;
+        ui_update.tournament_completed_view_mode = Some(mode.to_string());
+    }
+
     if ui_update.secondary_view_mode.is_none()
         && ui_update.scenario_slug.is_none()
         && ui_update.army_sort_mode.is_none()
+        && ui_update.tournament_completed_view_mode.is_none()
     {
         return Err(ApiError::bad_request("aucune préférence à mettre à jour"));
     }
@@ -515,10 +534,28 @@ async fn resolve_prefs(state: &AppState, session: &Session) -> Result<PrefsRespo
             .unwrap_or(auth::DEFAULT_ARMY_SORT_MODE)
     };
 
+    let tournament_completed_view_mode = if let Some(mode) = user
+        .as_ref()
+        .and_then(|u| u.tournament_completed_view_mode.as_deref())
+        .and_then(auth::parse_tournament_completed_view_mode)
+    {
+        mode
+    } else {
+        let from_session: Option<String> = session
+            .get(auth::SESSION_TOURNAMENT_COMPLETED_VIEW_MODE)
+            .await
+            .map_err(|error| ApiError::bad_request(error.to_string()))?;
+        from_session
+            .as_deref()
+            .and_then(auth::parse_tournament_completed_view_mode)
+            .unwrap_or(auth::DEFAULT_TOURNAMENT_COMPLETED_VIEW_MODE)
+    };
+
     Ok(PrefsResponse {
         secondary_view_mode: secondary_view_mode.to_string(),
         scenario_slug,
         army_sort_mode: army_sort_mode.to_string(),
+        tournament_completed_view_mode: tournament_completed_view_mode.to_string(),
     })
 }
 
@@ -549,6 +586,26 @@ async fn list_armies(State(state): State<AppState>) -> Result<Json<Vec<crate::Ar
 struct RankedArmy {
     rank: usize,
     army_id: u32,
+    wins: u32,
+    draws: u32,
+    losses: u32,
+    win_rate: f64,
+}
+
+#[derive(Debug, Serialize)]
+struct PlayerArmyStatsEntry {
+    army_id: u32,
+    wins: u32,
+    draws: u32,
+    losses: u32,
+    win_rate: f64,
+    elo_delta: f64,
+}
+
+#[derive(Debug, Serialize)]
+struct ArmyPlayerStatsEntry {
+    player_name: String,
+    display_name: String,
     wins: u32,
     draws: u32,
     losses: u32,
@@ -610,6 +667,33 @@ async fn get_army(
         losses: stats.losses,
         win_rate: stats.win_rate(),
     }))
+}
+
+async fn get_army_players(
+    State(state): State<AppState>,
+    Path(id): Path<u32>,
+) -> Result<Json<Vec<ArmyPlayerStatsEntry>>, ApiError> {
+    state
+        .armies
+        .get(id)
+        .map_err(|error| ApiError::bad_request(error.to_string()))?
+        .ok_or_else(|| ApiError::bad_request(format!("sectorielle introuvable : {}", id)))?;
+
+    let board = state.board.lock().unwrap();
+    let resolver = crate::display_name::PlayerDisplayResolver::new(&board, state.users.as_ref());
+    let players = board
+        .army_player_stats(id)
+        .into_iter()
+        .map(|entry| ArmyPlayerStatsEntry {
+            display_name: resolver.resolve(&entry.player_name),
+            wins: entry.wins,
+            draws: entry.draws,
+            losses: entry.losses,
+            win_rate: entry.win_rate(),
+            player_name: entry.player_name,
+        })
+        .collect();
+    Ok(Json(players))
 }
 
 async fn get_army_matches(
@@ -855,6 +939,27 @@ async fn get_player_matches(
         .map(|record| resolver.enrich_match(record))
         .collect();
     Ok(Json(matches))
+}
+
+async fn get_player_armies(
+    State(state): State<AppState>,
+    Path(name): Path<String>,
+) -> Result<Json<Vec<PlayerArmyStatsEntry>>, ApiError> {
+    let board = state.board.lock().unwrap();
+    let stats = board
+        .player_army_stats(&name)
+        .map_err(|error| ApiError::bad_request(error.to_string()))?
+        .into_iter()
+        .map(|entry| PlayerArmyStatsEntry {
+            army_id: entry.army_id,
+            wins: entry.wins,
+            draws: entry.draws,
+            losses: entry.losses,
+            win_rate: entry.win_rate(),
+            elo_delta: entry.elo_delta,
+        })
+        .collect();
+    Ok(Json(stats))
 }
 
 async fn claim_player(
