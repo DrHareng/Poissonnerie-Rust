@@ -133,6 +133,7 @@ function toggleDetail(listId: number) {
               <TableCell class="min-w-[12rem]">
                 <WinDrawLossBar
                   compact
+                  omit-games-count
                   :wins="entry.wins"
                   :draws="entry.draws"
                   :losses="entry.losses"

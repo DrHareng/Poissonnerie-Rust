@@ -8,6 +8,8 @@ const props = defineProps<{
   compact?: boolean
   /** Barre seule (tooltip au survol), pour une ligne compacte. */
   barOnly?: boolean
+  /** Masque « X parties » dans le libellé (ex. si le total est affiché ailleurs). */
+  omitGamesCount?: boolean
 }>()
 
 const total = computed(() => props.wins + props.draws + props.losses)
@@ -21,7 +23,11 @@ const detailLabel = computed(() => {
   const victoires = `${props.wins} ${label(props.wins, 'victoire', 'victoires')}`
   const nuls = `${props.draws} ${label(props.draws, 'nul', 'nuls')}`
   const defaites = `${props.losses} ${label(props.losses, 'défaite', 'défaites')}`
-  return `${parties} - ${victoires}, ${nuls}, ${defaites}`
+  const breakdown = `${victoires}, ${nuls}, ${defaites}`
+  if (props.omitGamesCount) {
+    return breakdown
+  }
+  return `${parties} - ${breakdown}`
 })
 
 const segments = computed(() => {
