@@ -58,6 +58,25 @@ pub fn require_lists(list1: &str, list2: &str) -> Result<(String, Option<String>
 pub fn parse_army_list_faction_slug(raw: &str) -> Option<String> {
     let normalized = normalize_army_list_code(raw)?;
     let binary = decode_army_payload(&normalized)?;
+    find_faction_slug_in_binary(&binary).map(|header| header.slug)
+}
+
+/// Lit le nom de liste encodé après le slug de faction.
+pub fn parse_army_list_name(raw: &str) -> Option<String> {
+    let normalized = normalize_army_list_code(raw)?;
+    let binary = decode_army_payload(&normalized)?;
+    let header = find_faction_slug_in_binary(&binary)?;
+    let name_offset = header.slug_offset + 1 + header.slug_len;
+    read_length_prefixed_string(&binary, name_offset, 128)
+}
+
+struct FactionSlugHeader {
+    slug_offset: usize,
+    slug_len: usize,
+    slug: String,
+}
+
+fn find_faction_slug_in_binary(binary: &[u8]) -> Option<FactionSlugHeader> {
     if binary.len() < 5 {
         return None;
     }
@@ -76,10 +95,32 @@ pub fn parse_army_list_faction_slug(raw: &str) -> Option<String> {
         }
         let slug = String::from_utf8_lossy(bytes).into_owned();
         if is_faction_slug(&slug) {
-            return Some(slug);
+            return Some(FactionSlugHeader {
+                slug_offset: offset,
+                slug_len: length,
+                slug,
+            });
         }
     }
     None
+}
+
+fn read_length_prefixed_string(binary: &[u8], offset: usize, max_len: usize) -> Option<String> {
+    if offset >= binary.len() {
+        return None;
+    }
+    let length = binary[offset] as usize;
+    if length == 0 || length > max_len {
+        return None;
+    }
+    if offset + 1 + length > binary.len() {
+        return None;
+    }
+    let bytes = &binary[offset + 1..offset + 1 + length];
+    std::str::from_utf8(bytes)
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
 }
 
 fn is_faction_slug(slug: &str) -> bool {
@@ -209,5 +250,18 @@ mod tests {
         let b = normalize_army_list_code(code).unwrap();
         assert_eq!(a, b);
         assert!(require_lists(url, code).is_err());
+    }
+
+    #[test]
+    fn extracts_list_name_from_code() {
+        let code = "gZIQaGFzc2Fzc2luLWJhaHJhbRBOb3V2ZWF1IGdvIHRvIHYygSwCAQEACgCBMAECAACGNQECAACBRwEGAACBTgEBAACBLQELAACBLQEOAACBUQECAACBGwEBAACBTAECAACGCwEDAAIBAAUAgUgBAwAAgTABBgAAgT4BAQAAgVQBAwAAhgkBAgA=";
+        assert_eq!(
+            parse_army_list_faction_slug(code).as_deref(),
+            Some("hassassin-bahram")
+        );
+        assert_eq!(
+            parse_army_list_name(code).as_deref(),
+            Some("Nouveau go to v2")
+        );
     }
 }

@@ -163,6 +163,8 @@ export interface MatchRecord extends RatingUpdate, MatchScores {
   player2_report?: MatchReport | null
   player1_army_list_code?: string | null
   player2_army_list_code?: string | null
+  player1_army_list_id?: number | null
+  player2_army_list_id?: number | null
   player1_secondary_slugs?: string[] | null
   player2_secondary_slugs?: string[] | null
   secondary_pool_slugs?: string[] | null
@@ -392,6 +394,24 @@ export interface TournamentListEntry extends Tournament {
   bracket_matches?: TournamentMatch[]
   pool_scenarios?: TournamentScenarioSlot[]
   registrations?: TournamentRegistrationPreview[]
+}
+
+export interface ArmyListStatsEntry {
+  id: number
+  code: string
+  army_id: number
+  name?: string | null
+  wins: number
+  draws: number
+  losses: number
+  games: number
+  win_rate: number
+  last_used_at: number
+}
+
+export interface ArmyListStatsGroup {
+  army_id: number
+  lists: ArmyListStatsEntry[]
 }
 
 export interface PlayerTournamentResult {

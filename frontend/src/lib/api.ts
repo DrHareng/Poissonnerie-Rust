@@ -1,6 +1,7 @@
 import type {
   ApiError,
   Army,
+  ArmyListStatsGroup,
   ArmyPlayerStats,
   AuthUser,
   CommonRule,
@@ -228,6 +229,25 @@ export function fetchRecentReports(limit = 5, offset = 0): Promise<PaginatedRepo
     offset: String(offset),
   })
   return request<PaginatedReports>(`/api/reports/recent?${params}`)
+}
+
+export function fetchArmyListArmies(): Promise<number[]> {
+  return request<number[]>('/api/army-lists/armies')
+}
+
+export function fetchArmyLists(armyIds: number[]): Promise<ArmyListStatsGroup[]> {
+  const params = new URLSearchParams()
+  if (armyIds.length > 0) {
+    params.set('army_ids', armyIds.join(','))
+  }
+  const query = params.toString()
+  return request<ArmyListStatsGroup[]>(
+    query ? `/api/army-lists?${query}` : '/api/army-lists',
+  )
+}
+
+export function fetchArmyListMatches(listId: number, limit = 200): Promise<MatchRecord[]> {
+  return request<MatchRecord[]>(`/api/army-lists/${listId}/matches?limit=${limit}`)
 }
 
 export function fetchReportTemplates(): Promise<ReportTemplate[]> {

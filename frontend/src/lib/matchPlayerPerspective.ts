@@ -41,8 +41,24 @@ export function normalizeMatchForPlayer(
     player2_army_id: match.player1_army_id,
     player1_army_list_code: match.player2_army_list_code,
     player2_army_list_code: match.player1_army_list_code,
+    player1_army_list_id: match.player2_army_list_id,
+    player2_army_list_id: match.player1_army_list_id,
     outcome: flipOutcome(match.outcome),
   }
+}
+
+/** Place le joueur ayant joué cette liste en J1. */
+export function normalizeMatchForArmyList(
+  match: MatchRecord,
+  armyListId: number,
+): MatchRecord {
+  if (match.player1_army_list_id === armyListId) {
+    return match
+  }
+  if (match.player2_army_list_id === armyListId) {
+    return normalizeMatchForPlayer(match, match.player2)
+  }
+  return match
 }
 
 /** Place le joueur de la sectorielle en J1. En miroir, conserve le J1 d’origine. */

@@ -17,9 +17,10 @@ use tower_sessions::{Expiry, Session, SessionManagerLayer};
 use crate::{
     auth::{self, AuthConfig, CallbackQuery},
     default_db_path, scenario::ScenarioStore, session_store::SqliteSessionStore, tournament_api,
-    ArmyStore, Leaderboard, MatchOutcome, MatchRecord, MatchScores, Player, ReportStatus,
-    ReportTemplateStore, TournamentStore, User, UserStore, DEFAULT_K_FACTOR,
+    ArmyListStore, ArmyStore, Leaderboard, MatchOutcome, MatchRecord, MatchScores, Player,
+    ReportStatus, ReportTemplateStore, TournamentStore, User, UserStore, DEFAULT_K_FACTOR,
 };
+use crate::army_list_store::ArmyListStatsGroup;
 use crate::tournament::TournamentStatus;
 use crate::user::{LocalProfileUpdate, UiPrefsUpdate, UserResponse};
 
@@ -29,6 +30,7 @@ const SESSION_INACTIVITY_DAYS: i64 = 30;
 pub struct AppState {
     pub board: Arc<Mutex<Leaderboard>>,
     pub armies: Arc<ArmyStore>,
+    pub army_lists: Arc<ArmyListStore>,
     pub users: Arc<UserStore>,
     pub tournaments: Arc<TournamentStore>,
     pub scenarios: Arc<ScenarioStore>,
@@ -264,6 +266,9 @@ pub fn router(state: AppState) -> Result<Router> {
         .route("/api/armies/{id}/matches", get(get_army_matches))
         .route("/api/armies/{id}/players", get(get_army_players))
         .route("/api/armies/{id}", get(get_army))
+        .route("/api/army-lists", get(list_army_lists))
+        .route("/api/army-lists/armies", get(list_army_list_armies))
+        .route("/api/army-lists/{id}/matches", get(get_army_list_matches))
         .route("/api/ranking", get(get_ranking))
         .route("/api/players", post(add_player))
         .route("/api/players/me", post(claim_player))
@@ -1448,15 +1453,23 @@ async fn update_match_army_list(
     };
 
     if let Some(army_id) = payload.army_id {
-        state
-            .armies
-            .validate_selectable_id(army_id)
-            .map_err(|error| ApiError::bad_request(error.to_string()))?;
+        let _ = army_id;
     }
+
+    let list = state
+        .army_lists
+        .get_or_create(&payload.army_list_code)
+        .map_err(|error| ApiError::bad_request(error.to_string()))?;
 
     let mut board = state.board.lock().unwrap();
     board
-        .update_match_army_list(id, &player.name, &payload.army_list_code, payload.army_id)
+        .update_match_army_list(
+            id,
+            &player.name,
+            list.id,
+            &list.code,
+            list.army_id,
+        )
         .map_err(|error| ApiError::bad_request(error.to_string()))?;
     board
         .save(&state.db_path)
@@ -1545,10 +1558,82 @@ async fn delete_report_template(
     Ok(StatusCode::NO_CONTENT)
 }
 
+#[derive(Debug, Deserialize)]
+struct ArmyListQuery {
+    #[serde(default)]
+    army_ids: Option<String>,
+}
+
+async fn list_army_lists(
+    State(state): State<AppState>,
+    Query(query): Query<ArmyListQuery>,
+) -> Result<Json<Vec<ArmyListStatsGroup>>, ApiError> {
+    let army_ids = query.army_ids.as_ref().map(|raw| {
+        raw.split(',')
+            .filter_map(|part| part.trim().parse::<u32>().ok())
+            .collect::<Vec<_>>()
+    });
+    let filter = army_ids.as_deref();
+    let groups = state
+        .army_lists
+        .list_stats_by_army(filter)
+        .map_err(|error| ApiError::bad_request(error.to_string()))?;
+    Ok(Json(groups))
+}
+
+async fn list_army_list_armies(
+    State(state): State<AppState>,
+) -> Result<Json<Vec<u32>>, ApiError> {
+    let ids = state
+        .army_lists
+        .army_ids_with_public_lists()
+        .map_err(|error| ApiError::bad_request(error.to_string()))?;
+    Ok(Json(ids))
+}
+
+async fn get_army_list_matches(
+    State(state): State<AppState>,
+    session: Session,
+    Path(id): Path<i64>,
+    Query(query): Query<MatchListQuery>,
+) -> Result<Json<Vec<crate::display_name::EnrichedMatchRecord>>, ApiError> {
+    state
+        .army_lists
+        .get(id)
+        .map_err(|error| ApiError::bad_request(error.to_string()))?
+        .ok_or_else(|| ApiError::bad_request(format!("liste d'armée introuvable : {}", id)))?;
+
+    let limit = query.limit.clamp(1, 500);
+    let match_ids = state
+        .army_lists
+        .list_match_ids(id, limit)
+        .map_err(|error| ApiError::bad_request(error.to_string()))?;
+
+    let viewer = viewer_player_name(&state, &session).await;
+    let mut records = {
+        let board = state.board.lock().unwrap();
+        match_ids
+            .into_iter()
+            .filter_map(|match_id| board.get_match(match_id).cloned())
+            .collect::<Vec<_>>()
+    };
+    for record in &mut records {
+        prepare_match_for_viewer(&state, record, viewer.as_deref());
+    }
+    let board = state.board.lock().unwrap();
+    let resolver = crate::display_name::PlayerDisplayResolver::new(&board, state.users.as_ref());
+    let matches = records
+        .into_iter()
+        .map(|record| resolver.enrich_match(record))
+        .collect();
+    Ok(Json(matches))
+}
+
 pub fn default_state() -> anyhow::Result<AppState> {
     let db_path = default_db_path();
     let board = Leaderboard::load(&db_path)?;
     let armies = ArmyStore::open(&db_path)?;
+    let army_lists = ArmyListStore::open(&db_path)?;
     let users = UserStore::open(&db_path)?;
     let tournaments = TournamentStore::open(&db_path)?;
     let scenarios = ScenarioStore::open(&db_path)?;
@@ -1557,6 +1642,7 @@ pub fn default_state() -> anyhow::Result<AppState> {
     Ok(AppState {
         board: Arc::new(Mutex::new(board)),
         armies: Arc::new(armies),
+        army_lists: Arc::new(army_lists),
         users: Arc::new(users),
         tournaments: Arc::new(tournaments),
         scenarios: Arc::new(scenarios),

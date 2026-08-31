@@ -174,6 +174,7 @@ impl Leaderboard {
                        m.lieutenant_winner, m.lieutenant_winner_choice, m.lieutenant_other_choice,
                        m.partie_step, m.created_by,
                        m.player1_army_list_code, m.player2_army_list_code,
+                       m.player1_army_list_id, m.player2_army_list_id,
                        m.recorded_at,
                        m.secondary_pool_slugs,
                        m.counts_for_elo,
@@ -254,10 +255,11 @@ impl Leaderboard {
                     lieutenant_winner, lieutenant_winner_choice, lieutenant_other_choice,
                     partie_step, created_by,
                     player1_army_list_code, player2_army_list_code,
+                    player1_army_list_id, player2_army_list_id,
                     recorded_at, secondary_pool_slugs, counts_for_elo, scenario_url
                 ) VALUES (
                     ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16,
-                    ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29, ?30, ?31, ?32, ?33, ?34
+                    ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29, ?30, ?31, ?32, ?33, ?34, ?35, ?36
                 )
                 ",
                 params![
@@ -291,6 +293,8 @@ impl Leaderboard {
                     record.created_by,
                     record.player1_army_list_code,
                     record.player2_army_list_code,
+                    record.player1_army_list_id,
+                    record.player2_army_list_id,
                     record.recorded_at,
                     encode_slug_list(record.secondary_pool_slugs.as_deref()),
                     if record.counts_for_elo { 1 } else { 0 },
@@ -450,6 +454,8 @@ impl Leaderboard {
             None,
             None,
             None,
+            None,
+            None,
         )
     }
 
@@ -470,6 +476,8 @@ impl Leaderboard {
         tournament_name: Option<String>,
         player1_army_list_code: Option<String>,
         player2_army_list_code: Option<String>,
+        player1_army_list_id: Option<i64>,
+        player2_army_list_id: Option<i64>,
     ) -> Result<MatchRecord> {
         let scores = scores.validate()?;
         let key1 = normalize_name(player1);
@@ -504,6 +512,8 @@ impl Leaderboard {
             tournament_name,
             player1_army_list_code,
             player2_army_list_code,
+            player1_army_list_id,
+            player2_army_list_id,
         )
     }
 
@@ -524,6 +534,8 @@ impl Leaderboard {
         tournament_name: Option<String>,
         player1_army_list_code: Option<String>,
         player2_army_list_code: Option<String>,
+        player1_army_list_id: Option<i64>,
+        player2_army_list_id: Option<i64>,
     ) -> Result<MatchRecord> {
         let next_id = self
             .matches
@@ -552,6 +564,8 @@ impl Leaderboard {
         );
         record.player1_army_list_code = player1_army_list_code;
         record.player2_army_list_code = player2_army_list_code;
+        record.player1_army_list_id = player1_army_list_id;
+        record.player2_army_list_id = player2_army_list_id;
 
         self.matches.insert(0, record.clone());
 
@@ -724,6 +738,8 @@ impl Leaderboard {
             player2_report: None,
             player1_army_list_code: None,
             player2_army_list_code: None,
+            player1_army_list_id: None,
+            player2_army_list_id: None,
             player1_secondary_slugs: if defer_secondaries {
                 None
             } else {
@@ -937,6 +953,8 @@ impl Leaderboard {
         scenario_name: Option<String>,
         player1_army_id: Option<u32>,
         player2_army_id: Option<u32>,
+        player1_army_list_id: Option<i64>,
+        player2_army_list_id: Option<i64>,
     ) -> Result<MatchRecord> {
         let scores = scores.validate()?;
         let index = self
@@ -989,6 +1007,12 @@ impl Leaderboard {
         }
         if player2_army_list_code.is_some() {
             record.player2_army_list_code = player2_army_list_code;
+        }
+        if player1_army_list_id.is_some() {
+            record.player1_army_list_id = player1_army_list_id;
+        }
+        if player2_army_list_id.is_some() {
+            record.player2_army_list_id = player2_army_list_id;
         }
         if scenario_id.is_some() {
             record.scenario_id = scenario_id;
@@ -1125,11 +1149,11 @@ impl Leaderboard {
         &mut self,
         id: u64,
         player_name: &str,
+        army_list_id: i64,
         army_list_code: &str,
-        army_id: Option<u32>,
+        army_id: u32,
     ) -> Result<MatchRecord> {
         let key = normalize_name(player_name);
-        let code = normalize_army_list_code(army_list_code);
         let record = self
             .matches
             .iter_mut()
@@ -1141,15 +1165,13 @@ impl Leaderboard {
         }
 
         if normalize_name(&record.player1) == key {
-            record.player1_army_list_code = code;
-            if let Some(army_id) = army_id {
-                record.player1_army_id = Some(army_id);
-            }
+            record.player1_army_list_id = Some(army_list_id);
+            record.player1_army_list_code = Some(army_list_code.to_string());
+            record.player1_army_id = Some(army_id);
         } else if normalize_name(&record.player2) == key {
-            record.player2_army_list_code = code;
-            if let Some(army_id) = army_id {
-                record.player2_army_id = Some(army_id);
-            }
+            record.player2_army_list_id = Some(army_list_id);
+            record.player2_army_list_code = Some(army_list_code.to_string());
+            record.player2_army_id = Some(army_id);
         } else {
             bail!("ce joueur ne participe pas à ce match");
         }
@@ -1507,10 +1529,12 @@ fn row_to_match(row: &rusqlite::Row<'_>) -> rusqlite::Result<MatchRecord> {
         created_by: row.get(29)?,
         player1_army_list_code: row.get(30)?,
         player2_army_list_code: row.get(31)?,
-        recorded_at: row.get(32)?,
-        secondary_pool_slugs: decode_slug_list(row.get(33)?),
-        counts_for_elo: row.get::<_, i64>(34)? != 0,
-        scenario_url: row.get(35)?,
+        player1_army_list_id: row.get(32)?,
+        player2_army_list_id: row.get(33)?,
+        recorded_at: row.get(34)?,
+        secondary_pool_slugs: decode_slug_list(row.get(35)?),
+        counts_for_elo: row.get::<_, i64>(36)? != 0,
+        scenario_url: row.get(37)?,
     })
 }
 
@@ -1632,10 +1656,6 @@ fn push_recent_report(items: &mut Vec<RecentMatchReport>, record: &MatchRecord, 
         published_at,
         updated_at: report.updated_at,
     });
-}
-
-fn normalize_army_list_code(raw: &str) -> Option<String> {
-    crate::army_list::normalize_army_list_code(raw)
 }
 
 fn adjust_player_match_count(

@@ -30,13 +30,21 @@ pub fn is_reinforcement_sectorial(id: u32) -> bool {
     id % 100 == 99
 }
 
+/// Factions meta non jouables (NA ARMIES, Contracted Back-Up, …).
+pub fn is_non_playable_sectorial(slug: &str) -> bool {
+    matches!(
+        slug.trim().to_ascii_lowercase().as_str(),
+        "non-aligned-armies" | "contracted-back-up"
+    )
+}
+
 /// Factions généralistes (id se terminant par 01).
 pub fn is_generalist(id: u32) -> bool {
     id % 100 == 1
 }
 
 pub fn is_listable(army: &Army) -> bool {
-    !is_reinforcement_sectorial(army.id)
+    !is_reinforcement_sectorial(army.id) && !is_non_playable_sectorial(&army.slug)
 }
 
 pub fn default_db_path() -> PathBuf {
@@ -377,6 +385,28 @@ mod tests {
             short_name: None,
         };
         assert!(is_listable(&discontinued));
+
+        let na_armies = Army {
+            id: 1201,
+            parent_id: 1201,
+            name: "NA ARMIES".into(),
+            slug: "non-aligned-armies".into(),
+            logo_url: String::new(),
+            discontinued: false,
+            short_name: None,
+        };
+        assert!(!is_listable(&na_armies));
+
+        let contracted = Army {
+            id: 1301,
+            parent_id: 1301,
+            name: "Contracted Back-Up".into(),
+            slug: "contracted-back-up".into(),
+            logo_url: String::new(),
+            discontinued: false,
+            short_name: None,
+        };
+        assert!(!is_listable(&contracted));
     }
 
     #[test]

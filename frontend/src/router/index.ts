@@ -70,6 +70,12 @@ export const router = createRouter({
       meta: { title: 'Matchs' },
     },
     {
+      path: '/matchs/listes',
+      name: 'matchs-listes',
+      component: MatchsPage,
+      meta: { title: 'Listes' },
+    },
+    {
       path: '/matchs/cr',
       name: 'matchs-cr',
       component: MatchsPage,

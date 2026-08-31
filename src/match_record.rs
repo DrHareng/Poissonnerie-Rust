@@ -170,6 +170,10 @@ pub struct MatchRecord {
     pub player1_army_list_code: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub player2_army_list_code: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub player1_army_list_id: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub player2_army_list_id: Option<i64>,
     /// Slugs des 3 secondaires tirés (JSON array).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub player1_secondary_slugs: Option<Vec<String>>,
@@ -248,6 +252,8 @@ impl MatchRecord {
             player2_report: None,
             player1_army_list_code: None,
             player2_army_list_code: None,
+            player1_army_list_id: None,
+            player2_army_list_id: None,
             player1_secondary_slugs: None,
             player2_secondary_slugs: None,
             secondary_pool_slugs: None,

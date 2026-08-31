@@ -4,7 +4,7 @@ use std::sync::{Arc, Mutex};
 
 use anyhow::Result;
 use clap::Parser;
-use poissonnerie_elo::{api, ArmyStore, AuthConfig, Leaderboard, UserStore, DEFAULT_K_FACTOR};
+use poissonnerie_elo::{api, ArmyListStore, ArmyStore, AuthConfig, Leaderboard, UserStore, DEFAULT_K_FACTOR};
 
 #[derive(Parser)]
 #[command(name = "poissonnerie-server", about = "API REST pour le classement ELO")]
@@ -28,6 +28,7 @@ async fn main() -> Result<()> {
     let args = Args::parse();
     let board = Leaderboard::load(&args.db)?;
     let armies = ArmyStore::open(&args.db)?;
+    let army_lists = ArmyListStore::open(&args.db)?;
     let users = UserStore::open(&args.db)?;
     let auth = match AuthConfig::from_env() {
         Ok(config) => {
@@ -43,6 +44,7 @@ async fn main() -> Result<()> {
     let state = api::AppState {
         board: Arc::new(Mutex::new(board)),
         armies: Arc::new(armies),
+        army_lists: Arc::new(army_lists),
         users: Arc::new(users),
         tournaments: Arc::new(poissonnerie_elo::TournamentStore::open(&args.db)?),
         scenarios: Arc::new(poissonnerie_elo::ScenarioStore::open(&args.db)?),

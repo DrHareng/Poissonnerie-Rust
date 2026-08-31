@@ -2,19 +2,29 @@
 import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { toast } from 'vue-sonner'
-import { Eye, Play, Trash2 } from '@lucide/vue'
-import { deleteMatch, fetchRecentMatches, fetchRecentReports } from '@/lib/api'
-import type { MatchRecord, RecentMatchReport } from '@/types/elo'
+import { Play, Trash2 } from '@lucide/vue'
+import {
+  deleteMatch,
+  fetchArmyLists,
+  fetchRecentMatches,
+  fetchRecentReports,
+} from '@/lib/api'
+import type { ArmyListStatsEntry, MatchRecord, RecentMatchReport } from '@/types/elo'
 import RecentMatchesList from '@/components/RecentMatchesList.vue'
 import RecentReportsList from '@/components/RecentReportsList.vue'
+import ArmyListsTable from '@/components/ArmyListsTable.vue'
 import ArmyLogo from '@/components/ArmyLogo.vue'
+import MatchOpenButton from '@/components/MatchOpenButton.vue'
 import PlayerLink from '@/components/PlayerLink.vue'
 import MatchContextCell from '@/components/MatchContextCell.vue'
 import PageTitleTabs from '@/components/PageTitleTabs.vue'
 import { useAuth } from '@/composables/useAuth'
+import { useAppSidePanel } from '@/composables/useAppSidePanel'
+import { useArmies } from '@/composables/useArmies'
 import { useMyInProgressMatches, inProgressMenuLabel } from '@/composables/useMyInProgressMatches'
 import { PARTIE_STEP_LABELS, type PartieStep } from '@/composables/usePartieFlow'
 import { matchsTabs } from '@/lib/pageTitleTabs'
+import { isListableArmy } from '@/lib/army'
 import { formatMatchRecordedDate } from '@/lib/tournamentMatchDisplay'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
@@ -37,10 +47,14 @@ import {
 
 const PAGE_SIZE = 5
 const REPORT_PAGE_SIZE = 10
+const ARMY_SELECTION_STORAGE_KEY = 'poissonnerie.army-lists-selected-army'
+const LEGACY_ARMY_FILTER_STORAGE_KEY = 'poissonnerie.army-lists-filter'
 
 const router = useRouter()
 const route = useRoute()
 const { isAuthenticated, isAdmin } = useAuth()
+const { setCustomSide } = useAppSidePanel()
+const { armies, ensureLoaded } = useArmies()
 const {
   allMatches,
   myMatches,
@@ -60,16 +74,34 @@ const page = ref(1)
 const loadingMatches = ref(true)
 
 const isReportsTab = computed(() => route.name === 'matchs-cr')
+const isListsTab = computed(() => route.name === 'matchs-listes')
+const isMatchsTab = computed(() => route.name === 'matchs')
+const showInProgress = computed(
+  () => isAuthenticated.value && isMatchsTab.value,
+)
 
 const reports = ref<RecentMatchReport[]>([])
 const totalReports = ref(0)
 const reportsPage = ref(1)
 const loadingReports = ref(true)
 
+const selectedArmyId = ref<number | null>(null)
+const selectedArmyLists = ref<ArmyListStatsEntry[]>([])
+const loadingArmyLists = ref(false)
+const loadingArmies = ref(false)
+
 const totalPages = computed(() => Math.max(1, Math.ceil(totalMatches.value / PAGE_SIZE)))
 const totalReportPages = computed(() =>
   Math.max(1, Math.ceil(totalReports.value / REPORT_PAGE_SIZE)),
 )
+
+const playableArmies = computed(() =>
+  [...armies.value]
+    .filter((army) => isListableArmy(army))
+    .sort((a, b) => a.id - b.id),
+)
+
+const showArmyListsSide = computed(() => isListsTab.value)
 
 const inProgressTitle = computed(() => {
   const count = inProgress.value.length
@@ -88,6 +120,58 @@ const inProgressDescription = computed(() =>
 function stepLabel(step: string | null | undefined): string {
   if (!step) return 'En cours'
   return PARTIE_STEP_LABELS[step as PartieStep] ?? step
+}
+
+function loadStoredArmyId(): number | null {
+  try {
+    const raw = localStorage.getItem(ARMY_SELECTION_STORAGE_KEY)
+    if (raw) {
+      const parsed = JSON.parse(raw) as unknown
+      if (typeof parsed === 'number') return parsed
+    }
+
+    const legacy = localStorage.getItem(LEGACY_ARMY_FILTER_STORAGE_KEY)
+    if (legacy) {
+      const parsed = JSON.parse(legacy) as unknown
+      if (Array.isArray(parsed) && typeof parsed[0] === 'number') {
+        return parsed[0]
+      }
+    }
+  } catch {
+    return null
+  }
+  return null
+}
+
+function persistArmySelection() {
+  if (selectedArmyId.value == null) return
+  localStorage.setItem(
+    ARMY_SELECTION_STORAGE_KEY,
+    JSON.stringify(selectedArmyId.value),
+  )
+}
+
+function initArmySelection() {
+  const ids = playableArmies.value.map((army) => army.id)
+  if (ids.length === 0) {
+    selectedArmyId.value = null
+    return
+  }
+
+  const stored = loadStoredArmyId()
+  if (stored != null && ids.includes(stored)) {
+    selectedArmyId.value = stored
+    return
+  }
+
+  selectedArmyId.value = ids[0] ?? null
+  persistArmySelection()
+}
+
+function selectArmy(armyId: number) {
+  if (selectedArmyId.value === armyId) return
+  selectedArmyId.value = armyId
+  persistArmySelection()
 }
 
 async function refreshMatches() {
@@ -125,9 +209,48 @@ async function refreshReports() {
   }
 }
 
+async function refreshArmyListTab() {
+  loadingArmies.value = true
+  try {
+    await ensureLoaded()
+    initArmySelection()
+    apiOnline.value = true
+  } catch (error) {
+    apiOnline.value = false
+    toast.error(
+      error instanceof Error ? error.message : 'Impossible de charger les sectorielles',
+    )
+  } finally {
+    loadingArmies.value = false
+  }
+}
+
+async function refreshArmyLists() {
+  if (!isListsTab.value || selectedArmyId.value == null) {
+    selectedArmyLists.value = []
+    return
+  }
+  loadingArmyLists.value = true
+  try {
+    const groups = await fetchArmyLists([selectedArmyId.value])
+    selectedArmyLists.value = groups[0]?.lists ?? []
+    apiOnline.value = true
+  } catch (error) {
+    apiOnline.value = false
+    toast.error(error instanceof Error ? error.message : 'Impossible de charger les listes')
+  } finally {
+    loadingArmyLists.value = false
+  }
+}
+
 async function refreshAll() {
   if (isReportsTab.value) {
     await Promise.all([refreshReports(), refreshInProgress()])
+    return
+  }
+  if (isListsTab.value) {
+    await Promise.all([refreshArmyListTab(), refreshInProgress()])
+    await refreshArmyLists()
     return
   }
   await Promise.all([refreshMatches(), refreshInProgress()])
@@ -143,10 +266,6 @@ function onReportsPageChange(nextPage: number) {
 
 function resumePartie(id: number) {
   router.push({ name: 'partie-resume', params: { id: String(id) } })
-}
-
-function openMatch(id: number) {
-  router.push({ name: 'match', params: { id: String(id) } })
 }
 
 async function onDeleteInProgress(id: number) {
@@ -173,11 +292,15 @@ async function scrollToHash() {
 }
 
 watch(page, () => {
-  if (!isReportsTab.value) void refreshMatches()
+  if (isMatchsTab.value) void refreshMatches()
 })
 watch(reportsPage, () => {
   if (isReportsTab.value) void refreshReports()
 })
+watch(selectedArmyId, () => {
+  if (isListsTab.value) void refreshArmyLists()
+})
+
 watch(isReportsTab, (isReports) => {
   if (isReports) {
     if (reportsPage.value !== 1) {
@@ -187,12 +310,29 @@ watch(isReportsTab, (isReports) => {
     void refreshReports()
     return
   }
+  if (isListsTab.value) {
+    void refreshAll()
+    return
+  }
   if (page.value !== 1) {
     page.value = 1
     return
   }
   void refreshMatches()
 })
+
+watch(isListsTab, (active) => {
+  if (active) {
+    void refreshAll()
+  }
+})
+
+watch(
+  showArmyListsSide,
+  (active) => setCustomSide(active),
+  { immediate: true },
+)
+
 watch(() => route.hash, scrollToHash)
 watch(loadingInProgress, (loading) => {
   if (!loading && route.hash === '#parties-en-cours') {
@@ -222,8 +362,49 @@ onMounted(async () => {
       </AlertDescription>
     </Alert>
 
+    <Teleport defer to="#app-side-panel">
+      <Card
+        v-if="showArmyListsSide"
+        class="neon-panel flex h-full max-h-full min-h-0 flex-col overflow-hidden"
+      >
+        <CardHeader class="shrink-0 pb-3">
+          <CardTitle>Sectorielles</CardTitle>
+          <CardDescription>
+            Choisissez une sectorielle pour afficher ses listes.
+          </CardDescription>
+        </CardHeader>
+        <CardContent class="min-h-0 flex-1 overflow-y-auto pt-0">
+          <div
+            v-if="loadingArmies"
+            class="px-1 text-sm text-muted-foreground"
+          >
+            Chargement…
+          </div>
+          <nav
+            v-else
+            class="scenario-side-list"
+            aria-label="Sectorielles jouables"
+          >
+            <button
+              v-for="army in playableArmies"
+              :key="army.id"
+              type="button"
+              class="scenario-side-item flex items-center gap-2"
+              :class="{
+                'scenario-side-item--active': selectedArmyId === army.id,
+              }"
+              @click="selectArmy(army.id)"
+            >
+              <ArmyLogo :army-id="army.id" />
+              <span class="min-w-0 truncate">{{ army.name }}</span>
+            </button>
+          </nav>
+        </CardContent>
+      </Card>
+    </Teleport>
+
     <Card
-      v-if="isAuthenticated && !isReportsTab"
+      v-if="showInProgress"
       id="parties-en-cours"
       class="neon-panel scroll-mt-24"
     >
@@ -296,15 +477,11 @@ onMounted(async () => {
                   >
                     <Play class="size-4" />
                   </Button>
-                  <Button
-                    type="button"
+                  <MatchOpenButton
+                    :match-id="item.id"
                     size="icon"
-                    variant="ghost"
                     title="Voir le match"
-                    @click="openMatch(item.id)"
-                  >
-                    <Eye class="size-4" />
-                  </Button>
+                  />
                   <Button
                     v-if="isAdmin"
                     type="button"
@@ -324,8 +501,52 @@ onMounted(async () => {
       </CardContent>
     </Card>
 
+    <template v-if="isListsTab">
+      <Card class="neon-panel lg:hidden">
+        <CardHeader class="pb-3">
+          <CardTitle>Sectorielles</CardTitle>
+          <CardDescription>
+            Choisissez une sectorielle pour afficher ses listes.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div
+            v-if="loadingArmies"
+            class="text-sm text-muted-foreground"
+          >
+            Chargement…
+          </div>
+          <nav
+            v-else
+            class="scenario-side-list"
+            aria-label="Sectorielles jouables"
+          >
+            <button
+              v-for="army in playableArmies"
+              :key="`mobile-${army.id}`"
+              type="button"
+              class="scenario-side-item flex items-center gap-2"
+              :class="{
+                'scenario-side-item--active': selectedArmyId === army.id,
+              }"
+              @click="selectArmy(army.id)"
+            >
+              <ArmyLogo :army-id="army.id" />
+              <span class="min-w-0 truncate">{{ army.name }}</span>
+            </button>
+          </nav>
+        </CardContent>
+      </Card>
+
+      <ArmyListsTable
+        :army-id="selectedArmyId"
+        :lists="selectedArmyLists"
+        :loading="loadingArmyLists || loadingArmies"
+      />
+    </template>
+
     <RecentReportsList
-      v-if="isReportsTab"
+      v-else-if="isReportsTab"
       :reports="reports"
       :loading="loadingReports"
       :page="reportsPage"

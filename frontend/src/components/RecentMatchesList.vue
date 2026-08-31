@@ -1,16 +1,17 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import { useRouter } from 'vue-router'
-import { ChevronLeft, ChevronRight, Eye, History } from '@lucide/vue'
+import { ChevronLeft, ChevronRight, History } from '@lucide/vue'
 import type { MatchRecord } from '@/types/elo'
 import MatchResultBadges from '@/components/MatchResultBadges.vue'
 import MatchContextCell from '@/components/MatchContextCell.vue'
+import MatchOpenButton from '@/components/MatchOpenButton.vue'
 import ArmyLogo from '@/components/ArmyLogo.vue'
 import ArmyListQuickActions from '@/components/ArmyListQuickActions.vue'
 import PlayerLink from '@/components/PlayerLink.vue'
 import { matchCountsForElo } from '@/lib/matchElo'
 import {
   normalizeMatchForArmy,
+  normalizeMatchForArmyList,
   normalizeMatchForPlayer,
   playerMatchEloDelta,
 } from '@/lib/matchPlayerPerspective'
@@ -44,6 +45,8 @@ const props = withDefaults(
     perspectivePlayer?: string
     /** Normalise les matchs pour afficher le joueur de cette sectorielle en J1. */
     perspectiveArmyId?: number | null
+    /** Normalise les matchs pour afficher le joueur de cette liste en J1. */
+    perspectiveArmyListId?: number | null
     /** Colonne évolution ELO (J1). */
     showElo?: boolean
     title?: string
@@ -65,14 +68,16 @@ const emit = defineEmits<{
   pageChange: [page: number]
 }>()
 
-const router = useRouter()
-
 const preparedMatches = computed(() => {
   let list = props.matches
   if (props.perspectivePlayer) {
     list = list
       .filter((match) => match.status !== 'in_progress')
       .map((match) => normalizeMatchForPlayer(match, props.perspectivePlayer!))
+  } else if (props.perspectiveArmyListId != null) {
+    list = list.map((match) =>
+      normalizeMatchForArmyList(match, props.perspectiveArmyListId!),
+    )
   } else if (props.perspectiveArmyId != null) {
     list = list.map((match) =>
       normalizeMatchForArmy(match, props.perspectiveArmyId!),
@@ -122,10 +127,6 @@ const defaultDescription = computed(() => {
 function goToPage(nextPage: number) {
   if (nextPage < 1 || nextPage > effectiveTotalPages.value) return
   emit('pageChange', nextPage)
-}
-
-function openMatch(id: number) {
-  router.push({ name: 'match', params: { id: String(id) } })
 }
 
 function eloDeltaClass(match: MatchRecord) {
@@ -220,7 +221,7 @@ function formatEloCell(match: MatchRecord) {
               <TableCell>
                 <MatchResultBadges
                   :match="match"
-                  :emphasize-defeat="!!perspectivePlayer || perspectiveArmyId != null"
+                  :emphasize-defeat="!!perspectivePlayer || perspectiveArmyId != null || perspectiveArmyListId != null"
                 />
               </TableCell>
               <TableCell class="px-2">
@@ -259,16 +260,7 @@ function formatEloCell(match: MatchRecord) {
                 <span v-else class="text-muted-foreground">—</span>
               </TableCell>
               <TableCell class="text-right">
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="icon-sm"
-                  :title="`Voir le match #${match.id}`"
-                  :aria-label="`Voir le match #${match.id}`"
-                  @click="openMatch(match.id)"
-                >
-                  <Eye class="size-4" />
-                </Button>
+                <MatchOpenButton :match-id="match.id" />
               </TableCell>
             </TableRow>
           </TableBody>

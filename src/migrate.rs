@@ -477,6 +477,73 @@ pub fn migrate(conn: &Connection) -> Result<()> {
 
     conn.execute_batch(
         "
+        CREATE TABLE IF NOT EXISTS army_lists (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            code TEXT NOT NULL UNIQUE,
+            army_id INTEGER NOT NULL REFERENCES armies(id)
+        );
+        CREATE INDEX IF NOT EXISTS idx_army_lists_army_id ON army_lists(army_id);
+        ",
+    )?;
+
+    if !column_exists(conn, "matches", "player1_army_list_id")? {
+        conn.execute(
+            "ALTER TABLE matches ADD COLUMN player1_army_list_id INTEGER REFERENCES army_lists(id)",
+            [],
+        )?;
+    }
+    if !column_exists(conn, "matches", "player2_army_list_id")? {
+        conn.execute(
+            "ALTER TABLE matches ADD COLUMN player2_army_list_id INTEGER REFERENCES army_lists(id)",
+            [],
+        )?;
+    }
+    if !column_exists(conn, "tournament_matches", "player1_army_list_id")? {
+        conn.execute(
+            "ALTER TABLE tournament_matches ADD COLUMN player1_army_list_id INTEGER REFERENCES army_lists(id)",
+            [],
+        )?;
+    }
+    if !column_exists(conn, "tournament_matches", "player2_army_list_id")? {
+        conn.execute(
+            "ALTER TABLE tournament_matches ADD COLUMN player2_army_list_id INTEGER REFERENCES army_lists(id)",
+            [],
+        )?;
+    }
+    if !column_exists(conn, "tournament_registrations", "army_list_1_id")? {
+        conn.execute(
+            "ALTER TABLE tournament_registrations ADD COLUMN army_list_1_id INTEGER REFERENCES army_lists(id)",
+            [],
+        )?;
+    }
+    if !column_exists(conn, "tournament_registrations", "army_list_2_id")? {
+        conn.execute(
+            "ALTER TABLE tournament_registrations ADD COLUMN army_list_2_id INTEGER REFERENCES army_lists(id)",
+            [],
+        )?;
+    }
+    if !column_exists(conn, "tournament_registrations", "bracket_list_1_id")? {
+        conn.execute(
+            "ALTER TABLE tournament_registrations ADD COLUMN bracket_list_1_id INTEGER REFERENCES army_lists(id)",
+            [],
+        )?;
+    }
+    if !column_exists(conn, "tournament_registrations", "bracket_list_2_id")? {
+        conn.execute(
+            "ALTER TABLE tournament_registrations ADD COLUMN bracket_list_2_id INTEGER REFERENCES army_lists(id)",
+            [],
+        )?;
+    }
+
+    crate::army_list_store::backfill_army_list_references(conn)?;
+
+    if !column_exists(conn, "army_lists", "name")? {
+        conn.execute("ALTER TABLE army_lists ADD COLUMN name TEXT", [])?;
+    }
+    crate::army_list_store::backfill_army_list_names(conn)?;
+
+    conn.execute_batch(
+        "
         CREATE TABLE IF NOT EXISTS tournament_scenarios (
             tournament_id INTEGER NOT NULL REFERENCES tournaments(id) ON DELETE CASCADE,
             kind TEXT NOT NULL,

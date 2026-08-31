@@ -221,9 +221,17 @@ pub struct TournamentRegistration {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub army_list_2: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub army_list_1_id: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub army_list_2_id: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub bracket_list_1: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub bracket_list_2: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bracket_list_1_id: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bracket_list_2_id: Option<i64>,
     /// Liste 1 d'inscription renseignée (sans révéler le code).
     #[serde(default)]
     pub has_army_lists: bool,
@@ -384,6 +392,10 @@ pub struct TournamentMatch {
     pub player1_army_list_code: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub player2_army_list_code: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub player1_army_list_id: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub player2_army_list_id: Option<i64>,
     pub played_at: Option<u64>,
     /// Partie ELO / wizard liée (en cours ou terminée).
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1037,6 +1049,8 @@ mod tests {
             player2_army_id: None,
             player1_army_list_code: None,
             player2_army_list_code: None,
+            player1_army_list_id: None,
+            player2_army_list_id: None,
             played_at: None,
             elo_match_id: None,
         };
@@ -1182,6 +1196,8 @@ mod tests {
                 player2_army_id: None,
                 player1_army_list_code: None,
                 player2_army_list_code: None,
+            player1_army_list_id: None,
+            player2_army_list_id: None,
                 played_at: None,
                 elo_match_id: None,
             },
@@ -1232,6 +1248,8 @@ mod tests {
                 player2_army_id: None,
                 player1_army_list_code: None,
                 player2_army_list_code: None,
+            player1_army_list_id: None,
+            player2_army_list_id: None,
                 played_at: None,
                 elo_match_id: None,
             },
@@ -1273,6 +1291,8 @@ mod tests {
                 player2_army_id: None,
                 player1_army_list_code: None,
                 player2_army_list_code: None,
+            player1_army_list_id: None,
+            player2_army_list_id: None,
                 played_at: None,
                 elo_match_id: None,
             },
@@ -1337,6 +1357,8 @@ mod tests {
                 player2_army_id: None,
                 player1_army_list_code: None,
                 player2_army_list_code: None,
+            player1_army_list_id: None,
+            player2_army_list_id: None,
                 played_at: None,
                 elo_match_id: None,
             }
@@ -1381,6 +1403,8 @@ mod tests {
                 player2_army_id: None,
                 player1_army_list_code: None,
                 player2_army_list_code: None,
+            player1_army_list_id: None,
+            player2_army_list_id: None,
                 played_at: None,
                 elo_match_id: None,
             },

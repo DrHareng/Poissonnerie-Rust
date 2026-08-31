@@ -1486,12 +1486,27 @@ async fn submit_tournament_from_partie(
             player2_survivors: tm.player2_survivors,
         };
         let mut board = state.board.lock().unwrap();
-        // Mettre à jour les codes liste sur la partie avant complete.
         if let Some(code) = tm.player1_army_list_code.as_deref() {
-            let _ = board.update_match_army_list(elo_id, tm.player1.as_deref().unwrap_or(""), code, None);
+            if let Ok(list) = state.army_lists.get_or_create(code) {
+                let _ = board.update_match_army_list(
+                    elo_id,
+                    tm.player1.as_deref().unwrap_or(""),
+                    list.id,
+                    &list.code,
+                    list.army_id,
+                );
+            }
         }
         if let Some(code) = tm.player2_army_list_code.as_deref() {
-            let _ = board.update_match_army_list(elo_id, tm.player2.as_deref().unwrap_or(""), code, None);
+            if let Ok(list) = state.army_lists.get_or_create(code) {
+                let _ = board.update_match_army_list(
+                    elo_id,
+                    tm.player2.as_deref().unwrap_or(""),
+                    list.id,
+                    &list.code,
+                    list.army_id,
+                );
+            }
         }
         board
             .complete_match(elo_id, outcome, state.k_factor, scores)
@@ -1688,6 +1703,8 @@ fn apply_tournament_match_to_board(
                     tm.scenario_name.clone(),
                     tm.player1_army_id,
                     tm.player2_army_id,
+                    tm.player1_army_list_id,
+                    tm.player2_army_list_id,
                 )
                 .map_err(|error| ApiError::bad_request(error.to_string()))?;
             return Ok(());
@@ -1711,6 +1728,8 @@ fn apply_tournament_match_to_board(
             tournament_name,
             tm.player1_army_list_code.clone(),
             tm.player2_army_list_code.clone(),
+            tm.player1_army_list_id,
+            tm.player2_army_list_id,
         )
         .map_err(|error| ApiError::bad_request(error.to_string()))?;
     Ok(())

@@ -696,6 +696,8 @@ fn apply_to_board(board: &mut Leaderboard, tm: &TournamentMatch) -> Result<()> {
         None,
         tm.player1_army_list_code.clone(),
         tm.player2_army_list_code.clone(),
+        tm.player1_army_list_id,
+        tm.player2_army_list_id,
     )?;
     Ok(())
 }
@@ -780,6 +782,8 @@ fn rebuild_leaderboard_from_matches(db_path: &Path) -> Result<()> {
             player2_report: None,
             player1_army_list_code: None,
             player2_army_list_code: None,
+            player1_army_list_id: None,
+            player2_army_list_id: None,
             player1_secondary_slugs: None,
             player2_secondary_slugs: None,
             secondary_pool_slugs: None,
@@ -828,6 +832,8 @@ fn rebuild_leaderboard_from_matches(db_path: &Path) -> Result<()> {
             record.tournament_name,
             record.player1_army_list_code,
             record.player2_army_list_code,
+            record.player1_army_list_id,
+            record.player2_army_list_id,
         )?;
     }
 

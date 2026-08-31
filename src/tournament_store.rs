@@ -7,6 +7,7 @@ use rusqlite::{params, Connection, OptionalExtension, Transaction};
 use serde::Deserialize;
 
 use crate::army_list::require_lists;
+use crate::army_list_store::get_or_create_in_conn;
 use crate::match_record::now_unix;
 use crate::migrate::migrate;
 use crate::player::MatchOutcome;
@@ -593,7 +594,7 @@ impl TournamentStore {
         player_name: &str,
         army_list_1: &str,
         army_list_2: &str,
-        army_id: Option<u32>,
+        _army_id: Option<u32>,
     ) -> Result<TournamentRegistration> {
         let conn = self.conn.lock().unwrap();
         let tournament = self
@@ -644,7 +645,12 @@ impl TournamentStore {
         }
 
         let (list1, list2) = require_lists(army_list_1, army_list_2)?;
-        let army_id = army_id.context("sectorielle manquante")?;
+        let list1_entry = get_or_create_in_conn(&conn, &list1)?;
+        let list2_id = list2
+            .as_ref()
+            .map(|code| get_or_create_in_conn(&conn, code).map(|entry| entry.id))
+            .transpose()?;
+        let army_id = list1_entry.army_id;
         let list2_stored = list2.as_deref().unwrap_or("");
         let lists_changed = registration.army_list_1.as_deref().unwrap_or("") != list1.as_str()
             || registration.army_list_2.as_deref().unwrap_or("") != list2_stored
@@ -664,16 +670,20 @@ impl TournamentStore {
                 SET army_id = ?1,
                     army_list_1 = ?2,
                     army_list_2 = ?3,
-                    status = ?4,
+                    army_list_1_id = ?4,
+                    army_list_2_id = ?5,
+                    status = ?6,
                     reviewed_at = NULL,
                     reviewed_by = NULL,
                     waitlist_position = NULL
-                WHERE id = ?5
+                WHERE id = ?7
                 ",
                 params![
                     army_id,
                     list1,
                     list2_stored,
+                    list1_entry.id,
+                    list2_id,
                     RegistrationStatus::Pending.as_str(),
                     registration.id
                 ],
@@ -682,10 +692,14 @@ impl TournamentStore {
             conn.execute(
                 "
                 UPDATE tournament_registrations
-                SET army_id = ?1, army_list_1 = ?2, army_list_2 = ?3
-                WHERE id = ?4
+                SET army_id = ?1,
+                    army_list_1 = ?2,
+                    army_list_2 = ?3,
+                    army_list_1_id = ?4,
+                    army_list_2_id = ?5
+                WHERE id = ?6
                 ",
-                params![army_id, list1, list2_stored, registration.id],
+                params![army_id, list1, list2_stored, list1_entry.id, list2_id, registration.id],
             )?;
         }
         self.get_registration_in_conn(&conn, registration.id)?
@@ -732,7 +746,7 @@ impl TournamentStore {
         tournament_id: i64,
         player_name: &str,
         admin_id: i64,
-        army_id: u32,
+        _army_id: u32,
         army_list_1: &str,
         army_list_2: &str,
     ) -> Result<TournamentRegistration> {
@@ -753,13 +767,21 @@ impl TournamentStore {
             bail!("ce joueur est déjà inscrit");
         }
 
+        let list1_entry = get_or_create_in_conn(&conn, &list1)?;
+        let list2_id = list2
+            .as_ref()
+            .map(|code| get_or_create_in_conn(&conn, code).map(|entry| entry.id))
+            .transpose()?;
+        let resolved_army_id = list1_entry.army_id;
+
         let now = now_unix();
         conn.execute(
             "
             INSERT INTO tournament_registrations
                 (tournament_id, player_name_key, player_name, status, requested_at,
-                 reviewed_at, reviewed_by, army_id, army_list_1, army_list_2)
-            VALUES (?1, ?2, ?3, ?4, ?5, ?5, ?6, ?7, ?8, ?9)
+                 reviewed_at, reviewed_by, army_id, army_list_1, army_list_2,
+                 army_list_1_id, army_list_2_id)
+            VALUES (?1, ?2, ?3, ?4, ?5, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
             ",
             params![
                 tournament_id,
@@ -768,9 +790,11 @@ impl TournamentStore {
                 RegistrationStatus::Pending.as_str(),
                 now,
                 admin_id,
-                army_id,
+                resolved_army_id,
                 list1,
                 list2.as_deref().unwrap_or(""),
+                list1_entry.id,
+                list2_id,
             ],
         )?;
         let reg_id = conn.last_insert_rowid();
@@ -796,17 +820,28 @@ impl TournamentStore {
             bail!("tournoi terminé");
         }
 
+        let list1_entry = get_or_create_in_conn(&conn, &list1)?;
+        let list2_id = list2
+            .as_ref()
+            .map(|code| get_or_create_in_conn(&conn, code).map(|entry| entry.id))
+            .transpose()?;
+
         let key = normalize_name(player_name);
         let updated = conn.execute(
             "
             UPDATE tournament_registrations
-            SET bracket_list_1 = ?1, bracket_list_2 = ?2
-            WHERE tournament_id = ?3 AND player_name_key = ?4
+            SET bracket_list_1 = ?1,
+                bracket_list_2 = ?2,
+                bracket_list_1_id = ?3,
+                bracket_list_2_id = ?4
+            WHERE tournament_id = ?5 AND player_name_key = ?6
               AND status = 'approved'
             ",
             params![
                 list1,
                 list2.as_deref().unwrap_or(""),
+                list1_entry.id,
+                list2_id,
                 tournament_id,
                 key
             ],
@@ -1482,6 +1517,15 @@ impl TournamentStore {
             )?;
         }
 
+        let list1_id = list1
+            .as_ref()
+            .map(|code| get_or_create_in_conn(&conn, code).map(|entry| entry.id))
+            .transpose()?;
+        let list2_id = list2
+            .as_ref()
+            .map(|code| get_or_create_in_conn(&conn, code).map(|entry| entry.id))
+            .transpose()?;
+
         conn.execute(
             "
             UPDATE tournament_matches SET
@@ -1496,8 +1540,9 @@ impl TournamentStore {
                 scenario_id = ?17, scenario_other = ?18,
                 player1_army_id = ?19, player2_army_id = ?20,
                 player1_army_list_code = ?21, player2_army_list_code = ?22,
-                played_at = ?23
-            WHERE id = ?24
+                player1_army_list_id = ?23, player2_army_list_id = ?24,
+                played_at = ?25
+            WHERE id = ?26
             ",
             params![
                 request.player1_objectives,
@@ -1526,6 +1571,8 @@ impl TournamentStore {
                 player2_army_id,
                 list1,
                 list2,
+                list1_id,
+                list2_id,
                 now,
                 match_id,
             ],
@@ -3259,7 +3306,8 @@ impl TournamentStore {
             "
             SELECT id, tournament_id, player_name, user_id, status,
                    waitlist_position, requested_at, reviewed_at, reviewed_by, army_id,
-                   army_list_1, army_list_2, bracket_list_1, bracket_list_2
+                   army_list_1, army_list_2, bracket_list_1, bracket_list_2,
+                   army_list_1_id, army_list_2_id, bracket_list_1_id, bracket_list_2_id
             FROM tournament_registrations
             WHERE tournament_id = ?1
             ORDER BY requested_at ASC
@@ -3536,6 +3584,7 @@ impl TournamentStore {
                    COALESCE(s.name, tm.scenario_other),
                    tm.player1_army_id, tm.player2_army_id, tm.played_at, tm.is_unplayed,
                    tm.player1_army_list_code, tm.player2_army_list_code,
+                   tm.player1_army_list_id, tm.player2_army_list_id,
                    tm.elo_match_id
             FROM tournament_matches tm
             LEFT JOIN scenarios s ON s.id = tm.scenario_id
@@ -3602,7 +3651,8 @@ impl TournamentStore {
             "
             SELECT id, tournament_id, player_name, user_id, status,
                    waitlist_position, requested_at, reviewed_at, reviewed_by, army_id,
-                   army_list_1, army_list_2, bracket_list_1, bracket_list_2
+                   army_list_1, army_list_2, bracket_list_1, bracket_list_2,
+                   army_list_1_id, army_list_2_id, bracket_list_1_id, bracket_list_2_id
             FROM tournament_registrations WHERE id = ?1
             ",
         )?;
@@ -3729,6 +3779,10 @@ fn row_to_registration(row: &rusqlite::Row<'_>) -> rusqlite::Result<TournamentRe
         army_list_2: row.get(11)?,
         bracket_list_1: row.get(12)?,
         bracket_list_2: row.get(13)?,
+        army_list_1_id: row.get(14)?,
+        army_list_2_id: row.get(15)?,
+        bracket_list_1_id: row.get(16)?,
+        bracket_list_2_id: row.get(17)?,
         has_army_lists: false,
         has_bracket_lists: false,
         has_army_list_2: false,
@@ -3780,8 +3834,10 @@ fn row_to_tournament_match(row: &rusqlite::Row<'_>) -> rusqlite::Result<Tourname
         is_unplayed: row.get::<_, i64>(32)? != 0,
         player1_army_list_code: row.get(33)?,
         player2_army_list_code: row.get(34)?,
+        player1_army_list_id: row.get(35)?,
+        player2_army_list_id: row.get(36)?,
         elo_match_id: row
-            .get::<_, Option<i64>>(35)?
+            .get::<_, Option<i64>>(37)?
             .map(|id| id as u64),
     })
 }

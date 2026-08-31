@@ -75,6 +75,80 @@ export function parseArmyListFactionSlug(raw: string): string | null {
   return null
 }
 
+/**
+ * Lit le nom de liste encodé après le slug de faction.
+ */
+export function parseArmyListName(raw: string): string | null {
+  const normalized = normalizeArmyListCode(raw)
+  if (!normalized) return null
+
+  let binary: Uint8Array
+  try {
+    const decoded = decodeURIComponent(normalized)
+    binary = base64ToBytes(decoded)
+  } catch {
+    try {
+      binary = base64ToBytes(normalized)
+    } catch {
+      return null
+    }
+  }
+
+  const slugHeader = findFactionSlugHeader(binary)
+  if (!slugHeader) return null
+
+  const nameOffset = slugHeader.offset + 1 + slugHeader.length
+  return readLengthPrefixedString(binary, nameOffset, 128)
+}
+
+function findFactionSlugHeader(
+  binary: Uint8Array,
+): { offset: number; length: number } | null {
+  if (binary.length < 5) return null
+
+  for (let offset = 0; offset <= Math.min(6, binary.length - 2); offset++) {
+    const length = binary[offset]
+    if (length === undefined || length < 3 || length > 64) continue
+    if (offset + 1 + length > binary.length) continue
+
+    let slug = ''
+    let ok = true
+    for (let i = 0; i < length; i++) {
+      const byte = binary[offset + 1 + i]!
+      if (byte < 0x20 || byte > 0x7e) {
+        ok = false
+        break
+      }
+      slug += String.fromCharCode(byte)
+    }
+    if (!ok) continue
+    if (FACTION_SLUG_RE.test(slug)) {
+      return { offset, length }
+    }
+  }
+
+  return null
+}
+
+function readLengthPrefixedString(
+  binary: Uint8Array,
+  offset: number,
+  maxLen: number,
+): string | null {
+  if (offset >= binary.length) return null
+  const length = binary[offset]
+  if (length === undefined || length === 0 || length > maxLen) return null
+  if (offset + 1 + length > binary.length) return null
+
+  const bytes = binary.slice(offset + 1, offset + 1 + length)
+  try {
+    const value = new TextDecoder().decode(bytes).trim()
+    return value || null
+  } catch {
+    return null
+  }
+}
+
 function base64ToBytes(value: string): Uint8Array {
   const cleaned = value.replace(/[^A-Za-z0-9+/=_-]/g, '').replace(/-/g, '+').replace(/_/g, '/')
   const padded = cleaned + '='.repeat((4 - (cleaned.length % 4)) % 4)
