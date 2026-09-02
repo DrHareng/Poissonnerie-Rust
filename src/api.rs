@@ -194,6 +194,7 @@ struct PrefsResponse {
     #[serde(skip_serializing_if = "Option::is_none")]
     scenario_slug: Option<String>,
     army_sort_mode: String,
+    player_sort_mode: String,
     tournament_completed_view_mode: String,
 }
 
@@ -205,6 +206,8 @@ struct UpdatePrefsRequest {
     scenario_slug: Option<String>,
     #[serde(default)]
     army_sort_mode: Option<String>,
+    #[serde(default)]
+    player_sort_mode: Option<String>,
     #[serde(default)]
     tournament_completed_view_mode: Option<String>,
 }
@@ -450,6 +453,16 @@ async fn update_prefs(
         ui_update.army_sort_mode = Some(mode.to_string());
     }
 
+    if let Some(raw) = payload.player_sort_mode.as_deref() {
+        let mode = auth::parse_player_sort_mode(raw)
+            .ok_or_else(|| ApiError::bad_request("tri joueurs invalide"))?;
+        session
+            .insert(auth::SESSION_PLAYER_SORT_MODE, mode.to_string())
+            .await
+            .map_err(|error| ApiError::bad_request(error.to_string()))?;
+        ui_update.player_sort_mode = Some(mode.to_string());
+    }
+
     if let Some(raw) = payload.tournament_completed_view_mode.as_deref() {
         let mode = auth::parse_tournament_completed_view_mode(raw)
             .ok_or_else(|| ApiError::bad_request("affichage tournois terminés invalide"))?;
@@ -466,6 +479,7 @@ async fn update_prefs(
     if ui_update.secondary_view_mode.is_none()
         && ui_update.scenario_slug.is_none()
         && ui_update.army_sort_mode.is_none()
+        && ui_update.player_sort_mode.is_none()
         && ui_update.tournament_completed_view_mode.is_none()
     {
         return Err(ApiError::bad_request("aucune préférence à mettre à jour"));
@@ -539,6 +553,23 @@ async fn resolve_prefs(state: &AppState, session: &Session) -> Result<PrefsRespo
             .unwrap_or(auth::DEFAULT_ARMY_SORT_MODE)
     };
 
+    let player_sort_mode = if let Some(mode) = user
+        .as_ref()
+        .and_then(|u| u.player_sort_mode.as_deref())
+        .and_then(auth::parse_player_sort_mode)
+    {
+        mode
+    } else {
+        let from_session: Option<String> = session
+            .get(auth::SESSION_PLAYER_SORT_MODE)
+            .await
+            .map_err(|error| ApiError::bad_request(error.to_string()))?;
+        from_session
+            .as_deref()
+            .and_then(auth::parse_player_sort_mode)
+            .unwrap_or(auth::DEFAULT_PLAYER_SORT_MODE)
+    };
+
     let tournament_completed_view_mode = if let Some(mode) = user
         .as_ref()
         .and_then(|u| u.tournament_completed_view_mode.as_deref())
@@ -560,6 +591,7 @@ async fn resolve_prefs(state: &AppState, session: &Session) -> Result<PrefsRespo
         secondary_view_mode: secondary_view_mode.to_string(),
         scenario_slug,
         army_sort_mode: army_sort_mode.to_string(),
+        player_sort_mode: player_sort_mode.to_string(),
         tournament_completed_view_mode: tournament_completed_view_mode.to_string(),
     })
 }

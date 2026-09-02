@@ -1,11 +1,17 @@
 <script setup lang="ts">
-import { computed, onMounted } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { Podium } from '@lucide/vue'
 import type { PlayerArmyUsage, RankedPlayer } from '@/types/elo'
 import ArmyLogo from '@/components/ArmyLogo.vue'
 import WinDrawLossBar from '@/components/WinDrawLossBar.vue'
 import { useArmies } from '@/composables/useArmies'
+import {
+  fetchPrefs,
+  updatePrefs,
+  type PlayerSortMode,
+} from '@/lib/api'
 import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
 import {
   Card,
   CardContent,
@@ -33,15 +39,71 @@ const emit = defineEmits<{
 
 const { ensureLoaded, getArmy } = useArmies()
 
+const PLAYER_SORT_MODES: PlayerSortMode[] = ['elo', 'win_rate', 'matches']
+
+const sortMode = ref<PlayerSortMode>('elo')
+
 onMounted(() => {
   void ensureLoaded()
+  void fetchPrefs()
+    .then((prefs) => {
+      if (PLAYER_SORT_MODES.includes(prefs.player_sort_mode)) {
+        sortMode.value = prefs.player_sort_mode
+      }
+    })
+    .catch(() => {
+      // Keep the default sort if prefs cannot be loaded.
+    })
 })
 
-const rankedActivePlayers = computed(() =>
-  props.players
-    .filter((player) => player.wins + player.draws + player.losses > 0)
-    .map((player, index) => ({ ...player, rank: index + 1 })),
-)
+function totalMatches(player: RankedPlayer) {
+  return player.wins + player.draws + player.losses
+}
+
+function winRate(player: RankedPlayer) {
+  const total = totalMatches(player)
+  if (total === 0) return 0
+  return ((player.wins + player.draws * 0.5) / total) * 100
+}
+
+function formatWinRate(value: number) {
+  return `${value.toLocaleString('fr-FR', {
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 1,
+  })} %`
+}
+
+const rankedActivePlayers = computed(() => {
+  const entries = props.players.filter((player) => totalMatches(player) > 0)
+
+  if (sortMode.value === 'elo') {
+    entries.sort(
+      (a, b) =>
+        b.rating - a.rating ||
+        winRate(b) - winRate(a) ||
+        totalMatches(b) - totalMatches(a) ||
+        a.name.localeCompare(b.name, 'fr', { sensitivity: 'base' }),
+    )
+  } else if (sortMode.value === 'win_rate') {
+    entries.sort(
+      (a, b) =>
+        winRate(b) - winRate(a) ||
+        totalMatches(b) - totalMatches(a) ||
+        b.rating - a.rating ||
+        a.name.localeCompare(b.name, 'fr', { sensitivity: 'base' }),
+    )
+  } else {
+    entries.sort(
+      (a, b) =>
+        totalMatches(b) - totalMatches(a) ||
+        winRate(b) - winRate(a) ||
+        b.rating - a.rating ||
+        a.name.localeCompare(b.name, 'fr', { sensitivity: 'base' }),
+    )
+  }
+
+  return entries.map((player, index) => ({ ...player, rank: index + 1 }))
+})
 
 const filteredPlayers = computed(() => {
   const query = props.searchQuery?.trim().toLowerCase()
@@ -69,21 +131,76 @@ function armyTooltip(usage: PlayerArmyUsage) {
   const label = usage.matches > 1 ? 'parties' : 'partie'
   return `${usage.matches} ${label} avec ${armyName}`
 }
+
+function sortButtonClass(mode: PlayerSortMode) {
+  return sortMode.value === mode
+    ? 'border-primary bg-primary! text-primary-foreground hover:bg-primary/90'
+    : 'border-border bg-black text-white hover:text-primary'
+}
+
+function setSortMode(mode: PlayerSortMode) {
+  sortMode.value = mode
+  void updatePrefs({ player_sort_mode: mode }).catch(() => {
+    // Keep the local choice even if persistence fails.
+  })
+}
 </script>
 
 <template>
   <Card class="neon-panel page-panel-scroll">
     <CardHeader class="lg:shrink-0">
-      <CardTitle class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+      <CardTitle class="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
         <div class="flex items-center gap-2">
           <Podium class="size-5 text-primary" />
           Classement ELO
         </div>
         <div
-          v-if="$slots['header-actions']"
-          class="flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:items-center"
+          class="flex w-full flex-col gap-3 sm:w-auto sm:flex-row sm:flex-wrap sm:items-center sm:justify-end"
         >
-          <slot name="header-actions" />
+          <div class="flex items-center gap-2">
+            <span class="text-sm font-medium text-muted-foreground">Tri :</span>
+            <div class="flex items-center gap-0">
+              <Button
+                type="button"
+                size="xs"
+                variant="outline"
+                :class="['rounded-r-none', sortButtonClass('elo')]"
+                @click="setSortMode('elo')"
+              >
+                ELO
+              </Button>
+              <Button
+                type="button"
+                size="xs"
+                variant="outline"
+                :class="[
+                  'rounded-none border-l-0',
+                  sortButtonClass('win_rate'),
+                ]"
+                @click="setSortMode('win_rate')"
+              >
+                Win rate
+              </Button>
+              <Button
+                type="button"
+                size="xs"
+                variant="outline"
+                :class="[
+                  'rounded-l-none border-l-0',
+                  sortButtonClass('matches'),
+                ]"
+                @click="setSortMode('matches')"
+              >
+                Nb parties
+              </Button>
+            </div>
+          </div>
+          <div
+            v-if="$slots['header-actions']"
+            class="flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:items-center"
+          >
+            <slot name="header-actions" />
+          </div>
         </div>
       </CardTitle>
     </CardHeader>
@@ -116,6 +233,8 @@ function armyTooltip(usage: PlayerArmyUsage) {
             <TableHead>Joueur</TableHead>
             <TableHead>Sectorielles</TableHead>
             <TableHead class="text-right">ELO</TableHead>
+            <TableHead class="text-right">Win rate</TableHead>
+            <TableHead class="text-right">Nb parties</TableHead>
             <TableHead>Bilan</TableHead>
           </TableRow>
         </TableHeader>
@@ -155,9 +274,16 @@ function armyTooltip(usage: PlayerArmyUsage) {
             <TableCell class="text-right font-semibold tabular-nums elo-score">
               {{ Math.round(player.rating) }}
             </TableCell>
+            <TableCell class="text-right font-semibold tabular-nums elo-score">
+              {{ formatWinRate(winRate(player)) }}
+            </TableCell>
+            <TableCell class="text-right tabular-nums text-muted-foreground">
+              {{ totalMatches(player) }}
+            </TableCell>
             <TableCell class="min-w-[14rem]" @click.stop>
               <WinDrawLossBar
                 compact
+                omit-games-count
                 :wins="player.wins"
                 :draws="player.draws"
                 :losses="player.losses"

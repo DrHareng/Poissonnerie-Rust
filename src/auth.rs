@@ -17,9 +17,11 @@ pub const SESSION_USER_ID: &str = "user_id";
 pub const SESSION_SECONDARY_VIEW_MODE: &str = "secondary_view_mode";
 pub const SESSION_SCENARIO_SLUG: &str = "scenario_slug";
 pub const SESSION_ARMY_SORT_MODE: &str = "army_sort_mode";
+pub const SESSION_PLAYER_SORT_MODE: &str = "player_sort_mode";
 pub const SESSION_TOURNAMENT_COMPLETED_VIEW_MODE: &str = "tournament_completed_view_mode";
 pub const DEFAULT_SECONDARY_VIEW_MODE: &str = "liste";
 pub const DEFAULT_ARMY_SORT_MODE: &str = "win_rate";
+pub const DEFAULT_PLAYER_SORT_MODE: &str = "elo";
 pub const DEFAULT_TOURNAMENT_COMPLETED_VIEW_MODE: &str = "compressed";
 
 pub fn parse_secondary_view_mode(value: &str) -> Option<&'static str> {
@@ -32,6 +34,15 @@ pub fn parse_secondary_view_mode(value: &str) -> Option<&'static str> {
 
 pub fn parse_army_sort_mode(value: &str) -> Option<&'static str> {
     match value {
+        "win_rate" => Some("win_rate"),
+        "matches" => Some("matches"),
+        _ => None,
+    }
+}
+
+pub fn parse_player_sort_mode(value: &str) -> Option<&'static str> {
+    match value {
+        "elo" => Some("elo"),
         "win_rate" => Some("win_rate"),
         "matches" => Some("matches"),
         _ => None,
@@ -139,6 +150,20 @@ pub async fn login_with_code(
         parse_army_sort_mode,
         |value| UiPrefsUpdate {
             army_sort_mode: Some(value.to_string()),
+            ..UiPrefsUpdate::default()
+        },
+    )
+    .await?;
+
+    sync_pref_on_login(
+        users,
+        session,
+        user.id,
+        user.player_sort_mode.as_deref(),
+        SESSION_PLAYER_SORT_MODE,
+        parse_player_sort_mode,
+        |value| UiPrefsUpdate {
+            player_sort_mode: Some(value.to_string()),
             ..UiPrefsUpdate::default()
         },
     )

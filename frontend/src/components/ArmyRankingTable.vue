@@ -207,6 +207,7 @@ function setSortMode(mode: ArmySortMode) {
             <TableCell class="min-w-[14rem]" @click.stop>
               <WinDrawLossBar
                 compact
+                omit-games-count
                 :wins="entry.wins"
                 :draws="entry.draws"
                 :losses="entry.losses"

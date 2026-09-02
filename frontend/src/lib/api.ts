@@ -132,12 +132,14 @@ export function updateProfile(payload: {
 
 export type SecondaryViewMode = 'liste' | 'cartes'
 export type ArmySortMode = 'win_rate' | 'matches'
+export type PlayerSortMode = 'elo' | 'win_rate' | 'matches'
 export type TournamentCompletedViewMode = 'detailed' | 'compressed'
 
 export interface UserPrefs {
   secondary_view_mode: SecondaryViewMode
   scenario_slug?: string | null
   army_sort_mode: ArmySortMode
+  player_sort_mode: PlayerSortMode
   tournament_completed_view_mode: TournamentCompletedViewMode
 }
 
@@ -149,6 +151,7 @@ export function updatePrefs(payload: {
   secondary_view_mode?: SecondaryViewMode
   scenario_slug?: string
   army_sort_mode?: ArmySortMode
+  player_sort_mode?: PlayerSortMode
   tournament_completed_view_mode?: TournamentCompletedViewMode
 }): Promise<UserPrefs> {
   return request<UserPrefs>('/api/prefs', {
