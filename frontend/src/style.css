@@ -167,14 +167,23 @@
   }
 
   .poissonnerie-inner {
-    @apply relative z-10 mx-auto flex min-h-0 w-[90%] flex-col lg:h-full;
+    @apply relative z-10 mx-auto flex min-h-0 w-[90%] max-w-[1600px] flex-col lg:h-full lg:overflow-hidden;
     padding:
-      clamp(1.5rem, 4vw, 3rem)
-      clamp(1.25rem, 5vw, 3.5rem);
+      clamp(0.75rem, 2vw, 1.5rem)
+      clamp(0.625rem, 2.5vw, 1.75rem);
   }
 
   .poissonnerie-body {
-    @apply flex min-h-0 flex-1 flex-col gap-6 lg:flex-row lg:items-stretch;
+    @apply flex min-h-0 min-w-0 flex-1 flex-col gap-6 lg:flex-row lg:items-stretch lg:overflow-hidden;
+    container-type: size;
+    container-name: poissonnerie-body;
+  }
+
+  /* Illustration décorative masquée si le viewport est trop bas (fallback CSS). */
+  @container poissonnerie-body (max-height: 420px) {
+    .poissonnerie-side-panel:not(.poissonnerie-side-panel--custom) {
+      display: none !important;
+    }
   }
 
   .poissonnerie-body--no-side {
@@ -186,11 +195,11 @@
   }
 
   .poissonnerie-side-panel {
-    @apply hidden shrink-0 lg:flex lg:h-full;
+    @apply hidden flex-col lg:flex lg:h-full lg:min-h-0 lg:min-w-0 lg:basis-1/3 lg:max-w-1/3 lg:grow-0 lg:shrink-0 lg:overflow-hidden;
   }
 
   .poissonnerie-side-panel--custom {
-    @apply w-80 xl:w-96;
+    @apply lg:basis-auto lg:w-72 lg:max-w-[min(32vw,18rem)] xl:w-80;
   }
 
   .poissonnerie-side-panel--empty {
@@ -202,12 +211,12 @@
   }
 
   .poissonnerie-side-image {
-    @apply block h-full w-auto max-w-full rounded-xl object-contain;
+    @apply block h-full w-full min-h-0 min-w-0 max-w-full rounded-xl object-contain object-top;
     filter: saturate(1.05) contrast(1.02);
   }
 
   .poissonnerie-content {
-    @apply flex min-h-0 min-w-0 flex-1 flex-col;
+    @apply flex min-h-0 min-w-0 flex-1 flex-col lg:overflow-y-auto;
   }
 
   /* Au-dessus du shell (isolate) et de la top bar */
@@ -1008,6 +1017,11 @@
 
   .scenario-detail-row--map {
     @apply grid-cols-1 lg:grid-cols-[7fr_3fr];
+  }
+
+  /* Viewport trop petit : carte au-dessus, déploiement en dessous. */
+  .poissonnerie-body--narrow-viewport .scenario-detail-row--map {
+    @apply lg:grid-cols-1;
   }
 
   .scenario-detail-cell {

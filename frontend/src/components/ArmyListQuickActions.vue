@@ -3,6 +3,7 @@ import { computed } from 'vue'
 import { toast } from 'vue-sonner'
 import { ClipboardCopy, ExternalLink } from '@lucide/vue'
 import { armyListUrl, normalizeArmyListCode } from '@/lib/armyList'
+import { copyTextToClipboard } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 
 const props = withDefaults(
@@ -20,7 +21,7 @@ const buttonSize = computed(() => (props.iconOnly ? 'icon-sm' : 'sm'))
 async function copyCode() {
   if (!normalized.value) return
   try {
-    await navigator.clipboard.writeText(normalized.value)
+    await copyTextToClipboard(normalized.value)
     toast.success('Code copié')
   } catch {
     toast.error('Impossible de copier le code')

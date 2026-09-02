@@ -4,15 +4,19 @@ import { RouterView, useRoute } from 'vue-router'
 import TopBar from '@/components/TopBar.vue'
 import { Toaster } from '@/components/ui/sonner'
 import { useAppSidePanelHost } from '@/composables/useAppSidePanel'
+import { useBrandSideImageVisibility } from '@/composables/useBrandSideImageVisibility'
 import { useSideImagePrefs } from '@/composables/useSideImagePrefs'
 
 const route = useRoute()
 const { customSideActive } = useAppSidePanelHost()
 const { pickSideImage, enabledImages } = useSideImagePrefs()
 
+const bodyRef = ref<HTMLElement | null>(null)
 const sideImage = ref(pickSideImage())
-const showBrandImage = computed(
-  () => !customSideActive.value && sideImage.value != null,
+const { showBrandImage, viewportTooSmall } = useBrandSideImageVisibility(
+  sideImage,
+  customSideActive,
+  bodyRef,
 )
 const showSidePanel = computed(
   () => customSideActive.value || showBrandImage.value,
@@ -40,8 +44,12 @@ watch(enabledImages, (pool) => {
       <TopBar />
 
       <div
+        ref="bodyRef"
         class="poissonnerie-body"
-        :class="{ 'poissonnerie-body--no-side': !showSidePanel }"
+        :class="{
+          'poissonnerie-body--no-side': !showSidePanel,
+          'poissonnerie-body--narrow-viewport': viewportTooSmall,
+        }"
       >
         <aside
           class="poissonnerie-side-panel"
