@@ -19,6 +19,7 @@ export const SIDE_IMAGES = [
   { id: 'side_08', src: brandImage('/brand/side_08.png'), name: 'Rivages de Jade' },
   { id: 'side_09', src: brandImage('/brand/side_09.png'), name: 'Kosmoflot' },
   { id: 'side_10', src: brandImage('/brand/side_10.png'), name: 'Jardins du Triumvirat' },
+  { id: 'side_11', src: brandImage('/brand/side_11.png'), name: 'Au p\'tit optimiste' },
 ] as const
 
 export type SideImageId = (typeof SIDE_IMAGES)[number]['id']
