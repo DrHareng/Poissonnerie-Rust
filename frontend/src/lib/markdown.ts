@@ -36,6 +36,12 @@ export function renderMarkdown(
       continue
     }
 
+    if (/^#br#$/i.test(trimmed)) {
+      flushList()
+      html.push('<div class="md-br" aria-hidden="true"></div>')
+      continue
+    }
+
     const imageOnly = standaloneImageHtml(trimmed)
     if (imageOnly) {
       flushList()
@@ -125,6 +131,8 @@ function inline(text: string, options: MarkdownOptions = {}): string {
   let work = text.replace(/\[img\]([^\[\]]+)\[img\]/gi, (_, raw) =>
     keep(renderMarkdownImage(String(raw))),
   )
+
+  work = work.replace(/#br#/gi, () => keep('<br>'))
 
   work = work.replace(
     /\[\[([^\]|]+)(?:\|([^\]]+))?\]\]/g,
