@@ -49,7 +49,7 @@ onMounted(load)
 
 <template>
   <div class="page-stack">
-    <nav class="page-title-tabs" aria-label="Ressources">
+    <nav class="page-title-tabs shrink-0" aria-label="Ressources">
       <div class="page-title-tabs-list">
         <h1 class="page-title-tab page-title-tab--active" aria-current="page">
           Ressources
@@ -68,14 +68,14 @@ onMounted(load)
       Chargement…
     </p>
 
-    <Card v-else class="neon-panel page-panel-scroll">
-      <CardHeader :class="{ 'pr-24': canEditContent }">
+    <Card v-else class="neon-panel page-panel-scroll flex min-h-0 flex-1 flex-col overflow-hidden">
+      <CardHeader class="shrink-0" :class="{ 'pr-24': canEditContent }">
         <CardTitle class="flex items-center gap-2">
           <BookOpen class="size-5 text-primary" />
           Liens et ressources
         </CardTitle>
       </CardHeader>
-      <CardContent>
+      <CardContent class="min-h-0 flex-1 overflow-y-auto">
         <AdminContentEditor
           :can-edit="canEditContent"
           :body="bodyMd"
