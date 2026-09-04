@@ -152,12 +152,12 @@ watch(
     if (redirected || !initialized.value || loading.value || !match.value) return
     if (match.value.status === 'in_progress') {
       redirected = true
-      redirectToMatch('Le compte rendu est disponible une fois le match terminé.')
+      redirectToMatch('Le rapport est disponible une fois le match terminé.')
       return
     }
     if (isAuthenticated.value && player.value && !isParticipant.value) {
       redirected = true
-      redirectToMatch('Seul un participant peut rédiger un compte rendu.')
+      redirectToMatch('Seul un participant peut rédiger un rapport.')
     }
   },
 )
@@ -191,9 +191,9 @@ async function persist(status: ReportStatus): Promise<boolean> {
     applyLoadedReport(record)
     toast.success(
       status === 'published'
-        ? 'Compte rendu publié'
+        ? 'Rapport publié'
         : wasPublished
-          ? 'Compte rendu dépublié'
+          ? 'Rapport dépublié'
           : 'Brouillon enregistré',
     )
     return true
@@ -211,14 +211,14 @@ async function saveDraft() {
 
 async function publish() {
   if (!body.value.trim()) {
-    toast.error('Le compte rendu ne peut pas être vide')
+    toast.error('Le rapport ne peut pas être vide')
     return
   }
   await persist('published')
 }
 
 async function unpublish() {
-  if (!window.confirm('Dépublier ce compte rendu ? Il ne sera plus visible publiquement.')) {
+  if (!window.confirm('Dépublier ce rapport ? Il ne sera plus visible publiquement.')) {
     return
   }
   await persist('draft')
@@ -288,7 +288,7 @@ async function removeTemplate() {
     <PageTitleTabs
       :tabs="matchsTabs"
       ariaLabel="Sections des matchs"
-      :current="{ label: 'Compte rendu' }"
+      :current="{ label: 'Rapport' }"
     />
 
     <section class="page-header">
@@ -323,7 +323,7 @@ async function removeTemplate() {
 
     <div v-else-if="match && !isAuthenticated" class="space-y-3">
       <p class="text-sm text-muted-foreground">
-        Connectez-vous avec Discord pour rédiger le compte rendu de ce match.
+        Connectez-vous avec Discord pour rédiger le rapport de ce match.
       </p>
       <Button type="button" size="sm" @click="login">Connexion</Button>
     </div>
@@ -367,7 +367,7 @@ async function removeTemplate() {
 
       <Card class="neon-panel">
         <CardHeader>
-          <CardTitle class="text-base">Rédiger le compte rendu</CardTitle>
+          <CardTitle class="text-base">Rédiger le rapport</CardTitle>
           <CardDescription>
             Un seul bloc markdown. Appliquez un modèle pour pré-remplir les sections
             (listes, déploiement, tours) avec les pseudos du match.
@@ -497,7 +497,7 @@ async function removeTemplate() {
     </div>
 
     <p v-else-if="match" class="text-sm text-muted-foreground">
-      Seul un joueur ayant participé à ce match terminé peut en rédiger le compte rendu.
+      Seul un joueur ayant participé à ce match terminé peut en rédiger le rapport.
     </p>
   </div>
 </template>

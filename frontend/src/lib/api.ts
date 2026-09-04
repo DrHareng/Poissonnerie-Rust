@@ -160,6 +160,24 @@ export function updatePrefs(payload: {
   })
 }
 
+export interface RessourcesContent {
+  body_md: string
+  updated_at: number
+}
+
+export function fetchRessources(): Promise<RessourcesContent> {
+  return request<RessourcesContent>('/api/ressources')
+}
+
+export function updateRessources(payload: {
+  body_md: string
+}): Promise<RessourcesContent> {
+  return request<RessourcesContent>('/api/ressources', {
+    method: 'PATCH',
+    body: JSON.stringify(payload),
+  })
+}
+
 export function addPlayer(payload: { name: string; discord_username: string }): Promise<Player> {
   return request<Player>('/api/players', {
     method: 'POST',

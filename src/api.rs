@@ -18,7 +18,8 @@ use crate::{
     auth::{self, AuthConfig, CallbackQuery},
     default_db_path, scenario::ScenarioStore, session_store::SqliteSessionStore, tournament_api,
     ArmyListStore, ArmyStore, Leaderboard, MatchOutcome, MatchRecord, MatchScores, Player,
-    ReportStatus, ReportTemplateStore, TournamentStore, User, UserStore, DEFAULT_K_FACTOR,
+    ReportStatus, ReportTemplateStore, SiteContentStore, TournamentStore, User, UserStore,
+    DEFAULT_K_FACTOR, RESSOURCES_KEY,
 };
 use crate::army_list_store::ArmyListStatsGroup;
 use crate::tournament::TournamentStatus;
@@ -35,6 +36,7 @@ pub struct AppState {
     pub tournaments: Arc<TournamentStore>,
     pub scenarios: Arc<ScenarioStore>,
     pub report_templates: Arc<ReportTemplateStore>,
+    pub site_content: Arc<SiteContentStore>,
     pub auth: Option<AuthConfig>,
     pub db_path: PathBuf,
     pub k_factor: f64,
@@ -298,6 +300,7 @@ pub fn router(state: AppState) -> Result<Router> {
             patch(update_report_template).delete(delete_report_template),
         )
         .route("/api/health", get(health))
+        .route("/api/ressources", get(get_ressources).patch(update_ressources))
         .merge(tournament_api::tournament_routes())
         .layer(cors_layer())
         .layer(session_layer)
@@ -306,6 +309,46 @@ pub fn router(state: AppState) -> Result<Router> {
 
 async fn health() -> &'static str {
     "ok"
+}
+
+#[derive(Debug, Serialize)]
+struct RessourcesResponse {
+    body_md: String,
+    updated_at: u64,
+}
+
+#[derive(Debug, Deserialize)]
+struct UpdateRessourcesRequest {
+    body_md: String,
+}
+
+async fn get_ressources(
+    State(state): State<AppState>,
+) -> Result<Json<RessourcesResponse>, ApiError> {
+    let content = state
+        .site_content
+        .get(RESSOURCES_KEY)
+        .map_err(|error| ApiError::bad_request(error.to_string()))?;
+    Ok(Json(RessourcesResponse {
+        body_md: content.body_md,
+        updated_at: content.updated_at,
+    }))
+}
+
+async fn update_ressources(
+    State(state): State<AppState>,
+    session: Session,
+    Json(payload): Json<UpdateRessourcesRequest>,
+) -> Result<Json<RessourcesResponse>, ApiError> {
+    require_admin(&state, &session).await?;
+    let content = state
+        .site_content
+        .update(RESSOURCES_KEY, &payload.body_md)
+        .map_err(|error| ApiError::bad_request(error.to_string()))?;
+    Ok(Json(RessourcesResponse {
+        body_md: content.body_md,
+        updated_at: content.updated_at,
+    }))
 }
 
 async fn discord_login(State(state): State<AppState>) -> Result<Redirect, ApiError> {
@@ -1670,6 +1713,7 @@ pub fn default_state() -> anyhow::Result<AppState> {
     let tournaments = TournamentStore::open(&db_path)?;
     let scenarios = ScenarioStore::open(&db_path)?;
     let report_templates = ReportTemplateStore::open(&db_path)?;
+    let site_content = SiteContentStore::open(&db_path)?;
     let auth = AuthConfig::from_env().ok();
     Ok(AppState {
         board: Arc::new(Mutex::new(board)),
@@ -1679,6 +1723,7 @@ pub fn default_state() -> anyhow::Result<AppState> {
         tournaments: Arc::new(tournaments),
         scenarios: Arc::new(scenarios),
         report_templates: Arc::new(report_templates),
+        site_content: Arc::new(site_content),
         auth,
         db_path,
         k_factor: DEFAULT_K_FACTOR,

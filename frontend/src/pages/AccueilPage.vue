@@ -251,7 +251,7 @@ onMounted(async () => {
           <div class="flex items-center justify-between gap-3">
             <CardTitle class="flex items-center gap-2">
               <FileText class="size-5 text-primary" />
-              Derniers comptes rendus
+              Derniers rapports
             </CardTitle>
             <RouterLink
               :to="{ name: 'matchs-cr' }"
@@ -272,7 +272,7 @@ onMounted(async () => {
             v-else-if="reports.length === 0"
             class="rounded-lg border border-dashed p-4 text-center text-sm text-muted-foreground"
           >
-            Aucun compte rendu publié pour l’instant.
+            Aucun rapport publié pour l’instant.
           </div>
           <Table v-else>
             <TableBody>

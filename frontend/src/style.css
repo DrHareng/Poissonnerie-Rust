@@ -342,11 +342,19 @@
   }
 
   .page-title-tabs {
-    @apply flex shrink-0 flex-nowrap items-baseline gap-x-5 overflow-hidden border-b border-border/60 pb-3;
+    @apply flex shrink-0 flex-nowrap items-end justify-between gap-x-4 border-b border-border/60;
+  }
+
+  .page-title-tabs-list {
+    @apply flex min-w-0 flex-nowrap items-end gap-x-5;
+  }
+
+  .page-title-tabs-actions {
+    @apply flex shrink-0 items-center self-center pb-1;
   }
 
   .page-title-tab {
-    @apply relative shrink-0 font-display text-2xl font-bold tracking-wide uppercase transition md:text-3xl;
+    @apply relative shrink-0 pb-3 font-display text-2xl font-bold tracking-wide uppercase transition md:text-3xl;
     @apply text-muted-foreground/40 hover:text-muted-foreground;
   }
 
@@ -366,7 +374,8 @@
 
   .page-title-tab--active::after {
     content: '';
-    @apply absolute -bottom-3 left-0 right-0 h-0.5 bg-primary;
+    @apply absolute bottom-0 left-0 right-0 h-[3px] rounded-full bg-primary;
+    box-shadow: 0 0 10px oklch(0.8 0.14 195 / 55%);
   }
 
   .page-description {

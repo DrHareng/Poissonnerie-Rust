@@ -373,18 +373,20 @@ watch(
 <template>
   <div class="page-stack">
     <nav class="page-title-tabs" aria-label="Sections des scénarios">
-      <h1 class="sr-only">{{ activeTabLabel }}</h1>
-      <button
-        v-for="tab in tabs"
-        :key="tab.id"
-        type="button"
-        class="page-title-tab"
-        :class="{ 'page-title-tab--active': activeTab === tab.id }"
-        :aria-current="activeTab === tab.id ? 'page' : undefined"
-        @click="setActiveTab(tab.id)"
-      >
-        {{ tab.label }}
-      </button>
+      <div class="page-title-tabs-list">
+        <h1 class="sr-only">{{ activeTabLabel }}</h1>
+        <button
+          v-for="tab in tabs"
+          :key="tab.id"
+          type="button"
+          class="page-title-tab"
+          :class="{ 'page-title-tab--active': activeTab === tab.id }"
+          :aria-current="activeTab === tab.id ? 'page' : undefined"
+          @click="setActiveTab(tab.id)"
+        >
+          {{ tab.label }}
+        </button>
+      </div>
     </nav>
 
     <Alert v-if="!apiOnline" variant="destructive" class="neon-panel-accent shrink-0">

@@ -79,11 +79,11 @@ onMounted(() => {
     <CardHeader class="lg:shrink-0">
       <CardTitle class="flex items-center gap-2">
         <FileText class="size-5 text-primary" />
-        Comptes rendus
+        Rapports
       </CardTitle>
       <CardDescription>
         <template v-if="total">
-          {{ total }} compte{{ total > 1 ? 's' : '' }} rendu{{ total > 1 ? 's' : '' }} publié{{
+          {{ total }} rapport{{ total > 1 ? 's' : '' }} publié{{
             total > 1 ? 's' : ''
           }}, du plus récent au plus ancien.
         </template>
@@ -97,14 +97,14 @@ onMounted(() => {
         v-if="loading"
         class="rounded-lg border border-dashed p-8 text-center text-muted-foreground"
       >
-        Chargement des comptes rendus…
+        Chargement des rapports…
       </div>
 
       <div
         v-else-if="reports.length === 0"
         class="rounded-lg border border-dashed p-8 text-center text-muted-foreground"
       >
-        Aucun compte rendu publié pour l’instant.
+        Aucun rapport publié pour l’instant.
       </div>
 
       <template v-else>

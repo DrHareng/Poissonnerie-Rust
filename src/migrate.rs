@@ -287,6 +287,7 @@ pub fn migrate(conn: &Connection) -> Result<()> {
     }
 
     migrate_match_reports(conn)?;
+    migrate_site_content(conn)?;
 
     if column_exists(conn, "matches", "tournament_id")?
         && column_exists(conn, "matches", "tournament_phase")?
@@ -871,6 +872,20 @@ fn migrate_match_reports(conn: &Connection) -> Result<()> {
         [],
     )?;
 
+    Ok(())
+}
+
+fn migrate_site_content(conn: &Connection) -> Result<()> {
+    conn.execute_batch(
+        "
+        CREATE TABLE IF NOT EXISTS site_content (
+            key TEXT PRIMARY KEY NOT NULL,
+            body_md TEXT NOT NULL DEFAULT '',
+            updated_at INTEGER NOT NULL
+        );
+        ",
+    )?;
+    crate::site_content::seed_ressources_content(conn)?;
     Ok(())
 }
 

@@ -215,9 +215,9 @@ function reportFor(playerName: string) {
 
 function crButtonLabel(playerName: string): string {
   const report = reportFor(playerName)
-  if (report?.status === 'draft') return 'Continuer le CR'
-  if (report) return 'Modifier mon CR'
-  return 'Saisir un CR'
+  if (report?.status === 'draft') return 'Continuer le rapport'
+  if (report) return 'Modifier mon rapport'
+  return 'Saisir un rapport'
 }
 
 function openCr() {
@@ -631,7 +631,7 @@ onMounted(loadMatch)
             <div class="flex items-start justify-between gap-3">
               <div class="space-y-1">
                 <CardTitle class="flex flex-wrap items-center gap-2 text-base">
-                  CR — {{ match.player1_display_name ?? match.player1 }}
+                  Rapport — {{ match.player1_display_name ?? match.player1 }}
                   <Badge v-if="reportFor(match.player1)?.status === 'draft'" variant="secondary">
                     Brouillon
                   </Badge>
@@ -663,7 +663,7 @@ onMounted(loadMatch)
               :source="match.player1_report.body_md"
             />
             <p v-else class="text-sm text-muted-foreground italic">
-              Aucun compte rendu pour l'instant.
+              Aucun rapport pour l'instant.
             </p>
           </CardContent>
         </Card>
@@ -673,7 +673,7 @@ onMounted(loadMatch)
             <div class="flex items-start justify-between gap-3">
               <div class="space-y-1">
                 <CardTitle class="flex flex-wrap items-center gap-2 text-base">
-                  CR — {{ match.player2_display_name ?? match.player2 }}
+                  Rapport — {{ match.player2_display_name ?? match.player2 }}
                   <Badge v-if="reportFor(match.player2)?.status === 'draft'" variant="secondary">
                     Brouillon
                   </Badge>
@@ -705,14 +705,14 @@ onMounted(loadMatch)
               :source="match.player2_report.body_md"
             />
             <p v-else class="text-sm text-muted-foreground italic">
-              Aucun compte rendu pour l'instant.
+              Aucun rapport pour l'instant.
             </p>
           </CardContent>
         </Card>
       </div>
 
       <p v-if="!isAuthenticated" class="text-sm text-muted-foreground">
-        Connectez-vous avec Discord pour saisir votre liste ou rédiger votre compte rendu si vous
+        Connectez-vous avec Discord pour saisir votre liste ou rédiger votre rapport si vous
         avez participé à ce match.
         <Button type="button" size="sm" variant="link" class="px-1" @click="login">
           Connexion

@@ -202,7 +202,7 @@ async function refreshReports() {
   } catch (error) {
     apiOnline.value = false
     toast.error(
-      error instanceof Error ? error.message : 'Impossible de charger les comptes rendus',
+      error instanceof Error ? error.message : 'Impossible de charger les rapports',
     )
   } finally {
     loadingReports.value = false
@@ -351,7 +351,14 @@ onMounted(async () => {
     <PageTitleTabs
       :tabs="matchsTabs"
       ariaLabel="Sections des matchs"
-    />
+    >
+      <template v-if="isAuthenticated" #actions>
+        <RouterLink to="/partie" class="topbar-cta">
+          <Play class="size-4" />
+          Démarrer une partie
+        </RouterLink>
+      </template>
+    </PageTitleTabs>
 
     <Alert v-if="!apiOnline" variant="destructive" class="neon-panel-accent">
       <AlertTitle>API indisponible</AlertTitle>

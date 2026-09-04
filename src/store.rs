@@ -1071,11 +1071,11 @@ impl Leaderboard {
             .ok_or_else(|| anyhow::anyhow!("match introuvable"))?;
 
         if record.status != MatchStatus::Completed {
-            bail!("le compte rendu n'est disponible qu'une fois le match terminé");
+            bail!("le rapport n'est disponible qu'une fois le match terminé");
         }
 
         if status == ReportStatus::Published && body_md.trim().is_empty() {
-            bail!("le compte rendu ne peut pas être vide");
+            bail!("le rapport ne peut pas être vide");
         }
 
         let report = |existing: &Option<MatchReport>| {

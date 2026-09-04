@@ -33,7 +33,7 @@ export const matchsTabs: PageTitleTab[] = [
   },
   {
     to: { name: 'matchs-cr' },
-    label: 'Compte rendu',
+    label: 'Rapports',
     activeNames: ['matchs-cr'],
   },
 ]

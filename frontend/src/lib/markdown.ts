@@ -1,4 +1,4 @@
-/** Markdown maison → HTML (scénarios, CR, descriptions, etc.). */
+/** Markdown maison → HTML (scénarios, rapports, descriptions, etc.). */
 
 import { withBase } from '@/lib/basePath'
 

@@ -2,6 +2,7 @@
 import { computed } from 'vue'
 import { useRoute } from 'vue-router'
 import {
+  BookOpen,
   ChevronDown,
   Eye,
   LogIn,
@@ -41,6 +42,7 @@ const links = [
   { to: '/matchs', label: 'Matchs', icon: Swords },
   { to: '/tournois', label: 'Tournois', icon: Trophy },
   { to: '/classement', label: 'Classement', icon: Podium },
+  { to: '/ressources', label: 'Ressources', icon: BookOpen },
 ]
 
 const activePath = computed(() => route.path)
@@ -62,6 +64,9 @@ function isLinkActive(to: string) {
   }
   if (to === '/scenarios') {
     return path.startsWith('/scenarios')
+  }
+  if (to === '/ressources') {
+    return path.startsWith('/ressources')
   }
   return path === to
 }
@@ -96,15 +101,6 @@ async function handleLogout() {
 
     <div class="flex flex-col gap-3 md:flex-row md:items-center md:gap-4">
       <nav class="topbar-nav" aria-label="Navigation principale">
-        <RouterLink
-          v-if="isAuthenticated"
-          to="/partie"
-          class="topbar-cta"
-          :class="{ 'topbar-cta-active': activePath === '/partie' }"
-        >
-          <Play class="size-4" />
-          Démarrer une partie
-        </RouterLink>
         <RouterLink
           v-for="link in links"
           :key="link.to"

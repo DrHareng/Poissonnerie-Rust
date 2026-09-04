@@ -60,23 +60,28 @@ function isActive(tab: DisplayTab) {
 
 <template>
   <nav class="page-title-tabs" :aria-label="ariaLabel">
-    <h1 class="sr-only">{{ activeLabel }}</h1>
-    <RouterLink
-      v-for="tab in displayTabs"
-      :key="tab.label"
-      :to="tab.to"
-      class="page-title-tab"
-      :class="{
-        'page-title-tab--active': isActive(tab),
-        'page-title-tab--detail': tab.isCurrent,
-      }"
-      :aria-current="isActive(tab) ? 'page' : undefined"
-      :title="tab.title ?? tab.detailLabel"
-    >
-      <template v-if="tab.isCurrent && tab.detailLabel">
-        <span class="page-title-tab-detail">&gt; {{ tab.detailLabel }}</span>
-      </template>
-      <template v-else>{{ tab.label }}</template>
-    </RouterLink>
+    <div class="page-title-tabs-list">
+      <h1 class="sr-only">{{ activeLabel }}</h1>
+      <RouterLink
+        v-for="tab in displayTabs"
+        :key="tab.label"
+        :to="tab.to"
+        class="page-title-tab"
+        :class="{
+          'page-title-tab--active': isActive(tab),
+          'page-title-tab--detail': tab.isCurrent,
+        }"
+        :aria-current="isActive(tab) ? 'page' : undefined"
+        :title="tab.title ?? tab.detailLabel"
+      >
+        <template v-if="tab.isCurrent && tab.detailLabel">
+          <span class="page-title-tab-detail">&gt; {{ tab.detailLabel }}</span>
+        </template>
+        <template v-else>{{ tab.label }}</template>
+      </RouterLink>
+    </div>
+    <div v-if="$slots.actions" class="page-title-tabs-actions">
+      <slot name="actions" />
+    </div>
   </nav>
 </template>

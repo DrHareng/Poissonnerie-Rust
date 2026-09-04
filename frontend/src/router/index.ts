@@ -11,6 +11,7 @@ import ScenariosPage from '@/pages/ScenariosPage.vue'
 import TournoisPage from '@/pages/TournoisPage.vue'
 import TournoiPage from '@/pages/TournoiPage.vue'
 import PartiePage from '@/pages/PartiePage.vue'
+import RessourcesPage from '@/pages/RessourcesPage.vue'
 import { pageTitle } from '@/lib/pageTitle'
 
 export const router = createRouter({
@@ -53,6 +54,12 @@ export const router = createRouter({
       meta: { title: 'Scénarios' },
     },
     {
+      path: '/ressources',
+      name: 'ressources',
+      component: RessourcesPage,
+      meta: { title: 'Ressources' },
+    },
+    {
       path: '/scenarios/secondaires',
       redirect: { name: 'scenarios', query: { tab: 'secondaires' } },
     },
@@ -79,7 +86,7 @@ export const router = createRouter({
       path: '/matchs/cr',
       name: 'matchs-cr',
       component: MatchsPage,
-      meta: { title: 'Compte rendu' },
+      meta: { title: 'Rapport' },
     },
     {
       path: '/matchs/:id',
@@ -136,7 +143,7 @@ router.afterEach((to) => {
     return
   }
   if (to.name === 'match-cr') {
-    document.title = pageTitle('Compte rendu')
+    document.title = pageTitle('Rapport')
     return
   }
   const suffix = to.meta.title
