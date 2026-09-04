@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
-import { useRoute, useRouter } from 'vue-router'
+import { computed, nextTick, onMounted, ref, watch } from 'vue'
+import { RouterLink, useRoute, useRouter } from 'vue-router'
 import { toast } from 'vue-sonner'
 import { Dices } from '@lucide/vue'
 import {
@@ -172,6 +172,47 @@ function setSelectedScenario(slug: string) {
   syncRouteQuery('liste', slug)
   void updatePrefs({ scenario_slug: slug }).catch(() => {
     // Keep the local choice even if persistence fails.
+  })
+}
+
+function scenarioTo(slug: string) {
+  return { name: 'scenarios' as const, query: { scenario: slug } }
+}
+
+/** Clic gauche dans l’onglet courant : mémorise le choix. Molette / nouvel onglet : navigation native. */
+function onScenarioLinkClick(slug: string, event: MouseEvent) {
+  if (
+    event.button !== 0 ||
+    event.metaKey ||
+    event.ctrlKey ||
+    event.shiftKey ||
+    event.altKey
+  ) {
+    return
+  }
+  preferredScenarioSlug.value = slug
+  void updatePrefs({ scenario_slug: slug }).catch(() => {
+    // Keep the local choice even if persistence fails.
+  })
+}
+
+function scrollActiveScenarioIntoView() {
+  const run = () => {
+    document
+      .querySelectorAll('.scenario-side-item--active')
+      .forEach((el) => {
+        ;(el as HTMLElement).scrollIntoView({
+          block: 'center',
+          inline: 'nearest',
+        })
+      })
+  }
+  void nextTick(() => {
+    run()
+    requestAnimationFrame(() => {
+      run()
+      requestAnimationFrame(run)
+    })
   })
 }
 
@@ -368,6 +409,15 @@ watch(
   (active) => setCustomSide(active),
   { immediate: true },
 )
+
+watch(
+  [showScenarioListSide, selectedScenarioSlug, () => page.value?.scenarios.length],
+  ([sideVisible, slug]) => {
+    if (!sideVisible || !slug) return
+    scrollActiveScenarioIntoView()
+  },
+  { flush: 'post' },
+)
 </script>
 
 <template>
@@ -429,19 +479,22 @@ watch(
                 class="scenario-side-list"
                 aria-label="Scénarios du pack"
               >
-                <button
+                <RouterLink
                   v-for="scenario in page.scenarios"
                   :key="scenario.id"
-                  type="button"
+                  :to="scenarioTo(scenario.slug)"
                   class="scenario-side-item"
                   :class="{
                     'scenario-side-item--active':
                       selectedScenarioSlug === scenario.slug,
                   }"
-                  @click="setSelectedScenario(scenario.slug)"
+                  :aria-current="
+                    selectedScenarioSlug === scenario.slug ? 'page' : undefined
+                  "
+                  @click="onScenarioLinkClick(scenario.slug, $event)"
                 >
                   {{ scenario.name }}
-                </button>
+                </RouterLink>
               </nav>
             </CardContent>
           </Card>
@@ -468,19 +521,22 @@ watch(
                 class="scenario-side-list"
                 aria-label="Scénarios du pack"
               >
-                <button
+                <RouterLink
                   v-for="scenario in page.scenarios"
                   :key="`mobile-${scenario.id}`"
-                  type="button"
+                  :to="scenarioTo(scenario.slug)"
                   class="scenario-side-item"
                   :class="{
                     'scenario-side-item--active':
                       selectedScenarioSlug === scenario.slug,
                   }"
-                  @click="setSelectedScenario(scenario.slug)"
+                  :aria-current="
+                    selectedScenarioSlug === scenario.slug ? 'page' : undefined
+                  "
+                  @click="onScenarioLinkClick(scenario.slug, $event)"
                 >
                   {{ scenario.name }}
-                </button>
+                </RouterLink>
               </nav>
             </CardContent>
           </Card>

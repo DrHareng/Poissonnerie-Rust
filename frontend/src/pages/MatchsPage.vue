@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, ref, watch } from 'vue'
-import { useRoute, useRouter } from 'vue-router'
+import { RouterLink, useRoute, useRouter } from 'vue-router'
 import { toast } from 'vue-sonner'
 import { Play, Trash2 } from '@lucide/vue'
 import {
@@ -151,27 +151,97 @@ function persistArmySelection() {
   )
 }
 
+function armySlugFromQuery(): string | null {
+  const raw = route.query.army
+  const value = Array.isArray(raw) ? raw[0] : raw
+  if (typeof value !== 'string') return null
+  const slug = value.trim()
+  return slug || null
+}
+
+function armyIdFromSlug(slug: string | null): number | null {
+  if (!slug) return null
+  const needle = slug.toLowerCase()
+  return (
+    playableArmies.value.find((army) => army.slug.toLowerCase() === needle)?.id ??
+    null
+  )
+}
+
+function armyTo(slug: string) {
+  return { name: 'matchs-listes' as const, query: { army: slug } }
+}
+
+function syncArmyQuery(armyId: number | null) {
+  if (!isListsTab.value) return
+  const army = playableArmies.value.find((item) => item.id === armyId)
+  const nextSlug = army?.slug ?? null
+  const currentSlug = armySlugFromQuery()
+  if (nextSlug === currentSlug) return
+  router.replace({
+    name: 'matchs-listes',
+    query: nextSlug ? { army: nextSlug } : {},
+  })
+}
+
 function initArmySelection() {
   const ids = playableArmies.value.map((army) => army.id)
   if (ids.length === 0) {
     selectedArmyId.value = null
+    syncArmyQuery(null)
+    return
+  }
+
+  const fromQuery = armyIdFromSlug(armySlugFromQuery())
+  if (fromQuery != null) {
+    selectedArmyId.value = fromQuery
+    persistArmySelection()
     return
   }
 
   const stored = loadStoredArmyId()
   if (stored != null && ids.includes(stored)) {
     selectedArmyId.value = stored
+    syncArmyQuery(stored)
     return
   }
 
   selectedArmyId.value = ids[0] ?? null
   persistArmySelection()
+  syncArmyQuery(selectedArmyId.value)
 }
 
-function selectArmy(armyId: number) {
-  if (selectedArmyId.value === armyId) return
+/** Clic gauche : mémorise. Molette / nouvel onglet : navigation native via RouterLink. */
+function onArmyLinkClick(armyId: number, event: MouseEvent) {
+  if (
+    event.button !== 0 ||
+    event.metaKey ||
+    event.ctrlKey ||
+    event.shiftKey ||
+    event.altKey
+  ) {
+    return
+  }
   selectedArmyId.value = armyId
   persistArmySelection()
+}
+
+function scrollActiveArmyIntoView() {
+  const run = () => {
+    document.querySelectorAll('.scenario-side-item--active').forEach((el) => {
+      ;(el as HTMLElement).scrollIntoView({
+        block: 'center',
+        inline: 'nearest',
+      })
+    })
+  }
+  void nextTick(() => {
+    run()
+    requestAnimationFrame(() => {
+      run()
+      requestAnimationFrame(run)
+    })
+  })
 }
 
 async function refreshMatches() {
@@ -301,6 +371,38 @@ watch(selectedArmyId, () => {
   if (isListsTab.value) void refreshArmyLists()
 })
 
+watch(
+  () => [isListsTab.value, route.query.army] as const,
+  () => {
+    if (!isListsTab.value || playableArmies.value.length === 0) return
+    const fromQuery = armyIdFromSlug(armySlugFromQuery())
+    if (fromQuery != null) {
+      if (selectedArmyId.value !== fromQuery) {
+        selectedArmyId.value = fromQuery
+        persistArmySelection()
+      }
+      return
+    }
+    if (
+      selectedArmyId.value == null ||
+      !playableArmies.value.some((army) => army.id === selectedArmyId.value)
+    ) {
+      initArmySelection()
+      return
+    }
+    syncArmyQuery(selectedArmyId.value)
+  },
+)
+
+watch(
+  [showArmyListsSide, selectedArmyId, () => playableArmies.value.length],
+  ([sideVisible, armyId]) => {
+    if (!sideVisible || armyId == null) return
+    scrollActiveArmyIntoView()
+  },
+  { flush: 'post' },
+)
+
 watch(isReportsTab, (isReports) => {
   if (isReports) {
     if (reportsPage.value !== 1) {
@@ -392,19 +494,20 @@ onMounted(async () => {
             class="scenario-side-list"
             aria-label="Sectorielles jouables"
           >
-            <button
+            <RouterLink
               v-for="army in playableArmies"
               :key="army.id"
-              type="button"
+              :to="armyTo(army.slug)"
               class="scenario-side-item flex items-center gap-2"
               :class="{
                 'scenario-side-item--active': selectedArmyId === army.id,
               }"
-              @click="selectArmy(army.id)"
+              :aria-current="selectedArmyId === army.id ? 'page' : undefined"
+              @click="onArmyLinkClick(army.id, $event)"
             >
               <ArmyLogo :army-id="army.id" />
               <span class="min-w-0 truncate">{{ army.name }}</span>
-            </button>
+            </RouterLink>
           </nav>
         </CardContent>
       </Card>
@@ -528,19 +631,20 @@ onMounted(async () => {
             class="scenario-side-list"
             aria-label="Sectorielles jouables"
           >
-            <button
+            <RouterLink
               v-for="army in playableArmies"
               :key="`mobile-${army.id}`"
-              type="button"
+              :to="armyTo(army.slug)"
               class="scenario-side-item flex items-center gap-2"
               :class="{
                 'scenario-side-item--active': selectedArmyId === army.id,
               }"
-              @click="selectArmy(army.id)"
+              :aria-current="selectedArmyId === army.id ? 'page' : undefined"
+              @click="onArmyLinkClick(army.id, $event)"
             >
               <ArmyLogo :army-id="army.id" />
               <span class="min-w-0 truncate">{{ army.name }}</span>
-            </button>
+            </RouterLink>
           </nav>
         </CardContent>
       </Card>

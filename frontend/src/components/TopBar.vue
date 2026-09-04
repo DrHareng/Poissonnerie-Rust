@@ -118,48 +118,6 @@ async function handleLogout() {
           Connexion...
         </div>
         <template v-else-if="isAuthenticated && user">
-          <div
-            v-if="isAdmin"
-            class="flex items-center gap-0"
-            role="group"
-            aria-label="Mode d’édition"
-          >
-            <Button
-              type="button"
-              size="xs"
-              variant="outline"
-              :class="[
-                'rounded-r-none',
-                isEditMode
-                  ? 'border-primary bg-primary! text-primary-foreground hover:bg-primary/90'
-                  : 'border-border bg-black text-white hover:text-primary',
-              ]"
-              :aria-pressed="isEditMode"
-              title="Mode édition"
-              @click="setEditMode(true)"
-            >
-              <Pencil class="size-3.5" />
-              Édition
-            </Button>
-            <Button
-              type="button"
-              size="xs"
-              variant="outline"
-              :class="[
-                'rounded-l-none border-l-0',
-                !isEditMode
-                  ? 'border-primary bg-primary! text-primary-foreground hover:bg-primary/90'
-                  : 'border-border bg-black text-white hover:text-primary',
-              ]"
-              :aria-pressed="!isEditMode"
-              title="Mode consultation"
-              @click="setEditMode(false)"
-            >
-              <Eye class="size-3.5" />
-              Lecture
-            </Button>
-          </div>
-
           <DropdownMenuRoot>
             <DropdownMenuTrigger
               class="topbar-user-trigger"
@@ -204,6 +162,45 @@ async function handleLogout() {
               </DropdownMenuContent>
             </DropdownMenuPortal>
           </DropdownMenuRoot>
+          <div
+            v-if="isAdmin"
+            class="flex items-center gap-0"
+            role="group"
+            aria-label="Mode d’édition"
+          >
+            <Button
+              type="button"
+              size="xs"
+              variant="outline"
+              :class="[
+                'rounded-r-none',
+                isEditMode
+                  ? 'border-primary bg-primary! text-primary-foreground hover:bg-primary/90'
+                  : 'border-border bg-black text-white hover:text-primary',
+              ]"
+              :aria-pressed="isEditMode"
+              title="Mode édition"
+              @click="setEditMode(true)"
+            >
+              <Pencil class="size-3.5" />
+            </Button>
+            <Button
+              type="button"
+              size="xs"
+              variant="outline"
+              :class="[
+                'rounded-l-none border-l-0',
+                !isEditMode
+                  ? 'border-primary bg-primary! text-primary-foreground hover:bg-primary/90'
+                  : 'border-border bg-black text-white hover:text-primary',
+              ]"
+              :aria-pressed="!isEditMode"
+              title="Mode consultation"
+              @click="setEditMode(false)"
+            >
+              <Eye class="size-3.5" />
+            </Button>
+          </div>
         </template>
         <Button v-else size="sm" @click="login">
           <LogIn class="size-4" />
