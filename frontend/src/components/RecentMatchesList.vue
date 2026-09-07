@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import { ChevronLeft, ChevronRight, History } from '@lucide/vue'
+import { History } from '@lucide/vue'
 import type { MatchRecord } from '@/types/elo'
+import PaginationBar from '@/components/PaginationBar.vue'
 import MatchResultBadges from '@/components/MatchResultBadges.vue'
 import MatchContextCell from '@/components/MatchContextCell.vue'
 import MatchOpenButton from '@/components/MatchOpenButton.vue'
@@ -16,7 +17,6 @@ import {
   playerMatchEloDelta,
 } from '@/lib/matchPlayerPerspective'
 import { formatMatchRecordedDate } from '@/lib/tournamentMatchDisplay'
-import { Button } from '@/components/ui/button'
 import {
   Card,
   CardContent,
@@ -106,16 +106,6 @@ const visibleMatches = computed(() => {
 const displayMatches = computed(() =>
   props.clientSide ? visibleMatches.value : preparedMatches.value,
 )
-
-const pageStart = computed(() => {
-  if (!effectiveTotal.value) return 0
-  return ((props.page ?? 1) - 1) * props.pageSize + 1
-})
-
-const pageEnd = computed(() => {
-  if (!effectiveTotal.value) return 0
-  return Math.min((props.page ?? 1) * props.pageSize, effectiveTotal.value)
-})
 
 const defaultDescription = computed(() => {
   if (effectiveTotal.value) {
@@ -266,37 +256,15 @@ function formatEloCell(match: MatchRecord) {
           </TableBody>
         </Table>
 
-        <div
+        <PaginationBar
           v-if="effectiveTotalPages > 1"
-          class="mt-4 flex flex-col gap-3 border-t border-border pt-4 sm:flex-row sm:items-center sm:justify-between"
-        >
-          <p class="text-sm text-muted-foreground">
-            {{ pageStart }}–{{ pageEnd }} sur {{ effectiveTotal }}
-          </p>
-          <div class="flex items-center gap-2">
-            <Button
-              variant="outline"
-              size="sm"
-              :disabled="(page ?? 1) <= 1 || loading"
-              @click="goToPage((page ?? 1) - 1)"
-            >
-              <ChevronLeft class="size-4" />
-              Précédent
-            </Button>
-            <span class="min-w-24 text-center text-sm text-muted-foreground">
-              Page {{ page ?? 1 }} / {{ effectiveTotalPages }}
-            </span>
-            <Button
-              variant="outline"
-              size="sm"
-              :disabled="(page ?? 1) >= effectiveTotalPages || loading"
-              @click="goToPage((page ?? 1) + 1)"
-            >
-              Suivant
-              <ChevronRight class="size-4" />
-            </Button>
-          </div>
-        </div>
+          :page="page ?? 1"
+          :total-pages="effectiveTotalPages"
+          :total="effectiveTotal"
+          :page-size="pageSize"
+          :loading="loading"
+          @page-change="goToPage"
+        />
       </template>
     </CardContent>
   </Card>

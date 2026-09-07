@@ -1608,7 +1608,15 @@ async fn correct_tournament_match(
     Json(payload): Json<SubmitMatchRequest>,
 ) -> Result<Json<crate::tournament::TournamentMatch>, ApiError> {
     require_admin(&state, &session).await?;
+    let tm = apply_tournament_match_correction(&state, id, &payload)?;
+    Ok(Json(tm))
+}
 
+pub(crate) fn apply_tournament_match_correction(
+    state: &AppState,
+    id: i64,
+    payload: &SubmitMatchRequest,
+) -> Result<crate::tournament::TournamentMatch, ApiError> {
     let before = state
         .tournaments
         .get_match(id)
@@ -1624,7 +1632,7 @@ async fn correct_tournament_match(
 
     let (tm, _winner_changed) = state
         .tournaments
-        .correct_match_score(id, &payload, state.k_factor)
+        .correct_match_score(id, payload, state.k_factor)
         .map_err(|error| ApiError::bad_request(error.to_string()))?;
 
     let new_bracket_snapshot = state
@@ -1632,19 +1640,60 @@ async fn correct_tournament_match(
         .bracket_elo_snapshot(tournament_id)
         .map_err(|error| ApiError::bad_request(error.to_string()))?;
 
-    sync_board_after_tournament_correction(
-        &state,
-        &old_bracket_snapshot,
-        &new_bracket_snapshot,
-        old_outcome,
-        tm.outcome,
-        tm.player1.as_deref().unwrap_or(""),
-        tm.player2.as_deref().unwrap_or(""),
-        tm.phase != crate::tournament::TournamentPhase::Pool,
-        before.is_forfeit || before.is_unplayed,
-    )?;
+    if before.status == crate::tournament::TournamentMatchStatus::Confirmed {
+        sync_board_after_tournament_correction(
+            state,
+            &old_bracket_snapshot,
+            &new_bracket_snapshot,
+            old_outcome,
+            tm.outcome,
+            tm.player1.as_deref().unwrap_or(""),
+            tm.player2.as_deref().unwrap_or(""),
+            tm.phase != crate::tournament::TournamentPhase::Pool,
+            before.is_forfeit || before.is_unplayed,
+        )?;
+    }
 
-    Ok(Json(tm))
+    sync_elo_match_after_tournament_score_edit(state, &tm)?;
+
+    Ok(tm)
+}
+
+fn sync_elo_match_after_tournament_score_edit(
+    state: &AppState,
+    tm: &crate::tournament::TournamentMatch,
+) -> Result<(), ApiError> {
+    let Some(elo_id) = tm.elo_match_id else {
+        return Ok(());
+    };
+    let Some(outcome) = tm.outcome else {
+        return Ok(());
+    };
+
+    let update = RatingUpdate {
+        player1_old: tm.player1_rating_used.unwrap_or(0.0),
+        player1_new: tm.player1_rating_used.unwrap_or(0.0) + tm.player1_elo_delta,
+        player2_old: tm.player2_rating_used.unwrap_or(0.0),
+        player2_new: tm.player2_rating_used.unwrap_or(0.0) + tm.player2_elo_delta,
+    };
+    let scores = MatchScores {
+        player1_objectives: tm.player1_objectives,
+        player1_survivors: tm.player1_survivors,
+        player2_objectives: tm.player2_objectives,
+        player2_survivors: tm.player2_survivors,
+    };
+
+    let mut board = state.board.lock().unwrap();
+    if board.get_match(elo_id).is_none() {
+        return Ok(());
+    }
+    board
+        .patch_match_result_fields(elo_id, outcome, update, scores)
+        .map_err(|error| ApiError::bad_request(error.to_string()))?;
+    board
+        .save(&state.db_path)
+        .map_err(|error| ApiError::bad_request(error.to_string()))?;
+    Ok(())
 }
 
 async fn get_player_tournaments(

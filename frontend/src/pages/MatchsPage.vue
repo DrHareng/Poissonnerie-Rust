@@ -21,6 +21,7 @@ import PageTitleTabs from '@/components/PageTitleTabs.vue'
 import { useAuth } from '@/composables/useAuth'
 import { useAppSidePanel } from '@/composables/useAppSidePanel'
 import { useArmies } from '@/composables/useArmies'
+import { useListPage } from '@/composables/useListPage'
 import { useMyInProgressMatches, inProgressMenuLabel } from '@/composables/useMyInProgressMatches'
 import { PARTIE_STEP_LABELS, type PartieStep } from '@/composables/usePartieFlow'
 import { matchsTabs } from '@/lib/pageTitleTabs'
@@ -70,7 +71,6 @@ const apiOnline = ref(true)
 
 const matches = ref<MatchRecord[]>([])
 const totalMatches = ref(0)
-const page = ref(1)
 const loadingMatches = ref(true)
 
 const isReportsTab = computed(() => route.name === 'matchs-cr')
@@ -80,10 +80,25 @@ const showInProgress = computed(
   () => isAuthenticated.value && isMatchsTab.value,
 )
 
+const {
+  page,
+  setPage,
+  clampToTotalPages,
+} = useListPage({
+  enabled: isMatchsTab,
+})
+
 const reports = ref<RecentMatchReport[]>([])
 const totalReports = ref(0)
-const reportsPage = ref(1)
 const loadingReports = ref(true)
+
+const {
+  page: reportsPage,
+  setPage: setReportsPage,
+  clampToTotalPages: clampReportPages,
+} = useListPage({
+  enabled: isReportsTab,
+})
 
 const selectedArmyId = ref<number | null>(null)
 const selectedArmyLists = ref<ArmyListStatsEntry[]>([])
@@ -248,9 +263,14 @@ async function refreshMatches() {
   loadingMatches.value = true
   try {
     const response = await fetchRecentMatches(PAGE_SIZE, (page.value - 1) * PAGE_SIZE)
-    matches.value = response.items
     totalMatches.value = response.total
+    const pages = Math.max(1, Math.ceil(response.total / PAGE_SIZE))
     apiOnline.value = true
+    if (page.value > pages) {
+      clampToTotalPages(pages)
+      return
+    }
+    matches.value = response.items
   } catch (error) {
     apiOnline.value = false
     toast.error(error instanceof Error ? error.message : 'Impossible de charger les matchs')
@@ -266,9 +286,14 @@ async function refreshReports() {
       REPORT_PAGE_SIZE,
       (reportsPage.value - 1) * REPORT_PAGE_SIZE,
     )
-    reports.value = response.items
     totalReports.value = response.total
+    const pages = Math.max(1, Math.ceil(response.total / REPORT_PAGE_SIZE))
     apiOnline.value = true
+    if (reportsPage.value > pages) {
+      clampReportPages(pages)
+      return
+    }
+    reports.value = response.items
   } catch (error) {
     apiOnline.value = false
     toast.error(
@@ -327,11 +352,11 @@ async function refreshAll() {
 }
 
 function onPageChange(nextPage: number) {
-  page.value = nextPage
+  setPage(nextPage)
 }
 
 function onReportsPageChange(nextPage: number) {
-  reportsPage.value = nextPage
+  setReportsPage(nextPage)
 }
 
 function resumePartie(id: number) {
@@ -405,19 +430,11 @@ watch(
 
 watch(isReportsTab, (isReports) => {
   if (isReports) {
-    if (reportsPage.value !== 1) {
-      reportsPage.value = 1
-      return
-    }
     void refreshReports()
     return
   }
   if (isListsTab.value) {
     void refreshAll()
-    return
-  }
-  if (page.value !== 1) {
-    page.value = 1
     return
   }
   void refreshMatches()

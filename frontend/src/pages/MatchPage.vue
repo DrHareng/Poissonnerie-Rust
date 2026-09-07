@@ -4,6 +4,7 @@ import { RouterLink, useRoute, useRouter } from 'vue-router'
 import { toast } from 'vue-sonner'
 import { Play, Pencil, Swords, Trash2 } from '@lucide/vue'
 import {
+  correctMatch,
   deleteMatch,
   fetchArmies,
   fetchMatch,
@@ -13,6 +14,7 @@ import {
 } from '@/lib/api'
 import type {
   Army,
+  MatchOutcome,
   MatchRecord,
   ScenarioSummary,
   SecondaryObjective,
@@ -37,6 +39,8 @@ import PageTitleTabs from '@/components/PageTitleTabs.vue'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
 import {
   Card,
   CardContent,
@@ -55,7 +59,16 @@ const secondaries = ref<SecondaryObjective[]>([])
 const scenarios = ref<ScenarioSummary[]>([])
 const loading = ref(true)
 const deleting = ref(false)
+const correcting = ref(false)
+const savingCorrection = ref(false)
 const apiOnline = ref(true)
+
+const scoreForm = ref({
+  player1Objectives: 0,
+  player1Survivors: 0,
+  player2Objectives: 0,
+  player2Survivors: 0,
+})
 
 const matchId = computed(() => Number(route.params.id))
 
@@ -338,6 +351,73 @@ async function onDelete() {
   }
 }
 
+const canCorrectScore = computed(
+  () =>
+    Boolean(
+      isAdmin.value &&
+        match.value &&
+        match.value.status === 'completed' &&
+        !correcting.value,
+    ),
+)
+
+function startCorrection() {
+  if (!match.value) return
+  scoreForm.value = {
+    player1Objectives: match.value.player1_objectives,
+    player1Survivors: match.value.player1_survivors,
+    player2Objectives: match.value.player2_objectives,
+    player2Survivors: match.value.player2_survivors,
+  }
+  correcting.value = true
+}
+
+function cancelCorrection() {
+  correcting.value = false
+}
+
+function clampObjectives(value: number) {
+  return Math.min(10, Math.max(0, Math.round(Number(value) || 0)))
+}
+
+function clampSurvivors(value: number) {
+  return Math.min(300, Math.max(0, Math.round(Number(value) || 0)))
+}
+
+function outcomeFromScores(
+  p1Objectives: number,
+  p2Objectives: number,
+): MatchOutcome {
+  if (p1Objectives > p2Objectives) return 'player1_win'
+  if (p2Objectives > p1Objectives) return 'player2_win'
+  return 'draw'
+}
+
+async function saveCorrection() {
+  if (!match.value) return
+  const player1_objectives = clampObjectives(scoreForm.value.player1Objectives)
+  const player2_objectives = clampObjectives(scoreForm.value.player2Objectives)
+  const player1_survivors = clampSurvivors(scoreForm.value.player1Survivors)
+  const player2_survivors = clampSurvivors(scoreForm.value.player2Survivors)
+
+  savingCorrection.value = true
+  try {
+    match.value = await correctMatch(match.value.id, {
+      outcome: outcomeFromScores(player1_objectives, player2_objectives),
+      player1_objectives,
+      player1_survivors,
+      player2_objectives,
+      player2_survivors,
+    })
+    correcting.value = false
+    toast.success('Score corrigé')
+  } catch (error) {
+    toast.error(error instanceof Error ? error.message : 'Correction impossible')
+  } finally {
+    savingCorrection.value = false
+  }
+}
+
 onMounted(loadMatch)
 </script>
 
@@ -363,11 +443,40 @@ onMounted(loadMatch)
             Reprendre
           </Button>
           <Button
+            v-if="canCorrectScore"
+            type="button"
+            size="sm"
+            variant="outline"
+            @click="startCorrection"
+          >
+            <Pencil class="size-4" />
+            Corriger le score
+          </Button>
+          <template v-if="correcting">
+            <Button
+              type="button"
+              size="sm"
+              :disabled="savingCorrection"
+              @click="saveCorrection"
+            >
+              {{ savingCorrection ? 'Enregistrement…' : 'Enregistrer' }}
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              :disabled="savingCorrection"
+              @click="cancelCorrection"
+            >
+              Annuler
+            </Button>
+          </template>
+          <Button
             v-if="isAdmin && match"
             type="button"
             variant="destructive"
             size="sm"
-            :disabled="deleting"
+            :disabled="deleting || correcting"
             @click="onDelete"
           >
             <Trash2 class="size-4" />
@@ -476,7 +585,34 @@ onMounted(loadMatch)
                 }}</span>
               </ContentHoverTip>
               <div
-                v-if="objectivesPoints('player1') != null"
+                v-if="correcting"
+                class="grid gap-2 text-sm"
+              >
+                <div class="grid gap-1">
+                  <Label :for="`match-p1-obj-${match.id}`">Points d'objectifs (0–10)</Label>
+                  <Input
+                    :id="`match-p1-obj-${match.id}`"
+                    v-model.number="scoreForm.player1Objectives"
+                    type="number"
+                    min="0"
+                    max="10"
+                    step="1"
+                  />
+                </div>
+                <div class="grid gap-1">
+                  <Label :for="`match-p1-surv-${match.id}`">Points de survivants (0–300)</Label>
+                  <Input
+                    :id="`match-p1-surv-${match.id}`"
+                    v-model.number="scoreForm.player1Survivors"
+                    type="number"
+                    min="0"
+                    max="300"
+                    step="1"
+                  />
+                </div>
+              </div>
+              <div
+                v-else-if="objectivesPoints('player1') != null"
                 class="space-y-0.5 text-sm"
               >
                 <p>
@@ -594,7 +730,34 @@ onMounted(loadMatch)
                 }}</span>
               </ContentHoverTip>
               <div
-                v-if="objectivesPoints('player2') != null"
+                v-if="correcting"
+                class="grid gap-2 text-sm"
+              >
+                <div class="grid gap-1">
+                  <Label :for="`match-p2-obj-${match.id}`">Points d'objectifs (0–10)</Label>
+                  <Input
+                    :id="`match-p2-obj-${match.id}`"
+                    v-model.number="scoreForm.player2Objectives"
+                    type="number"
+                    min="0"
+                    max="10"
+                    step="1"
+                  />
+                </div>
+                <div class="grid gap-1">
+                  <Label :for="`match-p2-surv-${match.id}`">Points de survivants (0–300)</Label>
+                  <Input
+                    :id="`match-p2-surv-${match.id}`"
+                    v-model.number="scoreForm.player2Survivors"
+                    type="number"
+                    min="0"
+                    max="300"
+                    step="1"
+                  />
+                </div>
+              </div>
+              <div
+                v-else-if="objectivesPoints('player2') != null"
                 class="space-y-0.5 text-sm"
               >
                 <p>

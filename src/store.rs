@@ -936,6 +936,133 @@ impl Leaderboard {
         Ok(record.clone())
     }
 
+    /// Corrige le score d'un match terminé (hors tournoi). Ajuste ELO / V-N-D si besoin.
+    pub fn correct_match(
+        &mut self,
+        id: u64,
+        outcome: MatchOutcome,
+        k_factor: f64,
+        scores: MatchScores,
+    ) -> Result<MatchRecord> {
+        let scores = scores.validate()?;
+        let index = self
+            .matches
+            .iter()
+            .position(|record| record.id == id)
+            .ok_or_else(|| anyhow::anyhow!("match introuvable"))?;
+
+        if self.matches[index].status != MatchStatus::Completed {
+            bail!("seuls les matchs terminés peuvent être corrigés");
+        }
+        if self.matches[index].tournament_id.is_some() {
+            bail!("corrigez ce match depuis la page du tournoi");
+        }
+
+        let old_outcome = self.matches[index]
+            .outcome
+            .context("résultat manquant sur le match")?;
+        let key1 = normalize_name(&self.matches[index].player1.clone());
+        let key2 = normalize_name(&self.matches[index].player2.clone());
+        let counts_for_elo = self.matches[index].counts_for_elo;
+        let rating_old1 = self.matches[index].player1_old;
+        let rating_old2 = self.matches[index].player2_old;
+        let rating_new1 = self.matches[index].player1_new;
+        let rating_new2 = self.matches[index].player2_new;
+
+        let update = if counts_for_elo {
+            {
+                let p1 = self.players.get_mut(&key1).context("joueur introuvable")?;
+                p1.rating -= rating_new1 - rating_old1;
+                adjust_player_match_count(p1, old_outcome.score_for_player1(), -1);
+            }
+            {
+                let score2 = match old_outcome.score_for_player1() {
+                    crate::elo::MatchScore::Win => crate::elo::MatchScore::Loss,
+                    crate::elo::MatchScore::Draw => crate::elo::MatchScore::Draw,
+                    crate::elo::MatchScore::Loss => crate::elo::MatchScore::Win,
+                };
+                let p2 = self.players.get_mut(&key2).context("joueur introuvable")?;
+                p2.rating -= rating_new2 - rating_old2;
+                adjust_player_match_count(p2, score2, -1);
+            }
+
+            let score1 = outcome.score_for_player1();
+            let (new1, new2) =
+                crate::elo::update_ratings(rating_old1, rating_old2, score1, k_factor);
+            {
+                let p1 = self.players.get_mut(&key1).unwrap();
+                p1.rating += new1 - rating_old1;
+                p1.record_match(score1);
+            }
+            {
+                let score2 = match score1 {
+                    crate::elo::MatchScore::Win => crate::elo::MatchScore::Loss,
+                    crate::elo::MatchScore::Draw => crate::elo::MatchScore::Draw,
+                    crate::elo::MatchScore::Loss => crate::elo::MatchScore::Win,
+                };
+                let p2 = self.players.get_mut(&key2).unwrap();
+                p2.rating += new2 - rating_old2;
+                p2.record_match(score2);
+            }
+            crate::player::RatingUpdate {
+                player1_old: rating_old1,
+                player1_new: new1,
+                player2_old: rating_old2,
+                player2_new: new2,
+            }
+        } else {
+            crate::player::RatingUpdate {
+                player1_old: rating_old1,
+                player1_new: rating_old1,
+                player2_old: rating_old2,
+                player2_new: rating_old2,
+            }
+        };
+
+        let record = &mut self.matches[index];
+        record.outcome = Some(outcome);
+        record.player1_old = update.player1_old;
+        record.player1_new = update.player1_new;
+        record.player2_old = update.player2_old;
+        record.player2_new = update.player2_new;
+        record.player1_objectives = scores.player1_objectives;
+        record.player1_survivors = scores.player1_survivors;
+        record.player2_objectives = scores.player2_objectives;
+        record.player2_survivors = scores.player2_survivors;
+
+        Ok(record.clone())
+    }
+
+    /// Met à jour uniquement les champs résultat d'un match (sans toucher aux joueurs).
+    pub fn patch_match_result_fields(
+        &mut self,
+        match_id: u64,
+        outcome: MatchOutcome,
+        update: crate::player::RatingUpdate,
+        scores: MatchScores,
+    ) -> Result<MatchRecord> {
+        let scores = scores.validate()?;
+        let index = self
+            .matches
+            .iter()
+            .position(|record| record.id == match_id)
+            .ok_or_else(|| anyhow::anyhow!("match introuvable"))?;
+
+        let record = &mut self.matches[index];
+        record.status = MatchStatus::Completed;
+        record.outcome = Some(outcome);
+        record.player1_old = update.player1_old;
+        record.player1_new = update.player1_new;
+        record.player2_old = update.player2_old;
+        record.player2_new = update.player2_new;
+        record.player1_objectives = scores.player1_objectives;
+        record.player1_survivors = scores.player1_survivors;
+        record.player2_objectives = scores.player2_objectives;
+        record.player2_survivors = scores.player2_survivors;
+
+        Ok(record.clone())
+    }
+
     /// Applique un résultat tournoi (ELO déjà calculé) sur une partie liée existante.
     pub fn apply_tournament_elo_to_existing_match(
         &mut self,
@@ -2754,5 +2881,69 @@ mod tests {
         assert_eq!(report.status, ReportStatus::Draft);
         assert_eq!(report.body_md, "version publique");
         let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn correct_match_updates_scores_and_reverses_elo() {
+        use crate::player::MatchOutcome;
+
+        let mut board = Leaderboard::default();
+        board.add_player("Alice").unwrap();
+        board.add_player("Bob").unwrap();
+
+        let started = board
+            .start_match(
+                "Alice",
+                "Bob",
+                101,
+                201,
+                "Alice",
+                Vec::new(),
+                Vec::new(),
+                true,
+            )
+            .unwrap();
+        let completed = board
+            .complete_match(
+                started.id,
+                MatchOutcome::Player1Win,
+                32.0,
+                MatchScores {
+                    player1_objectives: 8,
+                    player1_survivors: 100,
+                    player2_objectives: 5,
+                    player2_survivors: 80,
+                },
+            )
+            .unwrap();
+
+        let alice_after_win = board.get_player("Alice").unwrap().rating;
+        let bob_after_loss = board.get_player("Bob").unwrap().rating;
+        assert_eq!(board.get_player("Alice").unwrap().wins, 1);
+        assert_eq!(board.get_player("Bob").unwrap().losses, 1);
+
+        let corrected = board
+            .correct_match(
+                completed.id,
+                MatchOutcome::Player2Win,
+                32.0,
+                MatchScores {
+                    player1_objectives: 3,
+                    player1_survivors: 50,
+                    player2_objectives: 7,
+                    player2_survivors: 120,
+                },
+            )
+            .unwrap();
+
+        assert_eq!(corrected.player1_objectives, 3);
+        assert_eq!(corrected.player2_objectives, 7);
+        assert_eq!(corrected.outcome, Some(MatchOutcome::Player2Win));
+        assert_eq!(board.get_player("Alice").unwrap().wins, 0);
+        assert_eq!(board.get_player("Alice").unwrap().losses, 1);
+        assert_eq!(board.get_player("Bob").unwrap().wins, 1);
+        assert_eq!(board.get_player("Bob").unwrap().losses, 0);
+        assert!(board.get_player("Alice").unwrap().rating < alice_after_win);
+        assert!(board.get_player("Bob").unwrap().rating > bob_after_loss);
     }
 }

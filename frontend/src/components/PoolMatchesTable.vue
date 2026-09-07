@@ -210,7 +210,7 @@ void showActions
                 {{ match.is_forfeit ? 'Confirmer FF' : 'Confirmer' }}
               </Button>
               <Button
-                v-if="isAdmin && match.status === 'confirmed' && !match.is_forfeit && !isCorrecting(match)"
+                v-if="isAdmin && (match.status === 'confirmed' || match.status === 'submitted') && !match.is_forfeit && !isCorrecting(match)"
                 size="sm"
                 variant="outline"
                 @click="startCorrection(match)"

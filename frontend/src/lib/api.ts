@@ -367,6 +367,22 @@ export function completeMatch(
   })
 }
 
+export function correctMatch(
+  id: number,
+  payload: {
+    outcome: MatchOutcome
+    player1_objectives: number
+    player1_survivors: number
+    player2_objectives: number
+    player2_survivors: number
+  },
+): Promise<MatchRecord> {
+  return request<MatchRecord>(`/api/matches/${id}/correct`, {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  })
+}
+
 export function fetchMyInProgressMatches(): Promise<MatchRecord[]> {
   return request<MatchRecord[]>('/api/matches/mine/in-progress')
 }

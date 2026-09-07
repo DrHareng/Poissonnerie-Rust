@@ -179,7 +179,7 @@ function matchPlayerLabel(slot: 'player1' | 'player2') {
           {{ statusLabel }}
         </span>
         <Button
-          v-if="isAdmin && match.status === 'confirmed' && !match.is_forfeit && !correcting"
+          v-if="isAdmin && (match.status === 'confirmed' || match.status === 'submitted') && !match.is_forfeit && !correcting"
           size="sm"
           variant="outline"
           class="tournament-match-correct-btn"
@@ -210,7 +210,7 @@ function matchPlayerLabel(slot: 'player1' | 'player2') {
       />
 
       <div
-        v-if="canInteract && hasBothPlayers"
+        v-if="hasBothPlayers && (canInteract || correcting)"
         class="tournament-match-actions"
       >
         <template v-if="correcting">

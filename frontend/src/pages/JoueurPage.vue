@@ -15,6 +15,7 @@ import { pageTitle } from '@/lib/pageTitle'
 import { classementTabs } from '@/lib/pageTitleTabs'
 import { useAuth } from '@/composables/useAuth'
 import { useAppSidePanel } from '@/composables/useAppSidePanel'
+import { useListPage } from '@/composables/useListPage'
 import type {
   MatchRecord,
   PlayerArmyStats,
@@ -52,14 +53,23 @@ const loading = ref(true)
 const loadingMatches = ref(true)
 const loadingArmyStats = ref(true)
 const savingProfile = ref(false)
-const matchesPage = ref(1)
 
 const MATCHES_PAGE_SIZE = 5
 
 const localDisplayName = ref('')
 const localAvatarUrl = ref('')
 
+function normalize(name: string) {
+  return name.trim().toLowerCase()
+}
+
 const playerName = computed(() => String(route.params.name ?? ''))
+
+const {
+  page: matchesPage,
+  setPage: goToMatchesPage,
+  clampToTotalPages: clampMatchesPages,
+} = useListPage()
 
 const title = useTitle()
 
@@ -98,10 +108,6 @@ watch(
   },
   { immediate: true },
 )
-
-function normalize(name: string) {
-  return name.trim().toLowerCase()
-}
 
 const isOwnProfile = computed(() => Boolean(profile.value?.is_own_profile))
 
@@ -164,24 +170,20 @@ async function loadMatches() {
   const name = playerName.value
   if (!name) {
     matches.value = []
-    matchesPage.value = 1
+    goToMatchesPage(1)
     return
   }
 
   loadingMatches.value = true
   try {
     matches.value = await fetchPlayerMatches(name)
-    matchesPage.value = 1
+    clampMatchesPages(Math.max(1, Math.ceil(matches.value.length / MATCHES_PAGE_SIZE)))
   } catch {
     matches.value = []
-    matchesPage.value = 1
+    goToMatchesPage(1)
   } finally {
     loadingMatches.value = false
   }
-}
-
-function goToMatchesPage(nextPage: number) {
-  matchesPage.value = nextPage
 }
 
 async function loadArmyStats() {

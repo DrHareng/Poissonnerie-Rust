@@ -1856,12 +1856,47 @@ impl TournamentStore {
             .get_match_in_conn(&conn, match_id)?
             .context("match introuvable")?;
 
-        if old.status != TournamentMatchStatus::Confirmed {
-            bail!("seuls les matchs confirmés peuvent être corrigés");
+        if old.status != TournamentMatchStatus::Confirmed
+            && old.status != TournamentMatchStatus::Submitted
+        {
+            bail!("seuls les matchs soumis ou confirmés peuvent être corrigés");
         }
 
         let p1 = old.player1.as_ref().context("joueur 1 manquant")?;
         let p2 = old.player2.as_ref().context("joueur 2 manquant")?;
+
+        // Match encore en attente de confirmation : on met à jour le score sans recalculer
+        // les classements / l'arbre (appliqués à la confirmation).
+        if old.status == TournamentMatchStatus::Submitted {
+            let outcome = outcome_from_objectives(
+                request.player1_objectives,
+                request.player2_objectives,
+            );
+            conn.execute(
+                "
+                UPDATE tournament_matches SET
+                    player1_objectives = ?1, player2_objectives = ?2,
+                    player1_survivors = ?3, player2_survivors = ?4,
+                    outcome = ?5,
+                    is_forfeit = 0, is_unplayed = 0, forfeit_player = NULL
+                WHERE id = ?6
+                ",
+                params![
+                    request.player1_objectives,
+                    request.player2_objectives,
+                    request.player1_survivors,
+                    request.player2_survivors,
+                    outcome_to_str(outcome),
+                    match_id,
+                ],
+            )?;
+            drop(conn);
+            let updated = self
+                .get_match(match_id)?
+                .context("match introuvable")?;
+            return Ok((updated, false));
+        }
+
         let old_winner = if old.is_unplayed {
             None
         } else {

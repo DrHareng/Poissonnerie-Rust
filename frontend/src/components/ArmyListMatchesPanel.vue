@@ -4,6 +4,7 @@ import { toast } from 'vue-sonner'
 import { fetchArmyListMatches } from '@/lib/api'
 import type { MatchRecord } from '@/types/elo'
 import RecentMatchesList from '@/components/RecentMatchesList.vue'
+import { useListPage } from '@/composables/useListPage'
 
 const props = defineProps<{
   listId: number
@@ -13,16 +14,16 @@ const MATCHES_PAGE_SIZE = 5
 
 const matches = ref<MatchRecord[]>([])
 const loading = ref(true)
-const page = ref(1)
+const { page, setPage, clampToTotalPages } = useListPage()
 
 async function loadMatches() {
   loading.value = true
   try {
     matches.value = await fetchArmyListMatches(props.listId)
-    page.value = 1
+    clampToTotalPages(Math.max(1, Math.ceil(matches.value.length / MATCHES_PAGE_SIZE)))
   } catch (error) {
     matches.value = []
-    page.value = 1
+    setPage(1)
     toast.error(
       error instanceof Error ? error.message : 'Impossible de charger les matchs',
     )
@@ -57,7 +58,7 @@ watch(
       :page-size="MATCHES_PAGE_SIZE"
       :perspective-army-list-id="listId"
       empty-message="Aucune partie enregistrée avec cette liste."
-      @page-change="page = $event"
+      @page-change="setPage"
     />
   </div>
 </template>

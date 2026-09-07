@@ -288,6 +288,7 @@ pub fn router(state: AppState) -> Result<Router> {
             get(get_match).delete(delete_match).patch(update_match_progress),
         )
         .route("/api/matches/{id}/complete", post(complete_match))
+        .route("/api/matches/{id}/correct", post(correct_match))
         .route("/api/matches/{id}/report", patch(update_match_report))
         .route("/api/matches/{id}/army-list", patch(update_match_army_list))
         .route("/api/reports/recent", get(list_recent_reports))
@@ -1362,6 +1363,63 @@ async fn complete_match(
     let mut board = state.board.lock().unwrap();
     let record = board
         .complete_match(id, payload.outcome, state.k_factor, scores)
+        .map_err(|error| ApiError::bad_request(error.to_string()))?;
+    board
+        .save(&state.db_path)
+        .map_err(|error| ApiError::bad_request(error.to_string()))?;
+
+    let resolver = crate::display_name::PlayerDisplayResolver::new(&board, state.users.as_ref());
+    Ok(Json(resolver.enrich_match(record)))
+}
+
+async fn correct_match(
+    State(state): State<AppState>,
+    session: Session,
+    Path(id): Path<u64>,
+    Json(payload): Json<CompleteMatchRequest>,
+) -> Result<Json<crate::display_name::EnrichedMatchRecord>, ApiError> {
+    require_admin(&state, &session).await?;
+
+    let scores = MatchScores {
+        player1_objectives: payload.player1_objectives,
+        player1_survivors: payload.player1_survivors,
+        player2_objectives: payload.player2_objectives,
+        player2_survivors: payload.player2_survivors,
+    };
+
+    // Match lié à un tournoi : déléguer à la correction tournoi (classements / arbre).
+    if let Ok(Some(tm)) = state.tournaments.find_match_by_elo_match_id(id) {
+        if tm.status == crate::tournament::TournamentMatchStatus::Confirmed
+            || tm.status == crate::tournament::TournamentMatchStatus::Submitted
+        {
+            let submit = crate::tournament_store::SubmitMatchRequest {
+                player1_objectives: payload.player1_objectives,
+                player2_objectives: payload.player2_objectives,
+                player1_survivors: payload.player1_survivors,
+                player2_survivors: payload.player2_survivors,
+                player1_army_id: None,
+                player2_army_id: None,
+                player1_list_slot: None,
+                player2_list_slot: None,
+                scenario_id: None,
+                scenario_other: None,
+            };
+            tournament_api::apply_tournament_match_correction(&state, tm.id, &submit)?;
+
+            let board = state.board.lock().unwrap();
+            let record = board
+                .get_match(id)
+                .cloned()
+                .ok_or_else(|| ApiError::bad_request("match introuvable"))?;
+            let resolver =
+                crate::display_name::PlayerDisplayResolver::new(&board, state.users.as_ref());
+            return Ok(Json(resolver.enrich_match(record)));
+        }
+    }
+
+    let mut board = state.board.lock().unwrap();
+    let record = board
+        .correct_match(id, payload.outcome, state.k_factor, scores)
         .map_err(|error| ApiError::bad_request(error.to_string()))?;
     board
         .save(&state.db_path)

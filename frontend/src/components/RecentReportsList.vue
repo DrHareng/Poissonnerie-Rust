@@ -1,13 +1,13 @@
 <script setup lang="ts">
-import { computed, onMounted } from 'vue'
+import { onMounted } from 'vue'
 import { useRouter } from 'vue-router'
-import { ChevronLeft, ChevronRight, FileText } from '@lucide/vue'
+import { FileText } from '@lucide/vue'
 import type { RecentMatchReport } from '@/types/elo'
+import PaginationBar from '@/components/PaginationBar.vue'
 import ArmyLogo from '@/components/ArmyLogo.vue'
 import MatchContextCell from '@/components/MatchContextCell.vue'
 import { useArmies } from '@/composables/useArmies'
 import { formatMatchRecordedDate } from '@/lib/tournamentMatchDisplay'
-import { Button } from '@/components/ui/button'
 import {
   Card,
   CardContent,
@@ -39,16 +39,6 @@ const emit = defineEmits<{
 
 const router = useRouter()
 const { ensureLoaded, getArmy } = useArmies()
-
-const pageStart = computed(() => {
-  if (!props.total || props.total === 0) return 0
-  return ((props.page ?? 1) - 1) * (props.pageSize ?? 10) + 1
-})
-
-const pageEnd = computed(() => {
-  if (!props.total || props.total === 0) return 0
-  return Math.min((props.page ?? 1) * (props.pageSize ?? 10), props.total)
-})
 
 function armyName(armyId?: number | null): string {
   if (!armyId) return 'Sectorielle'
@@ -154,37 +144,15 @@ onMounted(() => {
           </TableBody>
         </Table>
 
-        <div
+        <PaginationBar
           v-if="totalPages && totalPages > 1"
-          class="mt-4 flex flex-col gap-3 border-t border-border pt-4 sm:flex-row sm:items-center sm:justify-between"
-        >
-          <p class="text-sm text-muted-foreground">
-            {{ pageStart }}–{{ pageEnd }} sur {{ total }}
-          </p>
-          <div class="flex items-center gap-2">
-            <Button
-              variant="outline"
-              size="sm"
-              :disabled="(page ?? 1) <= 1 || loading"
-              @click="goToPage((page ?? 1) - 1)"
-            >
-              <ChevronLeft class="size-4" />
-              Précédent
-            </Button>
-            <span class="min-w-24 text-center text-sm text-muted-foreground">
-              Page {{ page ?? 1 }} / {{ totalPages }}
-            </span>
-            <Button
-              variant="outline"
-              size="sm"
-              :disabled="(page ?? 1) >= totalPages || loading"
-              @click="goToPage((page ?? 1) + 1)"
-            >
-              Suivant
-              <ChevronRight class="size-4" />
-            </Button>
-          </div>
-        </div>
+          :page="page ?? 1"
+          :total-pages="totalPages"
+          :total="total ?? 0"
+          :page-size="pageSize ?? 10"
+          :loading="loading"
+          @page-change="goToPage"
+        />
       </template>
     </CardContent>
   </Card>

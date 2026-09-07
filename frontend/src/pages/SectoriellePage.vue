@@ -20,6 +20,7 @@ import ArmyLogo from '@/components/ArmyLogo.vue'
 import PlayerLink from '@/components/PlayerLink.vue'
 import RecentMatchesList from '@/components/RecentMatchesList.vue'
 import { useArmies } from '@/composables/useArmies'
+import { useListPage } from '@/composables/useListPage'
 import { Button } from '@/components/ui/button'
 import {
   Card,
@@ -35,12 +36,17 @@ const matches = ref<MatchRecord[]>([])
 const players = ref<ArmyPlayerStats[]>([])
 const loading = ref(true)
 const loadingMatches = ref(true)
-const matchesPage = ref(1)
 const sortMode = ref<ArmySortMode>('win_rate')
 
 const MATCHES_PAGE_SIZE = 5
 
 const armyId = computed(() => Number(route.params.id))
+
+const {
+  page: matchesPage,
+  setPage: goToMatchesPage,
+  clampToTotalPages: clampMatchesPages,
+} = useListPage()
 
 const armyName = computed(
   () => getArmy(armyId.value)?.name ?? `Sectorielle #${armyId.value}`,
@@ -123,10 +129,6 @@ function setSortMode(mode: ArmySortMode) {
   })
 }
 
-function goToMatchesPage(nextPage: number) {
-  matchesPage.value = nextPage
-}
-
 async function loadArmy() {
   const id = armyId.value
   if (!Number.isFinite(id) || id <= 0) {
@@ -158,17 +160,17 @@ async function loadMatches() {
   const id = armyId.value
   if (!Number.isFinite(id) || id <= 0) {
     matches.value = []
-    matchesPage.value = 1
+    goToMatchesPage(1)
     return
   }
 
   loadingMatches.value = true
   try {
     matches.value = await fetchArmyMatches(id)
-    matchesPage.value = 1
+    clampMatchesPages(Math.max(1, Math.ceil(matches.value.length / MATCHES_PAGE_SIZE)))
   } catch {
     matches.value = []
-    matchesPage.value = 1
+    goToMatchesPage(1)
   } finally {
     loadingMatches.value = false
   }
