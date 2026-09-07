@@ -11,6 +11,7 @@ import {
   Pencil,
   Play,
   Podium,
+  Shield,
   Swords,
   Trophy,
   User,
@@ -151,8 +152,14 @@ async function handleLogout() {
                     {{ inProgressMenuLabel }}
                   </RouterLink>
                 </DropdownMenuItem>
+                <DropdownMenuItem v-if="isAdmin" as-child>
+                  <RouterLink :to="{ name: 'admin' }" :class="menuItemClass">
+                    <Shield class="size-4" />
+                    Administration
+                  </RouterLink>
+                </DropdownMenuItem>
                 <DropdownMenuSeparator
-                  v-if="hasPlayer || inProgressRoute"
+                  v-if="hasPlayer || inProgressRoute || isAdmin"
                   class="topbar-user-menu-separator"
                 />
                 <DropdownMenuItem :class="menuItemClass" @select="handleLogout">

@@ -51,6 +51,20 @@ export interface AuthUser {
   player: Player | null
 }
 
+export interface AdminUserEntry extends User {
+  player_name?: string | null
+}
+
+export interface AdminPlayerEntry extends Player {
+  linked_user?: User | null
+  can_delete: boolean
+}
+
+export interface AdminAccounts {
+  users: AdminUserEntry[]
+  players: AdminPlayerEntry[]
+}
+
 export interface RankedPlayer extends Player {
   rank: number
   display_name: string

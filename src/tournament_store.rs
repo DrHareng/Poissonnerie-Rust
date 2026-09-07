@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::Path;
 use std::sync::Mutex;
 
@@ -197,6 +197,45 @@ impl TournamentStore {
         Ok(Self {
             conn: Mutex::new(conn),
         })
+    }
+
+    pub fn referenced_player_keys(&self) -> Result<HashSet<String>> {
+        let conn = self.conn.lock().unwrap();
+        let mut keys = HashSet::new();
+
+        for sql in [
+            "SELECT player_name_key FROM tournament_registrations",
+            "SELECT player_name_key FROM tournament_players",
+            "SELECT player_name_key FROM pool_players",
+        ] {
+            let mut stmt = conn.prepare(sql)?;
+            let rows = stmt.query_map([], |row| row.get::<_, String>(0))?;
+            for row in rows {
+                let key = row?;
+                if !key.is_empty() {
+                    keys.insert(key);
+                }
+            }
+        }
+
+        {
+            let mut stmt = conn.prepare(
+                "
+                SELECT player1 FROM tournament_matches WHERE player1 IS NOT NULL
+                UNION SELECT player2 FROM tournament_matches WHERE player2 IS NOT NULL
+                UNION SELECT forfeit_player FROM tournament_matches WHERE forfeit_player IS NOT NULL
+                ",
+            )?;
+            let rows = stmt.query_map([], |row| row.get::<_, String>(0))?;
+            for row in rows {
+                let key = normalize_name(&row?);
+                if !key.is_empty() {
+                    keys.insert(key);
+                }
+            }
+        }
+
+        Ok(keys)
     }
 
     pub fn list(&self) -> Result<Vec<Tournament>> {

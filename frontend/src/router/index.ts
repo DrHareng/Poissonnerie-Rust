@@ -12,6 +12,7 @@ import TournoisPage from '@/pages/TournoisPage.vue'
 import TournoiPage from '@/pages/TournoiPage.vue'
 import PartiePage from '@/pages/PartiePage.vue'
 import RessourcesPage from '@/pages/RessourcesPage.vue'
+import AdminPage from '@/pages/AdminPage.vue'
 import { pageTitle } from '@/lib/pageTitle'
 
 export const router = createRouter({
@@ -131,6 +132,12 @@ export const router = createRouter({
       props: true,
     },
     { path: '/joueur/:name', name: 'joueur', component: JoueurPage, props: true },
+    {
+      path: '/admin',
+      name: 'admin',
+      component: AdminPage,
+      meta: { title: 'Administration' },
+    },
   ],
 })
 

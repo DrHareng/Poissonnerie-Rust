@@ -372,6 +372,55 @@ impl Leaderboard {
         })
     }
 
+    pub fn link_player_to_discord_username(
+        &mut self,
+        player_name: &str,
+        discord_username: Option<&str>,
+    ) -> Result<()> {
+        let key = normalize_name(player_name);
+        if !self.players.contains_key(&key) {
+            bail!("joueur introuvable : {}", player_name);
+        }
+
+        match discord_username
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+        {
+            None => {
+                self.players.get_mut(&key).unwrap().discord_username = None;
+            }
+            Some(username) => {
+                for player in self.players.values_mut() {
+                    if player
+                        .discord_username
+                        .as_deref()
+                        .is_some_and(|stored| stored.eq_ignore_ascii_case(username))
+                    {
+                        player.discord_username = None;
+                    }
+                }
+                self.players.get_mut(&key).unwrap().discord_username =
+                    Some(username.to_string());
+            }
+        }
+
+        Ok(())
+    }
+
+    pub fn delete_unused_player(&mut self, name: &str) -> Result<Player> {
+        let player = self.get_player(name)?.clone();
+        let remaining = self.player_matches(&player.name, 1)?;
+        if !remaining.is_empty() {
+            bail!(
+                "impossible de supprimer « {} » : des parties sont encore enregistrées",
+                player.name
+            );
+        }
+
+        self.players.remove(&normalize_name(&player.name));
+        Ok(player)
+    }
+
     pub fn get_player(&self, name: &str) -> Result<&Player> {
         let key = normalize_name(name);
         self.players
@@ -2945,5 +2994,69 @@ mod tests {
         assert_eq!(board.get_player("Bob").unwrap().losses, 0);
         assert!(board.get_player("Alice").unwrap().rating < alice_after_win);
         assert!(board.get_player("Bob").unwrap().rating > bob_after_loss);
+    }
+
+    #[test]
+    fn link_player_assigns_and_transfers_discord_username() {
+        let mut board = Leaderboard::default();
+        board.add_player("Alice").unwrap();
+        board.add_player("Bob").unwrap();
+
+        board
+            .link_player_to_discord_username("Alice", Some("alice"))
+            .unwrap();
+        assert_eq!(
+            board.get_player("Alice").unwrap().discord_username.as_deref(),
+            Some("alice")
+        );
+
+        board
+            .link_player_to_discord_username("Bob", Some("alice"))
+            .unwrap();
+        assert_eq!(board.get_player("Alice").unwrap().discord_username, None);
+        assert_eq!(
+            board.get_player("Bob").unwrap().discord_username.as_deref(),
+            Some("alice")
+        );
+
+        board
+            .link_player_to_discord_username("Bob", None)
+            .unwrap();
+        assert_eq!(board.get_player("Bob").unwrap().discord_username, None);
+
+        let error = board
+            .link_player_to_discord_username("Inconnu", Some("alice"))
+            .unwrap_err();
+        assert!(error.to_string().contains("joueur introuvable"));
+    }
+
+    #[test]
+    fn delete_unused_player_rejects_profiles_with_matches() {
+        let mut board = Leaderboard::default();
+        board.add_player("Alice").unwrap();
+        board.add_player("Bob").unwrap();
+        board
+            .record_match(
+                "Alice",
+                "Bob",
+                MatchOutcome::Player1Win,
+                32.0,
+                MatchScores::default(),
+                None,
+                None,
+                None,
+                None,
+                None,
+            )
+            .unwrap();
+
+        let error = board.delete_unused_player("Alice").unwrap_err();
+        assert!(error.to_string().contains("des parties sont encore"));
+        assert!(board.get_player("Alice").is_ok());
+
+        board.add_player("Charlie").unwrap();
+        let removed = board.delete_unused_player("Charlie").unwrap();
+        assert_eq!(removed.name, "Charlie");
+        assert!(board.get_player("Charlie").is_err());
     }
 }

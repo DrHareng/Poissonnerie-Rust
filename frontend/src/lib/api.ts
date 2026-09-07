@@ -1,4 +1,5 @@
 import type {
+  AdminAccounts,
   ApiError,
   Army,
   ArmyListStatsGroup,
@@ -601,6 +602,37 @@ export function setTournamentListValidator(
 
 export function fetchUsers(): Promise<User[]> {
   return request<User[]>('/api/users')
+}
+
+export function fetchAdminAccounts(): Promise<AdminAccounts> {
+  return request<AdminAccounts>('/api/admin/accounts')
+}
+
+export function linkPlayerAccount(
+  playerName: string,
+  userId: number | null,
+): Promise<AdminAccounts> {
+  return request<AdminAccounts>('/api/admin/player-link', {
+    method: 'POST',
+    body: JSON.stringify({
+      player_name: playerName,
+      user_id: userId,
+    }),
+  })
+}
+
+export function deleteUnusedPlayer(playerName: string): Promise<AdminAccounts> {
+  return request<AdminAccounts>(
+    `/api/admin/players/${encodeURIComponent(playerName)}`,
+    { method: 'DELETE' },
+  )
+}
+
+export function mergePlayers(keep: string, alias: string): Promise<AdminAccounts> {
+  return request<AdminAccounts>('/api/admin/players/merge', {
+    method: 'POST',
+    body: JSON.stringify({ keep, alias }),
+  })
 }
 
 export function startTournament(id: number): Promise<Tournament> {

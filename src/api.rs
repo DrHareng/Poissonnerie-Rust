@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
@@ -6,7 +7,7 @@ use axum::{
     extract::{Path, Query, State},
     http::{HeaderValue, Method, StatusCode},
     response::{IntoResponse, Redirect, Response},
-    routing::{get, patch, post},
+    routing::{delete, get, patch, post},
     Json, Router,
 };
 use serde::{Deserialize, Serialize};
@@ -69,6 +70,42 @@ pub struct PlayerProfileResponse {
 struct AddPlayerRequest {
     name: String,
     discord_username: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct LinkPlayerAccountRequest {
+    player_name: String,
+    #[serde(default)]
+    user_id: Option<i64>,
+}
+
+#[derive(Debug, Serialize)]
+struct AdminAccountsResponse {
+    users: Vec<AdminUserEntry>,
+    players: Vec<AdminPlayerEntry>,
+}
+
+#[derive(Debug, Serialize)]
+struct AdminUserEntry {
+    #[serde(flatten)]
+    user: UserResponse,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    player_name: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+struct AdminPlayerEntry {
+    #[serde(flatten)]
+    player: Player,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    linked_user: Option<UserResponse>,
+    pub can_delete: bool,
+}
+
+#[derive(Debug, Deserialize)]
+struct MergePlayersRequest {
+    keep: String,
+    alias: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -277,6 +314,10 @@ pub fn router(state: AppState) -> Result<Router> {
         .route("/api/ranking", get(get_ranking))
         .route("/api/players", post(add_player))
         .route("/api/players/me", post(claim_player))
+        .route("/api/admin/accounts", get(admin_accounts))
+        .route("/api/admin/player-link", post(link_player_account))
+        .route("/api/admin/players/merge", post(merge_player_accounts))
+        .route("/api/admin/players/{name}", delete(delete_unused_player_account))
         .route("/api/players/{name}", get(get_player))
         .route("/api/players/{name}/armies", get(get_player_armies))
         .route("/api/players/{name}/matches", get(get_player_matches))
@@ -1109,6 +1150,187 @@ async fn add_player(
         .map_err(|error| ApiError::bad_request(error.to_string()))?;
 
     Ok((StatusCode::CREATED, Json(player)))
+}
+
+fn admin_accounts_payload(
+    board: &Leaderboard,
+    users: &[User],
+    tournament_keys: &HashSet<String>,
+) -> AdminAccountsResponse {
+    let user_entries = users
+        .iter()
+        .map(|user| AdminUserEntry {
+            player_name: board
+                .get_player_by_discord_username(&user.username)
+                .map(|player| player.name.clone()),
+            user: user.clone().into(),
+        })
+        .collect();
+
+    let mut players: Vec<AdminPlayerEntry> = board
+        .ranking()
+        .into_iter()
+        .map(|player| {
+            let linked_user = player.discord_username.as_deref().and_then(|username| {
+                users
+                    .iter()
+                    .find(|user| user.username.eq_ignore_ascii_case(username))
+                    .cloned()
+                    .map(Into::into)
+            });
+            let has_matches = board
+                .player_matches(&player.name, 1)
+                .map(|matches| !matches.is_empty())
+                .unwrap_or(true);
+            AdminPlayerEntry {
+                player: player.clone(),
+                linked_user,
+                can_delete: !has_matches
+                    && !tournament_keys.contains(&crate::normalize_name(&player.name)),
+            }
+        })
+        .collect();
+
+    players.sort_by(|left, right| {
+        left.player
+            .name
+            .to_lowercase()
+            .cmp(&right.player.name.to_lowercase())
+    });
+
+    AdminAccountsResponse {
+        users: user_entries,
+        players,
+    }
+}
+
+fn current_admin_accounts(
+    state: &AppState,
+    board: &Leaderboard,
+) -> Result<AdminAccountsResponse, ApiError> {
+    let users = state
+        .users
+        .list_all()
+        .map_err(|error| ApiError::bad_request(error.to_string()))?;
+    let tournament_keys = state
+        .tournaments
+        .referenced_player_keys()
+        .map_err(|error| ApiError::bad_request(error.to_string()))?;
+    Ok(admin_accounts_payload(board, &users, &tournament_keys))
+}
+
+async fn admin_accounts(
+    State(state): State<AppState>,
+    session: Session,
+) -> Result<Json<AdminAccountsResponse>, ApiError> {
+    require_admin(&state, &session).await?;
+    let board = state.board.lock().unwrap();
+    Ok(Json(current_admin_accounts(&state, &board)?))
+}
+
+async fn link_player_account(
+    State(state): State<AppState>,
+    session: Session,
+    Json(payload): Json<LinkPlayerAccountRequest>,
+) -> Result<Json<AdminAccountsResponse>, ApiError> {
+    require_admin(&state, &session).await?;
+
+    let player_name = payload.player_name.trim();
+    if player_name.is_empty() {
+        return Err(ApiError::bad_request("indiquez un joueur"));
+    }
+
+    let discord_username = if let Some(user_id) = payload.user_id {
+        let user = state
+            .users
+            .get_by_id(user_id)
+            .map_err(|error| ApiError::bad_request(error.to_string()))?
+            .ok_or_else(|| ApiError::bad_request("utilisateur introuvable"))?;
+        Some(user.username)
+    } else {
+        None
+    };
+
+    let mut board = state.board.lock().unwrap();
+    board
+        .link_player_to_discord_username(player_name, discord_username.as_deref())
+        .map_err(|error| ApiError::bad_request(error.to_string()))?;
+    board
+        .save(&state.db_path)
+        .map_err(|error| ApiError::bad_request(error.to_string()))?;
+
+    Ok(Json(current_admin_accounts(&state, &board)?))
+}
+
+async fn delete_unused_player_account(
+    State(state): State<AppState>,
+    session: Session,
+    Path(name): Path<String>,
+) -> Result<Json<AdminAccountsResponse>, ApiError> {
+    require_admin(&state, &session).await?;
+
+    let name = name.trim();
+    if name.is_empty() {
+        return Err(ApiError::bad_request("indiquez un joueur"));
+    }
+
+    let tournament_keys = state
+        .tournaments
+        .referenced_player_keys()
+        .map_err(|error| ApiError::bad_request(error.to_string()))?;
+    if tournament_keys.contains(&crate::normalize_name(name)) {
+        return Err(ApiError::bad_request(
+            "impossible de supprimer ce joueur : il apparaît encore dans un tournoi",
+        ));
+    }
+
+    let mut board = state.board.lock().unwrap();
+    board
+        .delete_unused_player(name)
+        .map_err(|error| ApiError::bad_request(error.to_string()))?;
+    board
+        .save(&state.db_path)
+        .map_err(|error| ApiError::bad_request(error.to_string()))?;
+
+    Ok(Json(current_admin_accounts(&state, &board)?))
+}
+
+async fn merge_player_accounts(
+    State(state): State<AppState>,
+    session: Session,
+    Json(payload): Json<MergePlayersRequest>,
+) -> Result<Json<AdminAccountsResponse>, ApiError> {
+    require_admin(&state, &session).await?;
+
+    let keep = payload.keep.trim().to_string();
+    let alias = payload.alias.trim().to_string();
+    if keep.is_empty() || alias.is_empty() {
+        return Err(ApiError::bad_request("indiquez les deux joueurs à fusionner"));
+    }
+    if crate::normalize_name(&keep) == crate::normalize_name(&alias) {
+        return Err(ApiError::bad_request(
+            "choisissez deux joueurs différents",
+        ));
+    }
+
+    let mut board = state.board.lock().unwrap();
+    board
+        .get_player(&keep)
+        .map_err(|error| ApiError::bad_request(error.to_string()))?;
+    board
+        .get_player(&alias)
+        .map_err(|error| ApiError::bad_request(error.to_string()))?;
+    board
+        .save(&state.db_path)
+        .map_err(|error| ApiError::bad_request(error.to_string()))?;
+
+    crate::merge_players(&state.db_path, &keep, &[&alias], state.k_factor)
+        .map_err(|error| ApiError::bad_request(error.to_string()))?;
+
+    *board = Leaderboard::load(&state.db_path)
+        .map_err(|error| ApiError::bad_request(error.to_string()))?;
+
+    Ok(Json(current_admin_accounts(&state, &board)?))
 }
 
 async fn record_match(
