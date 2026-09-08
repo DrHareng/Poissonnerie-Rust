@@ -23,7 +23,7 @@ use crate::tournament_store::{
     AdminRegisterRequest, CompleteRegistrationListsRequest, CreateTournamentRequest, ForfeitRequest,
     RegisterRequest, RerollScenarioRequest, SetBracketScenarioPoolRequest, SetPoolScenariosRequest,
     SetupPoolsRequest, SubmitMatchRequest, UpdateBracketListsRequest,
-    UpdateTournamentDetailsRequest,
+    UpdateTournamentDetailsRequest, UpdateTournamentFormatRequest,
 };
 
 async fn require_user(state: &AppState, session: &Session) -> Result<User, ApiError> {
@@ -284,6 +284,10 @@ pub fn tournament_routes() -> axum::Router<AppState> {
             get(get_tournament)
                 .patch(update_tournament_details)
                 .delete(delete_tournament),
+        )
+        .route(
+            "/api/tournaments/{id}/format",
+            axum::routing::patch(update_tournament_format),
         )
         .route(
             "/api/tournaments/{id}/open-registration",
@@ -597,6 +601,20 @@ async fn update_tournament_details(
     let tournament = state
         .tournaments
         .update_details(id, &payload)
+        .map_err(|error| ApiError::bad_request(error.to_string()))?;
+    Ok(Json(tournament))
+}
+
+async fn update_tournament_format(
+    State(state): State<AppState>,
+    session: Session,
+    Path(id): Path<i64>,
+    Json(payload): Json<UpdateTournamentFormatRequest>,
+) -> Result<Json<crate::tournament::Tournament>, ApiError> {
+    require_admin(&state, &session).await?;
+    let tournament = state
+        .tournaments
+        .update_format(id, &payload)
         .map_err(|error| ApiError::bad_request(error.to_string()))?;
     Ok(Json(tournament))
 }

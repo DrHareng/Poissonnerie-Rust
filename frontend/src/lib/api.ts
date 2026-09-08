@@ -531,6 +531,21 @@ export function updateTournamentDetails(
   })
 }
 
+export function updateTournamentFormat(
+  id: number,
+  payload: {
+    structure: string
+    swiss_rounds?: number
+    pool_count?: number
+    qualified_per_pool?: number
+  },
+): Promise<Tournament> {
+  return request<Tournament>(`/api/tournaments/${id}/format`, {
+    method: 'PATCH',
+    body: JSON.stringify(payload),
+  })
+}
+
 export function openTournamentRegistration(id: number): Promise<Tournament> {
   return request<Tournament>(`/api/tournaments/${id}/open-registration`, { method: 'POST' })
 }

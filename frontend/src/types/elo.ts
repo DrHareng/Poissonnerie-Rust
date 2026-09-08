@@ -269,6 +269,8 @@ export type RegistrationStatus = 'pending' | 'approved' | 'waitlisted' | 'reject
 
 export type BracketFormat = 'quarters_direct' | 'round_of_16' | 'round_of_16_full'
 
+export type TournamentStructure = 'swiss' | 'pools_bracket' | 'pools_final'
+
 export type TournamentPhase = 'pool' | 'round_of_16' | 'quarter' | 'semi' | 'final'
 
 export type TournamentMatchStatus = 'scheduled' | 'submitted' | 'confirmed'
@@ -280,6 +282,9 @@ export interface Tournament {
   status: TournamentStatus
   pool_count: number
   bracket_format: BracketFormat
+  structure: TournamentStructure
+  swiss_rounds: number
+  qualified_per_pool: number
   created_at: number
   started_at?: number | null
   pools_finalized_at?: number | null

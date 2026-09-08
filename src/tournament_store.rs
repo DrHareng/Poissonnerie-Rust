@@ -13,15 +13,25 @@ use crate::migrate::migrate;
 use crate::player::MatchOutcome;
 use crate::store::normalize_name;
 use crate::tournament::{
-    bracket_match_winner, bracket_scenario_phases, compute_elo_deltas, compute_bracket_placements,
-    draw_seeded_pools, enrich_top_four_armies, placement_label, pool_round_robin_pairs,
-    pool_scenario_letter, round_of_16_barrage_pairings, sort_pool_standings,
-    tournament_points_for_player, BracketFormat, PlayerTournamentResult, Pool, PoolPlayer,
-    RegistrationStatus, Tournament, TournamentDetail, TournamentListEntry, TournamentMatch,
-    TournamentMatchStatus, TournamentPhase, TournamentPlayerSnapshot, TournamentRegistration,
-    TournamentRegistrationPreview, TournamentScenarioSlot, TournamentStatus, POOLS_EIGHT_CAPACITY, POOLS_FOUR_CAPACITY,
-    POOL_SCENARIO_LETTERS, compute_display_status, compute_top_four, registration_counts,
+    bracket_format_for_pools, bracket_match_winner, bracket_scenario_phases, compute_elo_deltas,
+    compute_bracket_placements, draw_seeded_pools, enrich_top_four_armies,
+    expected_pool_scenario_count, placement_label, pool_round_robin_pairs, pool_scenario_letter,
+    pool_scenario_slot_letters, round_of_16_barrage_pairings, sort_pool_standings,
+    suggested_pool_count, tournament_capacity, tournament_points_for_player, BracketFormat,
+    PlayerTournamentResult, Pool, PoolPlayer, RegistrationStatus, Tournament, TournamentDetail,
+    TournamentListEntry, TournamentMatch, TournamentMatchStatus, TournamentPhase,
+    TournamentPlayerSnapshot, TournamentRegistration, TournamentRegistrationPreview,
+    TournamentScenarioSlot, TournamentStatus, TournamentStructure, DEFAULT_QUALIFIED_PER_POOL,
+    DEFAULT_SWISS_ROUNDS, MAX_POOL_SIZE, MAX_SWISS_ROUNDS,
+    compute_display_status, compute_top_four, registration_counts,
 };
+
+const TOURNAMENT_SELECT: &str = "
+    SELECT id, name, description, status, pool_count, bracket_format,
+           created_at, started_at, pools_finalized_at, completed_at,
+           list_validator_user_id, structure, swiss_rounds, qualified_per_pool
+    FROM tournaments
+";
 
 pub struct TournamentStore {
     conn: Mutex<Connection>,
@@ -39,6 +49,17 @@ pub struct UpdateTournamentDetailsRequest {
     pub name: String,
     #[serde(default)]
     pub description: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct UpdateTournamentFormatRequest {
+    pub structure: String,
+    #[serde(default)]
+    pub swiss_rounds: Option<u8>,
+    #[serde(default)]
+    pub pool_count: Option<u8>,
+    #[serde(default)]
+    pub qualified_per_pool: Option<u8>,
 }
 
 fn default_bracket_format() -> String {
@@ -240,15 +261,7 @@ impl TournamentStore {
 
     pub fn list(&self) -> Result<Vec<Tournament>> {
         let conn = self.conn.lock().unwrap();
-        let mut stmt = conn.prepare(
-            "
-            SELECT id, name, description, status, pool_count, bracket_format,
-                   created_at, started_at, pools_finalized_at, completed_at,
-                   list_validator_user_id
-            FROM tournaments
-            ORDER BY id DESC
-            ",
-        )?;
+        let mut stmt = conn.prepare(&format!("{TOURNAMENT_SELECT} ORDER BY id DESC"))?;
         let rows = stmt.query_map([], row_to_tournament)?;
         rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
     }
@@ -256,15 +269,7 @@ impl TournamentStore {
     pub fn list_entries(&self) -> Result<Vec<TournamentListEntry>> {
         let conn = self.conn.lock().unwrap();
         let tournaments = {
-            let mut stmt = conn.prepare(
-                "
-                SELECT id, name, description, status, pool_count, bracket_format,
-                       created_at, started_at, pools_finalized_at, completed_at,
-                       list_validator_user_id
-                FROM tournaments
-                ORDER BY id DESC
-                ",
-            )?;
+            let mut stmt = conn.prepare(&format!("{TOURNAMENT_SELECT} ORDER BY id DESC"))?;
             let rows = stmt.query_map([], row_to_tournament)?;
             rows.collect::<Result<Vec<_>, _>>()?
         };
@@ -334,15 +339,32 @@ impl TournamentStore {
 
         let bracket_format = BracketFormat::parse(&request.bracket_format)
             .ok_or_else(|| anyhow::anyhow!("format d'arbre invalide"))?;
+        let (pool_count, qualified_per_pool) = match bracket_format {
+            BracketFormat::RoundOf16Full => (8_u8, 2_u8),
+            BracketFormat::QuartersDirect => (4, 2),
+            BracketFormat::RoundOf16 => (4, DEFAULT_QUALIFIED_PER_POOL),
+        };
 
         let now = now_unix();
         let conn = self.conn.lock().unwrap();
         conn.execute(
             "
-            INSERT INTO tournaments (name, status, pool_count, bracket_format, created_at)
-            VALUES (?1, ?2, 4, ?3, ?4)
+            INSERT INTO tournaments (
+                name, status, pool_count, bracket_format, structure,
+                swiss_rounds, qualified_per_pool, created_at
+            )
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
             ",
-            params![name, TournamentStatus::Draft.as_str(), bracket_format.as_str(), now],
+            params![
+                name,
+                TournamentStatus::Draft.as_str(),
+                pool_count,
+                bracket_format.as_str(),
+                TournamentStructure::PoolsBracket.as_str(),
+                DEFAULT_SWISS_ROUNDS,
+                qualified_per_pool,
+                now,
+            ],
         )?;
         let id = conn.last_insert_rowid();
         self.get_in_conn(&conn, id)?
@@ -375,6 +397,111 @@ impl TournamentStore {
         }
         self.get_in_conn(&conn, tournament_id)?
             .context("tournoi introuvable après mise à jour")
+    }
+
+    pub fn update_format(
+        &self,
+        tournament_id: i64,
+        request: &UpdateTournamentFormatRequest,
+    ) -> Result<Tournament> {
+        let structure = TournamentStructure::parse(&request.structure)
+            .ok_or_else(|| anyhow::anyhow!("format de tournoi invalide"))?;
+
+        let conn = self.conn.lock().unwrap();
+        let tournament = self
+            .get_in_conn(&conn, tournament_id)?
+            .context("tournoi introuvable")?;
+
+        match tournament.status {
+            TournamentStatus::Draft
+            | TournamentStatus::RegistrationOpen
+            | TournamentStatus::RegistrationClosed => {}
+            TournamentStatus::Started | TournamentStatus::Completed => {
+                bail!("impossible de modifier le format après le démarrage du tournoi");
+            }
+        }
+
+        let registrations = self.list_registrations_in_conn(&conn, tournament_id)?;
+        let approved_count = registrations
+            .iter()
+            .filter(|r| r.status == RegistrationStatus::Approved)
+            .count();
+        let registered_count = registration_counts(&registrations).0 as usize;
+
+        let swiss_rounds = request.swiss_rounds.unwrap_or(tournament.swiss_rounds.max(1));
+        if !(1..=MAX_SWISS_ROUNDS).contains(&swiss_rounds) {
+            bail!("nombre de rondes suisses invalide (1–{MAX_SWISS_ROUNDS})");
+        }
+
+        let pool_count = if structure.uses_pools() {
+            let count = request
+                .pool_count
+                .unwrap_or_else(|| suggested_pool_count(registered_count));
+            if !(2..=8).contains(&count) {
+                bail!("nombre de poules invalide (2–8)");
+            }
+            count
+        } else {
+            tournament.pool_count.max(2)
+        };
+
+        let qualified_per_pool = if structure.uses_pools() {
+            let count = request
+                .qualified_per_pool
+                .unwrap_or(DEFAULT_QUALIFIED_PER_POOL);
+            if count < 1 || count as usize >= MAX_POOL_SIZE {
+                bail!(
+                    "nombre de qualifiés par poule invalide (1–{})",
+                    MAX_POOL_SIZE - 1
+                );
+            }
+            count
+        } else {
+            tournament.qualified_per_pool.max(1)
+        };
+
+        let bracket_format = if structure.uses_bracket() {
+            bracket_format_for_pools(pool_count, qualified_per_pool)
+        } else {
+            tournament.bracket_format
+        };
+
+        let mut preview = tournament.clone();
+        preview.structure = structure;
+        preview.pool_count = pool_count;
+        preview.swiss_rounds = swiss_rounds;
+        preview.qualified_per_pool = qualified_per_pool;
+        preview.bracket_format = bracket_format;
+        let capacity = tournament_capacity(&preview);
+        if approved_count > capacity {
+            bail!(
+                "trop de joueurs validés ({approved_count}) pour ce format (capacité {capacity})"
+            );
+        }
+
+        conn.execute(
+            "
+            UPDATE tournaments
+            SET structure = ?1, swiss_rounds = ?2, pool_count = ?3,
+                qualified_per_pool = ?4, bracket_format = ?5
+            WHERE id = ?6
+            ",
+            params![
+                structure.as_str(),
+                swiss_rounds,
+                pool_count,
+                qualified_per_pool,
+                bracket_format.as_str(),
+                tournament_id,
+            ],
+        )?;
+
+        if structure == TournamentStructure::Swiss {
+            self.extend_pool_scenarios_in_conn(&conn, tournament_id, swiss_rounds as usize)?;
+        }
+
+        self.get_in_conn(&conn, tournament_id)?
+            .context("tournoi introuvable après mise à jour du format")
     }
 
     /// Désigne (ou retire) le validateur de listes. Possible uniquement avant le démarrage.
@@ -989,11 +1116,7 @@ impl TournamentStore {
             bail!("sectorielle manquante pour valider l'inscription");
         }
 
-        let capacity = if tournament.pool_count >= 8 {
-            POOLS_EIGHT_CAPACITY
-        } else {
-            POOLS_FOUR_CAPACITY
-        } as i64;
+        let capacity = tournament_capacity(&tournament) as i64;
 
         if approved_count >= capacity {
             let waitlist_position = waitlisted_count + 1;
@@ -1107,6 +1230,9 @@ impl TournamentStore {
         if tournament.status != TournamentStatus::Started {
             bail!("le tournoi n'est pas démarré");
         }
+        if !tournament.structure.uses_pools() {
+            bail!("ce format n'utilise pas de poules");
+        }
 
         if request.pools.len() != tournament.pool_count as usize {
             bail!(
@@ -1167,6 +1293,9 @@ impl TournamentStore {
         if tournament.status != TournamentStatus::Started {
             bail!("le tournoi n'est pas démarré");
         }
+        if !tournament.structure.uses_pools() {
+            bail!("ce format n'utilise pas de poules");
+        }
 
         let snapshots = self.list_snapshots_in_conn(&conn, tournament_id)?;
         if snapshots.is_empty() {
@@ -1201,18 +1330,32 @@ impl TournamentStore {
         tournament_id: i64,
         scenario_ids: &[i64],
     ) -> Result<Vec<TournamentScenarioSlot>> {
-        if scenario_ids.len() != POOL_SCENARIO_LETTERS.len() {
-            bail!("il faut exactement 5 scénarios (A–E)");
+        let conn = self.conn.lock().unwrap();
+        let tournament = self
+            .get_in_conn(&conn, tournament_id)?
+            .context("tournoi introuvable")?;
+        let expected = expected_pool_scenario_count(&tournament);
+        drop(conn);
+        if scenario_ids.len() != expected {
+            bail!("il faut exactement {expected} scénario(s)");
         }
-        let slots = ["A", "B", "C", "D", "E"];
-        self.replace_scenario_kind(tournament_id, "pool", scenario_ids, &slots)
+        let letters = pool_scenario_slot_letters(expected);
+        let slots: Vec<String> = letters.iter().map(char::to_string).collect();
+        let slot_refs: Vec<&str> = slots.iter().map(String::as_str).collect();
+        self.replace_scenario_kind(tournament_id, "pool", scenario_ids, &slot_refs)
     }
 
     pub fn draw_pool_scenarios(
         &self,
         tournament_id: i64,
     ) -> Result<Vec<TournamentScenarioSlot>> {
-        let ids = self.pick_random_scenario_ids(POOL_SCENARIO_LETTERS.len())?;
+        let conn = self.conn.lock().unwrap();
+        let tournament = self
+            .get_in_conn(&conn, tournament_id)?
+            .context("tournoi introuvable")?;
+        let count = expected_pool_scenario_count(&tournament);
+        drop(conn);
+        let ids = self.pick_random_scenario_ids(count)?;
         self.set_pool_scenarios(tournament_id, &ids)
     }
 
@@ -1222,11 +1365,14 @@ impl TournamentStore {
         letter: &str,
     ) -> Result<Vec<TournamentScenarioSlot>> {
         let letter = letter.trim().to_uppercase();
-        if !POOL_SCENARIO_LETTERS.iter().any(|c| c.to_string() == letter) {
+        let conn = self.conn.lock().unwrap();
+        let tournament = self
+            .get_in_conn(&conn, tournament_id)?
+            .context("tournoi introuvable")?;
+        let allowed = pool_scenario_slot_letters(expected_pool_scenario_count(&tournament));
+        if !allowed.iter().any(|c| c.to_string() == letter) {
             bail!("lettre de scénario invalide");
         }
-        let conn = self.conn.lock().unwrap();
-        self.ensure_tournament_exists(&conn, tournament_id)?;
         let current = self.list_scenarios_in_conn(&conn, tournament_id, "pool")?;
         let used: Vec<i64> = current.iter().map(|s| s.scenario_id).collect();
         let new_id = self.pick_random_scenario_excluding(&conn, &used)?;
@@ -1250,6 +1396,9 @@ impl TournamentStore {
         let tournament = self
             .get_in_conn(&conn, tournament_id)?
             .context("tournoi introuvable")?;
+        if !tournament.structure.uses_bracket() {
+            bail!("ce format n'utilise pas d'arbre");
+        }
         if tournament.pools_finalized_at.is_none() {
             bail!("finalisez les poules avant de choisir les scénarios d'arbre");
         }
@@ -1366,10 +1515,17 @@ impl TournamentStore {
 
     pub fn generate_pool_matches(&self, tournament_id: i64) -> Result<Vec<TournamentMatch>> {
         let conn = self.conn.lock().unwrap();
+        let tournament = self
+            .get_in_conn(&conn, tournament_id)?
+            .context("tournoi introuvable")?;
+        if !tournament.structure.uses_pools() {
+            bail!("ce format n'utilise pas de matchs de poule");
+        }
         let pools = self.list_pools_in_conn(&conn, tournament_id)?;
         let pool_scenarios = self.list_scenarios_in_conn(&conn, tournament_id, "pool")?;
-        if pool_scenarios.len() != POOL_SCENARIO_LETTERS.len() {
-            bail!("définissez les 5 scénarios de poule (A–E) avant de générer les matchs");
+        let expected = expected_pool_scenario_count(&tournament);
+        if pool_scenarios.len() < expected {
+            bail!("définissez les {expected} scénarios de poule avant de générer les matchs");
         }
         let letter_to_id: HashMap<char, i64> = pool_scenarios
             .iter()
@@ -1379,37 +1535,33 @@ impl TournamentStore {
             })
             .collect();
 
+        let regenerate_all = tournament.pools_finalized_at.is_none();
         let tx = conn.unchecked_transaction()?;
-        tx.execute(
-            "DELETE FROM tournament_matches WHERE tournament_id = ?1 AND phase = 'pool'",
-            params![tournament_id],
-        )?;
+        if regenerate_all {
+            tx.execute(
+                "DELETE FROM tournament_matches WHERE tournament_id = ?1 AND phase = 'pool'",
+                params![tournament_id],
+            )?;
+        }
 
         for pool in &pools {
-            let n = pool.players.len();
-            let pairs = pool_round_robin_pairs(n);
-            for (i, j) in pairs {
-                let p1 = &pool.players[i];
-                let p2 = &pool.players[j];
-                let scenario_id = pool_scenario_letter(n, p1.seed as usize, p2.seed as usize)
-                    .and_then(|letter| letter_to_id.get(&letter).copied());
-                tx.execute(
-                    "
-                    INSERT INTO tournament_matches
-                        (tournament_id, phase, pool_id, player1, player2, status, scenario_id)
-                    VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
-                    ",
-                    params![
-                        tournament_id,
-                        TournamentPhase::Pool.as_str(),
-                        pool.id,
-                        p1.player_name,
-                        p2.player_name,
-                        TournamentMatchStatus::Scheduled.as_str(),
-                        scenario_id,
-                    ],
-                )?;
+            if regenerate_all && !is_group_pool(&tournament, pool) {
+                continue;
             }
+            if !regenerate_all {
+                let existing: i64 = tx.query_row(
+                    "
+                    SELECT COUNT(*) FROM tournament_matches
+                    WHERE tournament_id = ?1 AND pool_id = ?2
+                    ",
+                    params![tournament_id, pool.id],
+                    |row| row.get(0),
+                )?;
+                if existing > 0 {
+                    continue;
+                }
+            }
+            insert_round_robin_matches(&*tx, tournament_id, pool, &letter_to_id)?;
         }
 
         tx.commit()?;
@@ -2373,6 +2525,9 @@ impl TournamentStore {
         if tournament.status != TournamentStatus::Started {
             bail!("tournoi non démarré");
         }
+        if tournament.structure == TournamentStructure::Swiss {
+            bail!("les rondes suisses n'ont pas de phase de poules à clôturer");
+        }
 
         let unconfirmed: i64 = conn.query_row(
             "
@@ -2402,6 +2557,10 @@ impl TournamentStore {
             )?;
         }
 
+        if tournament.structure == TournamentStructure::PoolsFinal {
+            self.create_final_pool_in_conn(&conn, tournament_id, &tournament)?;
+        }
+
         let now = now_unix();
         conn.execute(
             "
@@ -2426,6 +2585,9 @@ impl TournamentStore {
 
         if tournament.status != TournamentStatus::Started {
             bail!("tournoi non démarré");
+        }
+        if !tournament.structure.uses_bracket() {
+            bail!("ce format n'utilise pas d'arbre");
         }
         if tournament.pools_finalized_at.is_none() {
             bail!("clôturez d'abord les poules");
@@ -2681,10 +2843,14 @@ impl TournamentStore {
         let tournament = self
             .get_in_conn(&conn, tournament_id)?
             .context("tournoi introuvable")?;
+        if !tournament.structure.uses_bracket() {
+            bail!("ce format n'utilise pas d'arbre");
+        }
 
         let pools = self.list_pools_in_conn(&conn, tournament_id)?;
         let pool_standings: Vec<(i64, Vec<PoolPlayer>)> = pools
             .iter()
+            .filter(|pool| is_group_pool(&tournament, pool))
             .map(|pool| {
                 let mut sorted = pool.players.clone();
                 sorted.sort_by(|a, b| {
@@ -3066,13 +3232,10 @@ impl TournamentStore {
             .get_in_conn(conn, tournament_id)?
             .context("tournoi introuvable")?;
         let pools = self.list_pools_in_conn(conn, tournament_id)?;
-        let top_n = match tournament.bracket_format {
-            BracketFormat::QuartersDirect | BracketFormat::RoundOf16Full => 2,
-            BracketFormat::RoundOf16 => 3,
-        };
+        let top_n = tournament.qualified_per_pool.max(1) as usize;
 
         let mut qualified = std::collections::HashSet::new();
-        for pool in pools {
+        for pool in pools.into_iter().filter(|pool| is_group_pool(&tournament, pool)) {
             let mut sorted = pool.players.clone();
             sorted.sort_by(|a, b| {
                 b.points
@@ -3353,17 +3516,147 @@ impl TournamentStore {
         Ok(())
     }
 
+    fn create_final_pool_in_conn(
+        &self,
+        conn: &Connection,
+        tournament_id: i64,
+        tournament: &Tournament,
+    ) -> Result<()> {
+        let already: i64 = conn.query_row(
+            "
+            SELECT COUNT(*) FROM pools
+            WHERE tournament_id = ?1 AND position > ?2
+            ",
+            params![tournament_id, tournament.pool_count],
+            |row| row.get(0),
+        )?;
+        if already > 0 {
+            return Ok(());
+        }
+
+        let pools = self.list_pools_in_conn(conn, tournament_id)?;
+        let group_pools: Vec<Pool> = pools
+            .into_iter()
+            .filter(|pool| is_group_pool(tournament, pool))
+            .collect();
+        if group_pools.is_empty() {
+            bail!("aucune poule à clôturer");
+        }
+
+        let top_n = tournament.qualified_per_pool.max(1) as usize;
+        let max_rank = group_pools
+            .iter()
+            .map(|pool| pool.players.len().min(top_n))
+            .max()
+            .unwrap_or(0);
+        let mut qualified: Vec<String> = Vec::new();
+        for rank in 0..max_rank {
+            for pool in &group_pools {
+                let mut sorted = pool.players.clone();
+                sort_pool_standings(&mut sorted);
+                if let Some(player) = sorted.get(rank) {
+                    qualified.push(player.player_name.clone());
+                }
+            }
+        }
+        if qualified.len() < 2 {
+            bail!("pas assez de qualifiés pour une poule finale");
+        }
+
+        conn.execute(
+            "
+            INSERT INTO pools (tournament_id, name, position)
+            VALUES (?1, ?2, ?3)
+            ",
+            params![
+                tournament_id,
+                "Poule finale",
+                tournament.pool_count + 1,
+            ],
+        )?;
+        let pool_id = conn.last_insert_rowid();
+        let mut players = Vec::new();
+        for (seed, player_name) in qualified.iter().enumerate() {
+            conn.execute(
+                "
+                INSERT INTO pool_players (pool_id, player_name_key, player_name, seed)
+                VALUES (?1, ?2, ?3, ?4)
+                ",
+                params![
+                    pool_id,
+                    normalize_name(player_name),
+                    player_name,
+                    seed as u8,
+                ],
+            )?;
+            players.push(PoolPlayer {
+                player_name: player_name.clone(),
+                player_display_name: None,
+                army_id: None,
+                seed: seed as u8,
+                points: 0,
+                objectives: 0,
+                survivors: 0,
+                wins: 0,
+                draws: 0,
+                losses: 0,
+            });
+        }
+
+        let pool_scenarios = self.list_scenarios_in_conn(conn, tournament_id, "pool")?;
+        let letter_to_id: HashMap<char, i64> = pool_scenarios
+            .iter()
+            .filter_map(|s| {
+                let letter = s.slot.chars().next()?;
+                Some((letter, s.scenario_id))
+            })
+            .collect();
+        let pool = Pool {
+            id: pool_id,
+            tournament_id,
+            name: "Poule finale".into(),
+            position: tournament.pool_count + 1,
+            players,
+        };
+        insert_round_robin_matches(conn, tournament_id, &pool, &letter_to_id)?;
+        Ok(())
+    }
+
+    fn extend_pool_scenarios_in_conn(
+        &self,
+        conn: &Connection,
+        tournament_id: i64,
+        target_count: usize,
+    ) -> Result<()> {
+        let current = self.list_scenarios_in_conn(conn, tournament_id, "pool")?;
+        if current.is_empty() || current.len() >= target_count {
+            return Ok(());
+        }
+        let existing_slots: HashSet<String> = current.iter().map(|s| s.slot.clone()).collect();
+        let mut used: Vec<i64> = current.iter().map(|s| s.scenario_id).collect();
+        for letter in pool_scenario_slot_letters(target_count) {
+            let slot = letter.to_string();
+            if existing_slots.contains(&slot) {
+                continue;
+            }
+            let new_id = self.pick_random_scenario_excluding(conn, &used)?;
+            used.push(new_id);
+            conn.execute(
+                "
+                INSERT INTO tournament_scenarios (tournament_id, kind, slot, scenario_id)
+                VALUES (?1, 'pool', ?2, ?3)
+                ON CONFLICT(tournament_id, kind, slot) DO UPDATE SET scenario_id = excluded.scenario_id
+                ",
+                params![tournament_id, slot, new_id],
+            )?;
+        }
+        Ok(())
+    }
+
     // --- row helpers ---
 
     fn get_in_conn(&self, conn: &Connection, id: i64) -> Result<Option<Tournament>> {
-        let mut stmt = conn.prepare(
-            "
-            SELECT id, name, description, status, pool_count, bracket_format,
-                   created_at, started_at, pools_finalized_at, completed_at,
-                   list_validator_user_id
-            FROM tournaments WHERE id = ?1
-            ",
-        )?;
+        let mut stmt = conn.prepare(&format!("{TOURNAMENT_SELECT} WHERE id = ?1"))?;
         let mut rows = stmt.query(params![id])?;
         if let Some(row) = rows.next()? {
             return Ok(Some(row_to_tournament(row)?));
@@ -3815,9 +4108,49 @@ fn parse_outcome(value: &str) -> Option<MatchOutcome> {
     }
 }
 
+fn is_group_pool(tournament: &Tournament, pool: &Pool) -> bool {
+    (pool.position as u32) <= u32::from(tournament.pool_count)
+}
+
+fn insert_round_robin_matches(
+    conn: &Connection,
+    tournament_id: i64,
+    pool: &Pool,
+    letter_to_id: &HashMap<char, i64>,
+) -> Result<()> {
+    let mut players = pool.players.clone();
+    players.sort_by_key(|player| player.seed);
+    let n = players.len();
+    let pairs = pool_round_robin_pairs(n);
+    for (i, j) in pairs {
+        let p1 = &players[i];
+        let p2 = &players[j];
+        let scenario_id = pool_scenario_letter(n, p1.seed as usize, p2.seed as usize)
+            .and_then(|letter| letter_to_id.get(&letter).copied());
+        conn.execute(
+            "
+            INSERT INTO tournament_matches
+                (tournament_id, phase, pool_id, player1, player2, status, scenario_id)
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+            ",
+            params![
+                tournament_id,
+                TournamentPhase::Pool.as_str(),
+                pool.id,
+                p1.player_name,
+                p2.player_name,
+                TournamentMatchStatus::Scheduled.as_str(),
+                scenario_id,
+            ],
+        )?;
+    }
+    Ok(())
+}
+
 fn row_to_tournament(row: &rusqlite::Row<'_>) -> rusqlite::Result<Tournament> {
     let status_str: String = row.get(3)?;
     let format_str: String = row.get(5)?;
+    let structure_str: String = row.get(11)?;
     Ok(Tournament {
         id: row.get(0)?,
         name: row.get(1)?,
@@ -3832,11 +4165,20 @@ fn row_to_tournament(row: &rusqlite::Row<'_>) -> rusqlite::Result<Tournament> {
         completed_at: row.get(9)?,
         list_validator_user_id: row.get(10)?,
         list_validator_display_name: None,
+        structure: TournamentStructure::parse(&structure_str)
+            .unwrap_or(TournamentStructure::PoolsBracket),
+        swiss_rounds: row.get(12)?,
+        qualified_per_pool: row.get(13)?,
     })
 }
 
 fn row_to_registration(row: &rusqlite::Row<'_>) -> rusqlite::Result<TournamentRegistration> {
     let status_str: String = row.get(4)?;
+    let army_list_1: Option<String> = row.get(10)?;
+    let army_list_2: Option<String> = row.get(11)?;
+    let bracket_list_1: Option<String> = row.get(12)?;
+    let bracket_list_2: Option<String> = row.get(13)?;
+    let has_text = |value: &Option<String>| value.as_ref().is_some_and(|s| !s.trim().is_empty());
     Ok(TournamentRegistration {
         id: row.get(0)?,
         tournament_id: row.get(1)?,
@@ -3849,18 +4191,18 @@ fn row_to_registration(row: &rusqlite::Row<'_>) -> rusqlite::Result<TournamentRe
         reviewed_at: row.get(7)?,
         reviewed_by: row.get(8)?,
         army_id: row.get(9)?,
-        army_list_1: row.get(10)?,
-        army_list_2: row.get(11)?,
-        bracket_list_1: row.get(12)?,
-        bracket_list_2: row.get(13)?,
+        has_army_lists: has_text(&army_list_1),
+        has_bracket_lists: has_text(&bracket_list_1),
+        has_army_list_2: has_text(&army_list_2),
+        has_bracket_list_2: has_text(&bracket_list_2),
+        army_list_1,
+        army_list_2,
+        bracket_list_1,
+        bracket_list_2,
         army_list_1_id: row.get(14)?,
         army_list_2_id: row.get(15)?,
         bracket_list_1_id: row.get(16)?,
         bracket_list_2_id: row.get(17)?,
-        has_army_lists: false,
-        has_bracket_lists: false,
-        has_army_list_2: false,
-        has_bracket_list_2: false,
     })
 }
 
@@ -4112,5 +4454,49 @@ mod tests {
             "Kantain devrait être dans le top 4, got {names:?}"
         );
         assert_eq!(top_four.len(), 4, "le top 4 devrait avoir 4 entrées");
+    }
+
+    #[test]
+    fn update_format_swiss_before_start() {
+        let (db_path, store) = temp_copy_of_db();
+        let tournament = store
+            .create(&CreateTournamentRequest {
+                name: "Format test".into(),
+                bracket_format: "round_of_16".into(),
+            })
+            .unwrap();
+        assert_eq!(tournament.structure, TournamentStructure::PoolsBracket);
+        assert_eq!(tournament.qualified_per_pool, 3);
+
+        let updated = store
+            .update_format(
+                tournament.id,
+                &UpdateTournamentFormatRequest {
+                    structure: "swiss".into(),
+                    swiss_rounds: Some(7),
+                    pool_count: None,
+                    qualified_per_pool: None,
+                },
+            )
+            .unwrap();
+        assert_eq!(updated.structure, TournamentStructure::Swiss);
+        assert_eq!(updated.swiss_rounds, 7);
+
+        let pools_final = store
+            .update_format(
+                tournament.id,
+                &UpdateTournamentFormatRequest {
+                    structure: "pools_final".into(),
+                    swiss_rounds: None,
+                    pool_count: Some(2),
+                    qualified_per_pool: Some(3),
+                },
+            )
+            .unwrap();
+        assert_eq!(pools_final.structure, TournamentStructure::PoolsFinal);
+        assert_eq!(pools_final.pool_count, 2);
+        assert_eq!(pools_final.qualified_per_pool, 3);
+
+        let _ = fs::remove_file(db_path);
     }
 }

@@ -38,7 +38,7 @@ const sortedRegistrations = computed(() =>
       />
       <p
         v-if="showStatus"
-        class="text-xs text-muted-foreground"
+        class="registration-list-status text-xs"
       >
         {{ registrationStatusLabel(reg) }}
       </p>

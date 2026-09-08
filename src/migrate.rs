@@ -65,6 +65,9 @@ pub fn migrate(conn: &Connection) -> Result<()> {
             status TEXT NOT NULL DEFAULT 'draft',
             pool_count INTEGER NOT NULL DEFAULT 4,
             bracket_format TEXT NOT NULL DEFAULT 'quarters_direct',
+            structure TEXT NOT NULL DEFAULT 'pools_bracket',
+            swiss_rounds INTEGER NOT NULL DEFAULT 5,
+            qualified_per_pool INTEGER NOT NULL DEFAULT 3,
             created_at INTEGER NOT NULL,
             started_at INTEGER,
             pools_finalized_at INTEGER,
@@ -438,6 +441,34 @@ pub fn migrate(conn: &Connection) -> Result<()> {
     if !column_exists(conn, "tournaments", "list_validator_user_id")? {
         conn.execute(
             "ALTER TABLE tournaments ADD COLUMN list_validator_user_id INTEGER REFERENCES users(id)",
+            [],
+        )?;
+    }
+
+    add_column_if_missing(
+        conn,
+        "tournaments",
+        "structure",
+        "ALTER TABLE tournaments ADD COLUMN structure TEXT NOT NULL DEFAULT 'pools_bracket'",
+    )?;
+    add_column_if_missing(
+        conn,
+        "tournaments",
+        "swiss_rounds",
+        "ALTER TABLE tournaments ADD COLUMN swiss_rounds INTEGER NOT NULL DEFAULT 5",
+    )?;
+    if add_column_if_missing(
+        conn,
+        "tournaments",
+        "qualified_per_pool",
+        "ALTER TABLE tournaments ADD COLUMN qualified_per_pool INTEGER NOT NULL DEFAULT 3",
+    )? {
+        conn.execute(
+            "
+            UPDATE tournaments
+            SET qualified_per_pool = 2
+            WHERE bracket_format IN ('quarters_direct', 'round_of_16_full')
+            ",
             [],
         )?;
     }
@@ -946,4 +977,21 @@ fn column_exists(conn: &Connection, table: &str, column: &str) -> Result<bool> {
         }
     }
     Ok(false)
+}
+
+/// `true` si la colonne vient d'être ajoutée.
+fn add_column_if_missing(
+    conn: &Connection,
+    table: &str,
+    column: &str,
+    ddl: &str,
+) -> Result<bool> {
+    if column_exists(conn, table, column)? {
+        return Ok(false);
+    }
+    match conn.execute(ddl, []) {
+        Ok(_) => Ok(true),
+        Err(error) if error.to_string().contains("duplicate column name") => Ok(false),
+        Err(error) => Err(error.into()),
+    }
 }

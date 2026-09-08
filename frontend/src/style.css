@@ -1037,12 +1037,19 @@
     @apply min-w-0;
   }
 
-  .registration-list-item--waiting-lists .player-link {
+  .registration-list-item--waiting-lists .player-link,
+  .registration-list-item--waiting-lists .registration-list-status {
     @apply !text-accent;
   }
 
-  .registration-list-item--lists-validated .player-link {
-    @apply !text-primary;
+  .registration-list-item--waiting-validation .player-link,
+  .registration-list-item--waiting-validation .registration-list-status {
+    color: oklch(0.72 0.16 250) !important;
+  }
+
+  .registration-list-item--validated .player-link,
+  .registration-list-item--validated .registration-list-status {
+    color: oklch(0.78 0.18 145) !important;
   }
 
   .scenario-subtabs {

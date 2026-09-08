@@ -6,10 +6,45 @@ use crate::player::MatchOutcome;
 pub const MAX_POOL_SIZE: usize = 6;
 pub const POOLS_FOUR_CAPACITY: usize = 24;
 pub const POOLS_EIGHT_CAPACITY: usize = 48;
+pub const SWISS_CAPACITY: usize = 64;
 /// Historique : seuil avant bascule 8 poules (désactivée — on reste à 24 + waitlist).
 pub const WAITLIST_THRESHOLD: usize = 32;
 pub const POOL_SCENARIO_LETTERS: &[char] = &['A', 'B', 'C', 'D', 'E'];
 pub const BRACKET_SCENARIO_COUNT: usize = 4;
+pub const DEFAULT_SWISS_ROUNDS: u8 = 5;
+pub const DEFAULT_QUALIFIED_PER_POOL: u8 = 3;
+pub const MAX_SWISS_ROUNDS: u8 = 12;
+
+pub fn default_swiss_rounds() -> u8 {
+    DEFAULT_SWISS_ROUNDS
+}
+
+pub fn default_qualified_per_pool() -> u8 {
+    DEFAULT_QUALIFIED_PER_POOL
+}
+
+/// 2 poules jusqu'à 12 inscrits, 3 entre 13 et 15, 4 à partir de 16.
+pub fn suggested_pool_count(registered: usize) -> u8 {
+    if registered <= 12 {
+        2
+    } else if registered < 16 {
+        3
+    } else {
+        4
+    }
+}
+
+pub fn bracket_format_for_pools(pool_count: u8, qualified_per_pool: u8) -> BracketFormat {
+    match (pool_count, qualified_per_pool) {
+        (8, _) => BracketFormat::RoundOf16Full,
+        (4, 2) => BracketFormat::QuartersDirect,
+        _ => BracketFormat::RoundOf16,
+    }
+}
+
+pub fn pool_scenario_slot_letters(count: usize) -> Vec<char> {
+    ('A'..='Z').take(count.clamp(1, 26)).collect()
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -103,6 +138,42 @@ impl BracketFormat {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum TournamentStructure {
+    Swiss,
+    #[default]
+    PoolsBracket,
+    PoolsFinal,
+}
+
+impl TournamentStructure {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Swiss => "swiss",
+            Self::PoolsBracket => "pools_bracket",
+            Self::PoolsFinal => "pools_final",
+        }
+    }
+
+    pub fn parse(value: &str) -> Option<Self> {
+        match value {
+            "swiss" => Some(Self::Swiss),
+            "pools_bracket" => Some(Self::PoolsBracket),
+            "pools_final" => Some(Self::PoolsFinal),
+            _ => None,
+        }
+    }
+
+    pub fn uses_pools(self) -> bool {
+        matches!(self, Self::PoolsBracket | Self::PoolsFinal)
+    }
+
+    pub fn uses_bracket(self) -> bool {
+        matches!(self, Self::PoolsBracket)
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum TournamentPhase {
@@ -189,6 +260,12 @@ pub struct Tournament {
     pub status: TournamentStatus,
     pub pool_count: u8,
     pub bracket_format: BracketFormat,
+    #[serde(default)]
+    pub structure: TournamentStructure,
+    #[serde(default = "default_swiss_rounds")]
+    pub swiss_rounds: u8,
+    #[serde(default = "default_qualified_per_pool")]
+    pub qualified_per_pool: u8,
     pub created_at: u64,
     pub started_at: Option<u64>,
     pub pools_finalized_at: Option<u64>,
@@ -703,7 +780,29 @@ pub fn pool_scenario_letter(player_count: usize, slot_a: usize, slot_b: usize) -
             let idx = lo * n + hi;
             Some(letters[idx % letters.len()])
         }
+        n if n >= 2 => {
+            let idx = lo.saturating_mul(n).saturating_add(hi);
+            Some(POOL_SCENARIO_LETTERS[idx % POOL_SCENARIO_LETTERS.len()])
+        }
         _ => None,
+    }
+}
+
+pub fn expected_pool_scenario_count(tournament: &Tournament) -> usize {
+    match tournament.structure {
+        TournamentStructure::Swiss => (tournament.swiss_rounds.max(1) as usize).min(26),
+        TournamentStructure::PoolsBracket | TournamentStructure::PoolsFinal => {
+            POOL_SCENARIO_LETTERS.len()
+        }
+    }
+}
+
+pub fn tournament_capacity(tournament: &Tournament) -> usize {
+    match tournament.structure {
+        TournamentStructure::Swiss => SWISS_CAPACITY,
+        TournamentStructure::PoolsBracket | TournamentStructure::PoolsFinal => {
+            (tournament.pool_count as usize).max(1) * MAX_POOL_SIZE
+        }
     }
 }
 
@@ -792,6 +891,17 @@ fn compute_started_display_status(
     tournament: &Tournament,
     matches: &[TournamentMatch],
 ) -> String {
+    match tournament.structure {
+        TournamentStructure::Swiss => return "Rondes suisses".into(),
+        TournamentStructure::PoolsFinal => {
+            if tournament.pools_finalized_at.is_none() {
+                return "Phase de poules".into();
+            }
+            return "Poule finale".into();
+        }
+        TournamentStructure::PoolsBracket => {}
+    }
+
     if tournament.pools_finalized_at.is_none() {
         return "Phase de poules".into();
     }
@@ -1146,6 +1256,30 @@ mod tests {
                 "exactly one top 5-8 in {pool:?}"
             );
         }
+    }
+
+    #[test]
+    fn suggested_pool_count_thresholds() {
+        assert_eq!(suggested_pool_count(0), 2);
+        assert_eq!(suggested_pool_count(12), 2);
+        assert_eq!(suggested_pool_count(13), 3);
+        assert_eq!(suggested_pool_count(15), 3);
+        assert_eq!(suggested_pool_count(16), 4);
+        assert_eq!(suggested_pool_count(24), 4);
+    }
+
+    #[test]
+    fn bracket_format_for_pools_maps_known_cases() {
+        assert_eq!(
+            bracket_format_for_pools(4, 2),
+            BracketFormat::QuartersDirect
+        );
+        assert_eq!(bracket_format_for_pools(4, 3), BracketFormat::RoundOf16);
+        assert_eq!(
+            bracket_format_for_pools(8, 2),
+            BracketFormat::RoundOf16Full
+        );
+        assert_eq!(bracket_format_for_pools(2, 3), BracketFormat::RoundOf16);
     }
 
     #[test]

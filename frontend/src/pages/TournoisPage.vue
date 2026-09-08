@@ -35,13 +35,6 @@ import {
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { tournoisTabs } from '@/lib/pageTitleTabs'
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select'
 
 const router = useRouter()
 const route = useRoute()
@@ -51,7 +44,6 @@ const tournaments = ref<TournamentListEntry[]>([])
 const loading = ref(true)
 const showCreate = ref(false)
 const newName = ref('')
-const newFormat = ref('round_of_16')
 const creating = ref(false)
 const completedViewMode = ref<TournamentCompletedViewMode>('compressed')
 
@@ -112,7 +104,6 @@ async function create() {
   try {
     const tournament = await createTournament({
       name: newName.value.trim(),
-      bracket_format: newFormat.value,
     })
     toast.success(`Tournoi « ${tournament.name} » créé.`)
     showCreate.value = false
@@ -159,18 +150,9 @@ onMounted(() => {
           <Label for="tournament-name">Nom</Label>
           <Input id="tournament-name" v-model="newName" placeholder="Ex. Poissonnerie 2026" />
         </div>
-        <div class="grid gap-2">
-          <Label>Format d'arbre (4 poules)</Label>
-          <Select v-model="newFormat">
-            <SelectTrigger>
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="quarters_direct">Quarts directs (1er + 2e)</SelectItem>
-              <SelectItem value="round_of_16">Seizièmes (2e vs 3e, BYE 1ers)</SelectItem>
-            </SelectContent>
-          </Select>
-        </div>
+        <p class="text-sm text-muted-foreground">
+          Le format (rondes suisses, poules + arbre, poules + poule) se définit dans l’administration du tournoi.
+        </p>
         <div class="flex gap-2">
           <Button :disabled="creating" @click="create">
             {{ creating ? 'Création...' : 'Créer' }}
@@ -264,7 +246,10 @@ onMounted(() => {
                     formatRegistrationSummary(
                       tournament.registered_count,
                       tournament.waitlist_count,
-                      tournamentRegistrationCapacity(tournament.pool_count),
+                      tournamentRegistrationCapacity(
+                        tournament.pool_count,
+                        tournament.structure,
+                      ),
                     )
                   }}
                 </p>

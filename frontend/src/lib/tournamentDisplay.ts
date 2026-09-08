@@ -1,4 +1,8 @@
-import type { RegistrationStatus, TournamentTopFourEntry } from '@/types/elo'
+import type {
+  RegistrationStatus,
+  TournamentStructure,
+  TournamentTopFourEntry,
+} from '@/types/elo'
 
 export interface RegistrationSortInput {
   player_name: string
@@ -35,25 +39,37 @@ export function registrationWaitingForLists(reg: {
   )
 }
 
-/** Listes saisies ou inscription validée. */
+export function registrationWaitingForValidation(reg: {
+  status: RegistrationStatus
+  has_army_lists?: boolean
+}): boolean {
+  return (
+    !!reg.has_army_lists
+    && (reg.status === 'pending' || reg.status === 'waitlisted')
+  )
+}
+
 export function registrationListsValidated(reg: {
   status: RegistrationStatus
   has_army_lists?: boolean
 }): boolean {
-  return reg.status === 'approved' || !!reg.has_army_lists
+  return reg.status === 'approved'
 }
 
 export function registrationListItemClass(reg: {
   status: RegistrationStatus
   has_army_lists?: boolean
-}): string | undefined {
+}): string {
   if (registrationWaitingForLists(reg)) {
     return 'registration-list-item--waiting-lists'
   }
-  if (registrationListsValidated(reg)) {
-    return 'registration-list-item--lists-validated'
+  if (registrationWaitingForValidation(reg)) {
+    return 'registration-list-item--waiting-validation'
   }
-  return undefined
+  if (registrationListsValidated(reg)) {
+    return 'registration-list-item--validated'
+  }
+  return 'registration-list-item--waiting-lists'
 }
 
 /** Validé (0) puis le reste ; « en attente des listes » en dernier (2). */
@@ -105,8 +121,18 @@ export function formatRegistrationSummary(
   return base
 }
 
-export function tournamentRegistrationCapacity(poolCount: number) {
-  return poolCount >= 8 ? 48 : 24
+export function suggestedPoolCount(registeredCount: number) {
+  if (registeredCount <= 12) return 2
+  if (registeredCount < 16) return 3
+  return 4
+}
+
+export function tournamentRegistrationCapacity(
+  poolCount: number,
+  structure: TournamentStructure = 'pools_bracket',
+) {
+  if (structure === 'swiss') return 64
+  return Math.max(1, poolCount) * 6
 }
 
 export interface TopFourDisplayRow {

@@ -33,6 +33,7 @@ import {
   unregisterFromTournament,
   updateMyBracketLists,
   updateTournamentDetails,
+  updateTournamentFormat,
   fetchUsers,
 } from '@/lib/api'
 import type {
@@ -43,6 +44,7 @@ import type {
   TournamentMatch,
   TournamentPhase,
   TournamentRegistration,
+  TournamentStructure,
   User,
 } from '@/types/elo'
 import { useAuth } from '@/composables/useAuth'
@@ -64,6 +66,7 @@ import {
   formatRegistrationSummary,
   registrationStatusLabel,
   sortRegistrationsForDisplay,
+  suggestedPoolCount,
   tournamentRegistrationCapacity,
 } from '@/lib/tournamentDisplay'
 import { phaseLabels } from '@/lib/tournamentPhase'
@@ -113,13 +116,19 @@ const drawingPools = ref(false)
 const scenarioBusy = ref(false)
 const savingBracketLists = ref(false)
 
-const poolScenarioSlots = [
-  { key: 'A', label: 'Mission A' },
-  { key: 'B', label: 'Mission B' },
-  { key: 'C', label: 'Mission C' },
-  { key: 'D', label: 'Mission D' },
-  { key: 'E', label: 'Mission E' },
-]
+const poolScenarioSlots = computed(() => {
+  const count =
+    detail.value?.structure === 'swiss'
+      ? Math.max(1, detail.value.swiss_rounds ?? 5)
+      : 5
+  return Array.from({ length: count }, (_, index) => {
+    const letter = String.fromCharCode(65 + index)
+    return {
+      key: letter,
+      label: detail.value?.structure === 'swiss' ? `Ronde ${index + 1}` : `Mission ${letter}`,
+    }
+  })
+})
 
 const bracketScenarioSlots = computed(() => {
   const count = detail.value?.bracket_format === 'quarters_direct' ? 3 : 4
@@ -185,6 +194,15 @@ const poolMatches = computed(() =>
   detail.value?.matches.filter((m) => m.phase === 'pool') ?? [],
 )
 
+const hasPoolWithoutMatches = computed(() => {
+  const ids = new Set(
+    poolMatches.value
+      .map((match) => match.pool_id)
+      .filter((id): id is number => id != null),
+  )
+  return (detail.value?.pools ?? []).some((pool) => !ids.has(pool.id))
+})
+
 const selectedPoolId = ref<number | null>(null)
 
 const myTournamentMatches = computed(() => {
@@ -211,13 +229,17 @@ const userPickedTab = ref(false)
 
 const showArbreTab = computed(
   () =>
-    bracketMatches.value.length > 0
-    || canEditBracket.value
-    || !!detail.value?.pools_finalized_at,
+    tournamentStructure.value === 'pools_bracket'
+    && (bracketMatches.value.length > 0
+      || canEditBracket.value
+      || !!detail.value?.pools_finalized_at),
 )
 
 const showPoulesTab = computed(
-  () => (detail.value?.pools.length ?? 0) > 0 || canEditPools.value,
+  () =>
+    tournamentStructure.value === 'swiss'
+      ? detail.value?.status === 'started' || detail.value?.status === 'completed'
+      : (detail.value?.pools.length ?? 0) > 0 || canEditPools.value,
 )
 
 const showInscriptionsTab = computed(
@@ -234,7 +256,10 @@ const tournamentTabs = computed(() => {
     tabs.push({ id: 'arbre', label: "L'arbre" })
   }
   if (showPoulesTab.value) {
-    tabs.push({ id: 'poules', label: 'Phase de poules' })
+    tabs.push({
+      id: 'poules',
+      label: tournamentStructure.value === 'swiss' ? 'Rondes suisses' : 'Phase de poules',
+    })
   }
   if (showInscriptionsTab.value) {
     tabs.push({ id: 'inscriptions', label: 'Inscriptions' })
@@ -382,17 +407,114 @@ const canDeleteTournament = computed(
 )
 
 const deletingTournament = ref(false)
+const savingFormat = ref(false)
+
+const tournamentStructure = computed(
+  (): TournamentStructure => detail.value?.structure ?? 'pools_bracket',
+)
+
+const formatLocked = computed(
+  () =>
+    !detail.value
+    || detail.value.status === 'started'
+    || detail.value.status === 'completed',
+)
+
+const formatDraft = ref({
+  structure: 'pools_bracket' as TournamentStructure,
+  swiss_rounds: 5,
+  pool_count: 4,
+  qualified_per_pool: 3,
+})
+
+const suggestedPools = computed(() =>
+  suggestedPoolCount(detail.value?.registered_count ?? 0),
+)
+
+function syncFormatDraft() {
+  if (!detail.value) return
+  formatDraft.value = {
+    structure: detail.value.structure ?? 'pools_bracket',
+    swiss_rounds: detail.value.swiss_rounds ?? 5,
+    pool_count: detail.value.pool_count ?? suggestedPools.value,
+    qualified_per_pool: detail.value.qualified_per_pool ?? 3,
+  }
+}
+
+watch(
+  () => [
+    detail.value?.id,
+    detail.value?.structure,
+    detail.value?.swiss_rounds,
+    detail.value?.pool_count,
+    detail.value?.qualified_per_pool,
+  ],
+  () => syncFormatDraft(),
+  { immediate: true },
+)
+
+function formatCardClass(structure: TournamentStructure) {
+  const selected = formatDraft.value.structure === structure
+  return [
+    'flex h-full flex-col rounded-xl border p-4 text-left transition',
+    selected
+      ? 'border-primary bg-primary/10 ring-2 ring-primary/40'
+      : 'border-border bg-background/40 hover:border-primary/40',
+    formatLocked.value ? 'cursor-default opacity-90' : 'cursor-pointer',
+  ]
+}
+
+async function selectStructure(structure: TournamentStructure) {
+  if (formatLocked.value || !detail.value) return
+  const previous = formatDraft.value.structure
+  formatDraft.value.structure = structure
+  if (structure !== 'swiss' && previous === 'swiss') {
+    formatDraft.value.pool_count = suggestedPools.value
+    formatDraft.value.qualified_per_pool = 3
+  }
+  if (structure === 'swiss' && previous !== 'swiss') {
+    formatDraft.value.swiss_rounds = detail.value.swiss_rounds || 5
+  }
+  await saveFormat()
+}
+
+async function saveFormat() {
+  if (formatLocked.value || !detail.value) return
+  savingFormat.value = true
+  try {
+    const updated = await updateTournamentFormat(tournamentId.value, {
+      structure: formatDraft.value.structure,
+      swiss_rounds: formatDraft.value.swiss_rounds,
+      pool_count: formatDraft.value.pool_count,
+      qualified_per_pool: formatDraft.value.qualified_per_pool,
+    })
+    if (detail.value) {
+      detail.value = {
+        ...detail.value,
+        ...updated,
+      }
+    }
+    toast.success('Format du tournoi enregistré')
+  } catch (error) {
+    toast.error(error instanceof Error ? error.message : 'Erreur')
+    syncFormatDraft()
+  } finally {
+    savingFormat.value = false
+  }
+}
 
 const canEditPools = computed(
   () =>
     isAdmin.value &&
     detail.value?.status === 'started' &&
-    poolMatches.value.length === 0,
+    poolMatches.value.length === 0 &&
+    tournamentStructure.value !== 'swiss',
 )
 
 const canEditBracket = computed(
   () =>
     isAdmin.value &&
+    tournamentStructure.value === 'pools_bracket' &&
     detail.value?.status === 'started' &&
     !!detail.value?.pools_finalized_at &&
     bracketMatches.value.every((match) => match.status !== 'confirmed'),
@@ -829,7 +951,8 @@ const canEditBracketScenarios = computed(
 
 const canSubmitBracketLists = computed(
   () =>
-    !!myRegistration.value
+    tournamentStructure.value === 'pools_bracket'
+    && !!myRegistration.value
     && myRegistration.value.status === 'approved'
     && !!detail.value?.pools_finalized_at
     && detail.value.status !== 'completed',
@@ -1755,6 +1878,26 @@ onMounted(refresh)
         </template>
 
         <template v-else-if="activeTab === 'poules'">
+          <Card v-if="isAdmin && tournamentStructure === 'swiss'" class="neon-panel">
+            <CardHeader>
+              <CardTitle>Scénarios des rondes</CardTitle>
+              <CardDescription>
+                {{ poolScenarioSlots.length }} mission(s) pour {{ detail.swiss_rounds }} ronde(s).
+                Au-delà des scénarios déjà définis, de nouveaux tirages sont ajoutés.
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <TournamentScenarioPicker
+                title="Missions des rondes"
+                :slots="poolScenarioSlots"
+                :values="detail.pool_scenarios ?? []"
+                :can-edit="canEditPoolScenarios"
+                :saving="scenarioBusy"
+                @save="onSavePoolScenarios"
+              />
+            </CardContent>
+          </Card>
+
           <Card v-if="canEditPools" class="neon-panel">
             <CardHeader>
               <CardTitle>Configurer les poules</CardTitle>
@@ -1975,7 +2118,10 @@ onMounted(refresh)
                   formatRegistrationSummary(
                     detail.registered_count,
                     detail.waitlist_count,
-                    tournamentRegistrationCapacity(detail.pool_count),
+                    tournamentRegistrationCapacity(
+                      detail.pool_count,
+                      detail.structure,
+                    ),
                   )
                 }}
               </CardDescription>
@@ -2202,57 +2348,191 @@ onMounted(refresh)
           <Card class="neon-panel-accent">
             <CardHeader>
               <CardTitle>Administration</CardTitle>
+              <CardDescription>
+                Définissez le format du tournoi, puis pilotez inscriptions, démarrage et suppression.
+              </CardDescription>
             </CardHeader>
-            <CardContent class="flex flex-wrap gap-2">
-              <Button
-                v-if="detail.status === 'draft'"
-                size="sm"
-                @click="act(() => openTournamentRegistration(tournamentId), 'Inscriptions ouvertes')"
-              >
-                Ouvrir inscriptions
-              </Button>
-              <Button
-                v-if="detail.status === 'registration_open'"
-                size="sm"
-                variant="outline"
-                @click="act(() => closeTournamentRegistration(tournamentId), 'Inscriptions fermées')"
-              >
-                Fermer inscriptions
-              </Button>
-              <Button
-                v-if="detail.status === 'registration_open' || detail.status === 'registration_closed'"
-                size="sm"
-                :disabled="!canStartTournament"
-                :title="!detail.list_validator_user_id ? 'Désignez un validateur de listes' : undefined"
-                @click="act(() => startTournament(tournamentId), 'Tournoi démarré')"
-              >
-                Démarrer le tournoi
-              </Button>
-              <Button
-                v-if="detail.status === 'started' && detail.pools.length > 0 && poolMatches.length === 0"
-                size="sm"
-                variant="outline"
-                @click="act(() => generatePoolMatches(tournamentId), 'Matchs de poule générés')"
-              >
-                Générer matchs de poule
-              </Button>
-              <Button
-                v-if="detail.status === 'started' && poolMatches.length > 0 && !detail.pools_finalized_at"
-                size="sm"
-                @click="act(() => finalizePools(tournamentId), 'Poules clôturées')"
-              >
-                Clôturer les poules
-              </Button>
-              <Button
-                v-if="canDeleteTournament"
-                size="sm"
-                variant="destructive"
-                :disabled="deletingTournament"
-                @click="onDeleteTournament"
-              >
-                <Trash2 class="size-4" />
-                {{ deletingTournament ? 'Suppression…' : 'Supprimer le tournoi' }}
-              </Button>
+            <CardContent class="grid gap-4">
+              <div class="grid gap-3 lg:grid-cols-3">
+                <div
+                  :class="formatCardClass('swiss')"
+                  @click="selectStructure('swiss')"
+                >
+                  <h3 class="font-semibold">Rondes suisses</h3>
+                  <p class="mt-1 text-sm text-muted-foreground">
+                    Chaque joueur joue N parties. Si moins de rondes que de scénarios déjà tirés, on joue les N premiers ; si plus, on tire les scénarios manquants.
+                  </p>
+                  <div class="mt-3 grid gap-1" @click.stop>
+                    <Label for="swiss-rounds">Nombre de rondes</Label>
+                    <Input
+                      id="swiss-rounds"
+                      type="number"
+                      min="1"
+                      max="12"
+                      :model-value="formatDraft.swiss_rounds"
+                      :disabled="formatLocked || savingFormat"
+                      @update:model-value="formatDraft.swiss_rounds = Number($event) || 1"
+                      @change="formatDraft.structure === 'swiss' && saveFormat()"
+                    />
+                  </div>
+                </div>
+
+                <div
+                  :class="formatCardClass('pools_bracket')"
+                  @click="selectStructure('pools_bracket')"
+                >
+                  <h3 class="font-semibold">Poules + arbre</h3>
+                  <p class="mt-1 text-sm text-muted-foreground">
+                    Phase de poules puis arbre final avec les qualifiés de chaque poule.
+                  </p>
+                  <div class="mt-3 grid gap-3" @click.stop>
+                    <div class="grid gap-1">
+                      <Label for="pools-bracket-count">Nombre de poules</Label>
+                      <Input
+                        id="pools-bracket-count"
+                        type="number"
+                        min="2"
+                        max="8"
+                        :model-value="formatDraft.pool_count"
+                        :disabled="formatLocked || savingFormat"
+                        @update:model-value="formatDraft.pool_count = Number($event) || 2"
+                        @change="formatDraft.structure === 'pools_bracket' && saveFormat()"
+                      />
+                      <p class="text-xs text-muted-foreground">
+                        Défaut selon les inscrits : {{ suggestedPools }}
+                        (2 jusqu’à 12, 3 entre 13 et 15, 4 à partir de 16).
+                      </p>
+                    </div>
+                    <div class="grid gap-1">
+                      <Label for="pools-bracket-qualified">Qualifiés par poule</Label>
+                      <Input
+                        id="pools-bracket-qualified"
+                        type="number"
+                        min="1"
+                        max="5"
+                        :model-value="formatDraft.qualified_per_pool"
+                        :disabled="formatLocked || savingFormat"
+                        @update:model-value="formatDraft.qualified_per_pool = Number($event) || 1"
+                        @change="formatDraft.structure === 'pools_bracket' && saveFormat()"
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                <div
+                  :class="formatCardClass('pools_final')"
+                  @click="selectStructure('pools_final')"
+                >
+                  <h3 class="font-semibold">Poules + poule</h3>
+                  <p class="mt-1 text-sm text-muted-foreground">
+                    Phase de poules puis poule finale avec les qualifiés (pas d’arbre).
+                  </p>
+                  <div class="mt-3 grid gap-3" @click.stop>
+                    <div class="grid gap-1">
+                      <Label for="pools-final-count">Nombre de poules</Label>
+                      <Input
+                        id="pools-final-count"
+                        type="number"
+                        min="2"
+                        max="8"
+                        :model-value="formatDraft.pool_count"
+                        :disabled="formatLocked || savingFormat"
+                        @update:model-value="formatDraft.pool_count = Number($event) || 2"
+                        @change="formatDraft.structure === 'pools_final' && saveFormat()"
+                      />
+                      <p class="text-xs text-muted-foreground">
+                        Défaut selon les inscrits : {{ suggestedPools }}
+                      </p>
+                    </div>
+                    <div class="grid gap-1">
+                      <Label for="pools-final-qualified">Qualifiés par poule</Label>
+                      <Input
+                        id="pools-final-qualified"
+                        type="number"
+                        min="1"
+                        max="5"
+                        :model-value="formatDraft.qualified_per_pool"
+                        :disabled="formatLocked || savingFormat"
+                        @update:model-value="formatDraft.qualified_per_pool = Number($event) || 1"
+                        @change="formatDraft.structure === 'pools_final' && saveFormat()"
+                      />
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <p v-if="formatLocked" class="text-sm text-muted-foreground">
+                Le format est verrouillé après le démarrage du tournoi.
+              </p>
+
+              <div class="flex flex-wrap gap-2 border-t pt-4">
+                <Button
+                  v-if="detail.status === 'draft'"
+                  size="sm"
+                  @click="act(() => openTournamentRegistration(tournamentId), 'Inscriptions ouvertes')"
+                >
+                  Ouvrir inscriptions
+                </Button>
+                <Button
+                  v-if="detail.status === 'registration_open'"
+                  size="sm"
+                  variant="outline"
+                  @click="act(() => closeTournamentRegistration(tournamentId), 'Inscriptions fermées')"
+                >
+                  Fermer inscriptions
+                </Button>
+                <Button
+                  v-if="detail.status === 'registration_open' || detail.status === 'registration_closed'"
+                  size="sm"
+                  :disabled="!canStartTournament"
+                  :title="!detail.list_validator_user_id ? 'Désignez un validateur de listes' : undefined"
+                  @click="act(() => startTournament(tournamentId), 'Tournoi démarré')"
+                >
+                  Démarrer le tournoi
+                </Button>
+                <Button
+                  v-if="
+                    tournamentStructure !== 'swiss'
+                    && detail.status === 'started'
+                    && detail.pools.length > 0
+                    && (poolMatches.length === 0
+                      || (tournamentStructure === 'pools_final'
+                        && !!detail.pools_finalized_at
+                        && hasPoolWithoutMatches))
+                  "
+                  size="sm"
+                  variant="outline"
+                  @click="act(() => generatePoolMatches(tournamentId), 'Matchs de poule générés')"
+                >
+                  {{
+                    detail.pools_finalized_at
+                      ? 'Générer matchs de la poule finale'
+                      : 'Générer matchs de poule'
+                  }}
+                </Button>
+                <Button
+                  v-if="
+                    tournamentStructure !== 'swiss'
+                    && detail.status === 'started'
+                    && poolMatches.length > 0
+                    && !detail.pools_finalized_at
+                  "
+                  size="sm"
+                  @click="act(() => finalizePools(tournamentId), tournamentStructure === 'pools_final' ? 'Poules clôturées, poule finale créée' : 'Poules clôturées')"
+                >
+                  {{ tournamentStructure === 'pools_final' ? 'Clôturer les poules (poule finale)' : 'Clôturer les poules' }}
+                </Button>
+                <Button
+                  v-if="canDeleteTournament"
+                  size="sm"
+                  variant="destructive"
+                  :disabled="deletingTournament"
+                  @click="onDeleteTournament"
+                >
+                  <Trash2 class="size-4" />
+                  {{ deletingTournament ? 'Suppression…' : 'Supprimer le tournoi' }}
+                </Button>
+              </div>
             </CardContent>
           </Card>
 
@@ -2301,7 +2581,7 @@ onMounted(refresh)
           </Card>
 
           <Card
-            v-if="isAdmin && detail.pools_finalized_at"
+            v-if="isAdmin && detail.pools_finalized_at && tournamentStructure === 'pools_bracket'"
             class="neon-panel"
           >
             <CardHeader>
@@ -2352,9 +2632,16 @@ onMounted(refresh)
             class="neon-panel"
           >
             <CardHeader>
-              <CardTitle>Scénarios de poule</CardTitle>
+              <CardTitle>
+                {{ tournamentStructure === 'swiss' ? 'Scénarios des rondes' : 'Scénarios de poule' }}
+              </CardTitle>
               <CardDescription>
-                À définir avant de générer les matchs de poule (5 missions A–E).
+                <template v-if="tournamentStructure === 'swiss'">
+                  {{ poolScenarioSlots.length }} mission(s) pour les rondes suisses.
+                </template>
+                <template v-else>
+                  À définir avant de générer les matchs de poule (5 missions A–E).
+                </template>
               </CardDescription>
             </CardHeader>
             <CardContent>

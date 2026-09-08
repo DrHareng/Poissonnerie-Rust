@@ -344,7 +344,10 @@ onMounted(async () => {
                       formatRegistrationSummary(
                         tournament.registered_count,
                         tournament.waitlist_count,
-                        tournamentRegistrationCapacity(tournament.pool_count),
+                        tournamentRegistrationCapacity(
+                          tournament.pool_count,
+                          tournament.structure,
+                        ),
                       )
                     }}
                   </p>
