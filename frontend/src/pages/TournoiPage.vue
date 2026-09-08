@@ -981,10 +981,16 @@ function showArmyForRegistration(reg: TournamentRegistration) {
   )
 }
 
-async function review(reg: TournamentRegistration, action: 'approved' | 'rejected') {
+async function reviewList(
+  reg: TournamentRegistration,
+  listSlot: 1 | 2,
+  action: 'approved' | 'rejected',
+) {
   await act(
-    () => reviewRegistration(tournamentId.value, reg.id, action),
-    action === 'approved' ? 'Inscription validée' : 'Inscription refusée',
+    () => reviewRegistration(tournamentId.value, reg.id, action, listSlot),
+    action === 'approved'
+      ? `Liste ${listSlot} validée`
+      : `Liste ${listSlot} renvoyée`,
   )
 }
 
@@ -2662,71 +2668,102 @@ onMounted(refresh)
             <CardHeader>
               <CardTitle>Inscriptions en attente</CardTitle>
               <CardDescription>
-                Validez ou refusez les listes d'armées des joueurs.
+                Validez ou renvoyez chaque liste séparément. L'inscription n'est validée que lorsque toutes les listes saisies le sont.
               </CardDescription>
             </CardHeader>
             <CardContent class="grid gap-2">
               <div
                 v-for="reg in pendingRegistrations"
                 :key="reg.id"
-                class="flex items-center justify-between rounded border p-3"
+                class="flex flex-col gap-3 rounded border p-3"
               >
-                <div class="flex min-w-0 flex-1 flex-col gap-2">
-                  <div class="flex flex-wrap items-center gap-2">
-                    <PlayerLink
-                      :name="reg.player_name"
-                      :display-name="reg.player_display_name"
-                    />
-                    <ArmyLogo v-if="reg.army_id" :army-id="reg.army_id" />
-                  </div>
-                  <template v-if="reg.army_list_1">
-                    <div class="grid gap-1.5">
-                      <div class="flex flex-wrap items-center gap-2">
-                        <Input
-                          :model-value="reg.army_list_1"
-                          readonly
-                          class="min-w-0 flex-1 text-xs"
-                        />
-                        <ArmyListQuickActions :code="reg.army_list_1" />
-                      </div>
-                      <div
-                        v-if="reg.army_list_2"
-                        class="flex flex-wrap items-center gap-2"
+                <div class="flex flex-wrap items-center gap-2">
+                  <PlayerLink
+                    :name="reg.player_name"
+                    :display-name="reg.player_display_name"
+                  />
+                  <ArmyLogo v-if="reg.army_id" :army-id="reg.army_id" />
+                </div>
+                <template v-if="reg.army_list_1">
+                  <div class="grid gap-2">
+                    <div class="flex flex-wrap items-center gap-2">
+                      <span class="w-14 shrink-0 text-xs text-muted-foreground">Liste 1</span>
+                      <Input
+                        :model-value="reg.army_list_1"
+                        readonly
+                        class="min-w-0 flex-1 text-xs"
+                      />
+                      <ArmyListQuickActions :code="reg.army_list_1" />
+                      <Badge
+                        v-if="reg.army_list_1_validated"
+                        variant="outline"
+                        class="text-xs"
                       >
-                        <Input
-                          :model-value="reg.army_list_2"
-                          readonly
-                          class="min-w-0 flex-1 text-xs"
-                        />
-                        <ArmyListQuickActions :code="reg.army_list_2" />
-                      </div>
-                      <span
+                        Validée
+                      </Badge>
+                      <Button
                         v-else
-                        class="text-xs text-muted-foreground italic"
+                        size="sm"
+                        :disabled="!reg.army_id"
+                        @click="reviewList(reg, 1, 'approved')"
                       >
-                        pas de liste 2
-                      </span>
+                        <Check class="size-4" />
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        @click="reviewList(reg, 1, 'rejected')"
+                      >
+                        <X class="size-4" />
+                      </Button>
                     </div>
-                  </template>
-                  <span
-                    v-else
-                    class="text-xs text-amber-600 dark:text-amber-400"
-                  >
-                    Listes non saisies
-                  </span>
-                </div>
-                <div class="flex gap-2">
-                  <Button
-                    size="sm"
-                    :disabled="!reg.army_list_1 || !reg.army_id"
-                    @click="review(reg, 'approved')"
-                  >
-                    <Check class="size-4" />
-                  </Button>
-                  <Button size="sm" variant="outline" @click="review(reg, 'rejected')">
-                    <X class="size-4" />
-                  </Button>
-                </div>
+                    <div
+                      v-if="reg.army_list_2"
+                      class="flex flex-wrap items-center gap-2"
+                    >
+                      <span class="w-14 shrink-0 text-xs text-muted-foreground">Liste 2</span>
+                      <Input
+                        :model-value="reg.army_list_2"
+                        readonly
+                        class="min-w-0 flex-1 text-xs"
+                      />
+                      <ArmyListQuickActions :code="reg.army_list_2" />
+                      <Badge
+                        v-if="reg.army_list_2_validated"
+                        variant="outline"
+                        class="text-xs"
+                      >
+                        Validée
+                      </Badge>
+                      <Button
+                        v-else
+                        size="sm"
+                        @click="reviewList(reg, 2, 'approved')"
+                      >
+                        <Check class="size-4" />
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        @click="reviewList(reg, 2, 'rejected')"
+                      >
+                        <X class="size-4" />
+                      </Button>
+                    </div>
+                    <span
+                      v-else
+                      class="text-xs text-muted-foreground italic"
+                    >
+                      pas de liste 2
+                    </span>
+                  </div>
+                </template>
+                <span
+                  v-else
+                  class="text-xs text-amber-600 dark:text-amber-400"
+                >
+                  Listes non saisies
+                </span>
               </div>
             </CardContent>
           </Card>

@@ -473,6 +473,41 @@ pub fn migrate(conn: &Connection) -> Result<()> {
         )?;
     }
 
+    if add_column_if_missing(
+        conn,
+        "tournament_registrations",
+        "army_list_1_validated",
+        "ALTER TABLE tournament_registrations ADD COLUMN army_list_1_validated INTEGER NOT NULL DEFAULT 0",
+    )? {
+        conn.execute(
+            "
+            UPDATE tournament_registrations
+            SET army_list_1_validated = 1
+            WHERE status IN ('approved', 'waitlisted')
+              AND army_list_1 IS NOT NULL
+              AND trim(army_list_1) != ''
+            ",
+            [],
+        )?;
+    }
+    if add_column_if_missing(
+        conn,
+        "tournament_registrations",
+        "army_list_2_validated",
+        "ALTER TABLE tournament_registrations ADD COLUMN army_list_2_validated INTEGER NOT NULL DEFAULT 0",
+    )? {
+        conn.execute(
+            "
+            UPDATE tournament_registrations
+            SET army_list_2_validated = 1
+            WHERE status IN ('approved', 'waitlisted')
+              AND army_list_2 IS NOT NULL
+              AND trim(army_list_2) != ''
+            ",
+            [],
+        )?;
+    }
+
     if !column_exists(conn, "tournament_matches", "player1_army_list_code")? {
         conn.execute(
             "ALTER TABLE tournament_matches ADD COLUMN player1_army_list_code TEXT",

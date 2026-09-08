@@ -598,10 +598,11 @@ export function reviewRegistration(
   tournamentId: number,
   regId: number,
   action: 'approved' | 'rejected',
+  list_slot: 1 | 2,
 ): Promise<TournamentRegistration> {
   return request<TournamentRegistration>(
     `/api/tournaments/${tournamentId}/registrations/${regId}/review`,
-    { method: 'POST', body: JSON.stringify({ action }) },
+    { method: 'POST', body: JSON.stringify({ action, list_slot }) },
   )
 }
 

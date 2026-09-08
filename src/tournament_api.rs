@@ -71,6 +71,7 @@ async fn require_list_validator(
 #[derive(Debug, Deserialize)]
 struct ReviewRegistrationRequest {
     action: String,
+    list_slot: u8,
 }
 
 #[derive(Debug, Deserialize)]
@@ -857,7 +858,13 @@ async fn review_registration(
     let validator = require_list_validator(&state, &session, tournament_id).await?;
     state
         .tournaments
-        .review_registration(tournament_id, reg_id, &payload.action, validator.id)
+        .review_registration(
+            tournament_id,
+            reg_id,
+            &payload.action,
+            payload.list_slot,
+            validator.id,
+        )
         .map(Json)
         .map_err(|error| ApiError::bad_request(error.to_string()))
 }

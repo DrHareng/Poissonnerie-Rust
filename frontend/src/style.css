@@ -57,6 +57,10 @@
   --neon-cyan: #00e8ff;
   --neon-magenta: #ff3eb5;
   --neon-orange: #ff9a3c;
+  --md-mark-b: #00e5ff;
+  --md-mark-v: #39ff88;
+  --md-mark-r: #ff2ed1;
+  --md-mark-o: #ff9500;
   --background: oklch(0.07 0.02 260);
   --foreground: oklch(0.95 0.01 220);
   --card: oklch(0.12 0.025 260);
@@ -1037,19 +1041,16 @@
     @apply min-w-0;
   }
 
-  .registration-list-item--waiting-lists .player-link,
-  .registration-list-item--waiting-lists .registration-list-status {
-    @apply !text-accent;
+  .registration-list-item--waiting-lists .player-link {
+    color: var(--md-mark-r) !important;
   }
 
-  .registration-list-item--waiting-validation .player-link,
-  .registration-list-item--waiting-validation .registration-list-status {
-    color: oklch(0.72 0.16 250) !important;
+  .registration-list-item--waiting-validation .player-link {
+    color: var(--md-mark-b) !important;
   }
 
-  .registration-list-item--validated .player-link,
-  .registration-list-item--validated .registration-list-status {
-    color: oklch(0.78 0.18 145) !important;
+  .registration-list-item--validated .player-link {
+    color: var(--md-mark-v) !important;
   }
 
   .scenario-subtabs {
@@ -1416,22 +1417,22 @@
   .md-content .md-highlight,
   .md-content .md-c-b {
     @apply bg-transparent font-semibold;
-    color: #00e5ff;
+    color: var(--md-mark-b);
   }
 
   .md-content .md-c-v {
     @apply bg-transparent font-semibold;
-    color: #39ff88;
+    color: var(--md-mark-v);
   }
 
   .md-content .md-c-r {
     @apply bg-transparent font-semibold;
-    color: #ff2ed1;
+    color: var(--md-mark-r);
   }
 
   .md-content .md-c-o {
     @apply bg-transparent font-semibold;
-    color: #ff9500;
+    color: var(--md-mark-o);
   }
 
   .md-content a.md-link {

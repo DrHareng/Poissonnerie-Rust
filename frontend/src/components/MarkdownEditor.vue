@@ -340,7 +340,7 @@ function onKeydown(event: KeyboardEvent) {
         variant="ghost"
         size="xs"
         class="min-w-6 px-1.5 font-semibold"
-        style="color: #00e5ff"
+        style="color: var(--md-mark-b)"
         title="Couleur bleue (=b=…=b=) — Ctrl+Shift+B"
         @mousedown.prevent
         @click="wrapSelection('=b=', '=b=')"
@@ -352,7 +352,7 @@ function onKeydown(event: KeyboardEvent) {
         variant="ghost"
         size="xs"
         class="min-w-6 px-1.5 font-semibold"
-        style="color: #39ff88"
+        style="color: var(--md-mark-v)"
         title="Couleur verte (=v=…=v=) — Ctrl+Shift+V"
         @mousedown.prevent
         @click="wrapSelection('=v=', '=v=')"
@@ -364,7 +364,7 @@ function onKeydown(event: KeyboardEvent) {
         variant="ghost"
         size="xs"
         class="min-w-6 px-1.5 font-semibold"
-        style="color: #ff2ed1"
+        style="color: var(--md-mark-r)"
         title="Couleur rose (=r=…=r=) — Ctrl+Shift+R"
         @mousedown.prevent
         @click="wrapSelection('=r=', '=r=')"
@@ -376,7 +376,7 @@ function onKeydown(event: KeyboardEvent) {
         variant="ghost"
         size="xs"
         class="min-w-6 px-1.5 font-semibold"
-        style="color: #ff9500"
+        style="color: var(--md-mark-o)"
         title="Couleur orange (=o=…=o=) — Ctrl+Shift+O"
         @mousedown.prevent
         @click="wrapSelection('=o=', '=o=')"

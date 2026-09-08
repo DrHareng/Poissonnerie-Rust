@@ -313,6 +313,8 @@ export interface TournamentRegistration {
   has_bracket_lists?: boolean
   has_army_list_2?: boolean
   has_bracket_list_2?: boolean
+  army_list_1_validated?: boolean
+  army_list_2_validated?: boolean
 }
 
 export interface TournamentScenarioSlot {

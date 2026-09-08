@@ -319,6 +319,10 @@ pub struct TournamentRegistration {
     pub has_army_list_2: bool,
     #[serde(default)]
     pub has_bracket_list_2: bool,
+    #[serde(default)]
+    pub army_list_1_validated: bool,
+    #[serde(default)]
+    pub army_list_2_validated: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

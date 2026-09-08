@@ -33,6 +33,15 @@ const TOURNAMENT_SELECT: &str = "
     FROM tournaments
 ";
 
+const REGISTRATION_SELECT: &str = "
+    SELECT id, tournament_id, player_name, user_id, status,
+           waitlist_position, requested_at, reviewed_at, reviewed_by, army_id,
+           army_list_1, army_list_2, bracket_list_1, bracket_list_2,
+           army_list_1_id, army_list_2_id, bracket_list_1_id, bracket_list_2_id,
+           army_list_1_validated, army_list_2_validated
+    FROM tournament_registrations
+";
+
 pub struct TournamentStore {
     conn: Mutex<Connection>,
 }
@@ -797,6 +806,10 @@ impl TournamentStore {
                 SET army_id = NULL,
                     army_list_1 = NULL,
                     army_list_2 = NULL,
+                    army_list_1_id = NULL,
+                    army_list_2_id = NULL,
+                    army_list_1_validated = 0,
+                    army_list_2_validated = 0,
                     status = ?1,
                     reviewed_at = NULL,
                     reviewed_by = NULL,
@@ -818,56 +831,53 @@ impl TournamentStore {
             .transpose()?;
         let army_id = list1_entry.army_id;
         let list2_stored = list2.as_deref().unwrap_or("");
-        let lists_changed = registration.army_list_1.as_deref().unwrap_or("") != list1.as_str()
-            || registration.army_list_2.as_deref().unwrap_or("") != list2_stored
-            || registration.army_id != Some(army_id);
-
-        // Toute modification des listes exige une nouvelle validation orga.
-        let reset_to_pending = lists_changed
-            && matches!(
-                registration.status,
-                RegistrationStatus::Approved | RegistrationStatus::Waitlisted
-            );
-
-        if reset_to_pending {
-            conn.execute(
-                "
-                UPDATE tournament_registrations
-                SET army_id = ?1,
-                    army_list_1 = ?2,
-                    army_list_2 = ?3,
-                    army_list_1_id = ?4,
-                    army_list_2_id = ?5,
-                    status = ?6,
-                    reviewed_at = NULL,
-                    reviewed_by = NULL,
-                    waitlist_position = NULL
-                WHERE id = ?7
-                ",
-                params![
-                    army_id,
-                    list1,
-                    list2_stored,
-                    list1_entry.id,
-                    list2_id,
-                    RegistrationStatus::Pending.as_str(),
-                    registration.id
-                ],
-            )?;
+        let list1_changed =
+            registration.army_list_1.as_deref().unwrap_or("") != list1.as_str();
+        let list2_changed =
+            registration.army_list_2.as_deref().unwrap_or("") != list2_stored;
+        let army_list_1_validated = if list1_changed {
+            0_i64
         } else {
-            conn.execute(
-                "
-                UPDATE tournament_registrations
-                SET army_id = ?1,
-                    army_list_1 = ?2,
-                    army_list_2 = ?3,
-                    army_list_1_id = ?4,
-                    army_list_2_id = ?5
-                WHERE id = ?6
-                ",
-                params![army_id, list1, list2_stored, list1_entry.id, list2_id, registration.id],
-            )?;
-        }
+            i64::from(registration.army_list_1_validated)
+        };
+        let army_list_2_validated = if list2_changed || list2_stored.is_empty() {
+            0_i64
+        } else {
+            i64::from(registration.army_list_2_validated)
+        };
+
+        conn.execute(
+            "
+            UPDATE tournament_registrations
+            SET army_id = ?1,
+                army_list_1 = ?2,
+                army_list_2 = ?3,
+                army_list_1_id = ?4,
+                army_list_2_id = ?5,
+                army_list_1_validated = ?6,
+                army_list_2_validated = ?7
+            WHERE id = ?8
+            ",
+            params![
+                army_id,
+                list1,
+                list2_stored,
+                list1_entry.id,
+                list2_id,
+                army_list_1_validated,
+                army_list_2_validated,
+                registration.id
+            ],
+        )?;
+        let updated = self
+            .get_registration_in_conn(&conn, registration.id)?
+            .context("inscription introuvable")?;
+        self.sync_registration_after_list_review(
+            &conn,
+            &updated,
+            registration.reviewed_by.unwrap_or(0),
+            now_unix(),
+        )?;
         self.get_registration_in_conn(&conn, registration.id)?
             .context("inscription introuvable")
     }
@@ -894,16 +904,7 @@ impl TournamentStore {
             "DELETE FROM tournament_registrations WHERE id = ?1",
             params![registration.id],
         )?;
-
-        let mut waitlisted = self.list_registrations_in_conn(&conn, tournament_id)?;
-        waitlisted.retain(|r| r.status == RegistrationStatus::Waitlisted);
-        waitlisted.sort_by_key(|r| r.waitlist_position.unwrap_or(u32::MAX));
-        for (index, reg) in waitlisted.iter().enumerate() {
-            conn.execute(
-                "UPDATE tournament_registrations SET waitlist_position = ?1 WHERE id = ?2",
-                params![(index + 1) as u32, reg.id],
-            )?;
-        }
+        self.compact_waitlist_in_conn(&conn, tournament_id)?;
         Ok(())
     }
 
@@ -946,8 +947,9 @@ impl TournamentStore {
             INSERT INTO tournament_registrations
                 (tournament_id, player_name_key, player_name, status, requested_at,
                  reviewed_at, reviewed_by, army_id, army_list_1, army_list_2,
-                 army_list_1_id, army_list_2_id)
-            VALUES (?1, ?2, ?3, ?4, ?5, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
+                 army_list_1_id, army_list_2_id,
+                 army_list_1_validated, army_list_2_validated)
+            VALUES (?1, ?2, ?3, ?4, ?5, ?5, ?6, ?7, ?8, ?9, ?10, ?11, 1, ?12)
             ",
             params![
                 tournament_id,
@@ -961,10 +963,16 @@ impl TournamentStore {
                 list2.as_deref().unwrap_or(""),
                 list1_entry.id,
                 list2_id,
+                i64::from(list2.is_some()),
             ],
         )?;
         let reg_id = conn.last_insert_rowid();
-        self.review_registration_in_tx(&conn, reg_id, "approved", admin_id)
+        let registration = self
+            .get_registration_in_conn(&conn, reg_id)?
+            .context("inscription introuvable")?;
+        self.approve_registration(&conn, &registration, admin_id, now)?;
+        self.get_registration_in_conn(&conn, reg_id)?
+            .context("inscription introuvable")
     }
 
     pub fn update_bracket_lists(
@@ -1024,6 +1032,7 @@ impl TournamentStore {
         tournament_id: i64,
         registration_id: i64,
         action: &str,
+        list_slot: u8,
         admin_id: i64,
     ) -> Result<TournamentRegistration> {
         let conn = self.conn.lock().unwrap();
@@ -1033,50 +1042,113 @@ impl TournamentStore {
         if registration.tournament_id != tournament_id {
             bail!("inscription introuvable pour ce tournoi");
         }
-        self.review_registration_in_tx(&conn, registration_id, action, admin_id)
-    }
-
-    fn review_registration_in_tx(
-        &self,
-        conn: &Connection,
-        registration_id: i64,
-        action: &str,
-        admin_id: i64,
-    ) -> Result<TournamentRegistration> {
-        let registration = self
-            .get_registration_in_conn(conn, registration_id)?
-            .context("inscription introuvable")?;
-
-        if registration.status != RegistrationStatus::Pending
-            && registration.status != RegistrationStatus::Waitlisted
-            && action != "approved"
-        {
-            // allow re-review from waitlisted when promoting
+        if list_slot != 1 && list_slot != 2 {
+            bail!("liste invalide");
         }
 
         let now = now_unix();
         match action {
-            "approved" => self.approve_registration(conn, &registration, admin_id, now)?,
-            "rejected" => {
+            "approved" => {
+                let has_list = if list_slot == 1 {
+                    registration_list_filled(&registration.army_list_1)
+                } else {
+                    registration_list_filled(&registration.army_list_2)
+                };
+                if !has_list {
+                    bail!("cette liste n'est pas renseignée");
+                }
+                let column = if list_slot == 1 {
+                    "army_list_1_validated"
+                } else {
+                    "army_list_2_validated"
+                };
                 conn.execute(
-                    "
-                    UPDATE tournament_registrations
-                    SET status = ?1, reviewed_at = ?2, reviewed_by = ?3, waitlist_position = NULL
-                    WHERE id = ?4
-                    ",
-                    params![
-                        RegistrationStatus::Rejected.as_str(),
-                        now,
-                        admin_id,
-                        registration_id
-                    ],
+                    &format!(
+                        "UPDATE tournament_registrations SET {column} = 1 WHERE id = ?1"
+                    ),
+                    params![registration_id],
                 )?;
+            }
+            "rejected" => {
+                if list_slot == 1 {
+                    conn.execute(
+                        "
+                        UPDATE tournament_registrations
+                        SET army_list_1 = NULL,
+                            army_list_1_id = NULL,
+                            army_list_1_validated = 0,
+                            army_id = NULL
+                        WHERE id = ?1
+                        ",
+                        params![registration_id],
+                    )?;
+                } else {
+                    conn.execute(
+                        "
+                        UPDATE tournament_registrations
+                        SET army_list_2 = NULL,
+                            army_list_2_id = NULL,
+                            army_list_2_validated = 0
+                        WHERE id = ?1
+                        ",
+                        params![registration_id],
+                    )?;
+                }
             }
             _ => bail!("action invalide"),
         }
 
-        self.get_registration_in_conn(conn, registration_id)?
+        let updated = self
+            .get_registration_in_conn(&conn, registration_id)?
+            .context("inscription introuvable")?;
+        self.sync_registration_after_list_review(&conn, &updated, admin_id, now)?;
+        self.get_registration_in_conn(&conn, registration_id)?
             .context("inscription introuvable")
+    }
+
+    fn sync_registration_after_list_review(
+        &self,
+        conn: &Connection,
+        registration: &TournamentRegistration,
+        admin_id: i64,
+        now: u64,
+    ) -> Result<()> {
+        if registration_lists_fully_validated(registration) {
+            if registration.status != RegistrationStatus::Approved
+                && registration.status != RegistrationStatus::Waitlisted
+            {
+                self.approve_registration(conn, registration, admin_id, now)?;
+            }
+            return Ok(());
+        }
+
+        if registration.status == RegistrationStatus::Approved
+            || registration.status == RegistrationStatus::Waitlisted
+        {
+            conn.execute(
+                "
+                UPDATE tournament_registrations
+                SET status = ?1, reviewed_at = NULL, reviewed_by = NULL, waitlist_position = NULL
+                WHERE id = ?2
+                ",
+                params![RegistrationStatus::Pending.as_str(), registration.id],
+            )?;
+            self.compact_waitlist_in_conn(conn, registration.tournament_id)?;
+        }
+        Ok(())
+    }
+
+    fn compact_waitlist_in_conn(&self, conn: &Connection, tournament_id: i64) -> Result<()> {
+        let mut waitlisted = self.list_registrations_in_conn(conn, tournament_id)?;
+        waitlisted.retain(|r| r.status == RegistrationStatus::Waitlisted);
+        waitlisted.sort_by_key(|r| r.waitlist_position.unwrap_or(u32::MAX));
+        for (index, reg) in waitlisted.iter().enumerate() {
+            conn.execute(
+                "UPDATE tournament_registrations SET waitlist_position = ?1 WHERE id = ?2",
+                params![(index + 1) as u32, reg.id],
+            )?;
+        }
+        Ok(())
     }
 
     fn approve_registration(
@@ -3669,17 +3741,11 @@ impl TournamentStore {
         conn: &Connection,
         tournament_id: i64,
     ) -> Result<Vec<TournamentRegistration>> {
-        let mut stmt = conn.prepare(
-            "
-            SELECT id, tournament_id, player_name, user_id, status,
-                   waitlist_position, requested_at, reviewed_at, reviewed_by, army_id,
-                   army_list_1, army_list_2, bracket_list_1, bracket_list_2,
-                   army_list_1_id, army_list_2_id, bracket_list_1_id, bracket_list_2_id
-            FROM tournament_registrations
+        let mut stmt = conn.prepare(&format!(
+            "{REGISTRATION_SELECT}
             WHERE tournament_id = ?1
-            ORDER BY requested_at ASC
-            ",
-        )?;
+            ORDER BY requested_at ASC"
+        ))?;
         let rows = stmt.query_map(params![tournament_id], row_to_registration)?;
         rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
     }
@@ -4014,15 +4080,7 @@ impl TournamentStore {
         conn: &Connection,
         id: i64,
     ) -> Result<Option<TournamentRegistration>> {
-        let mut stmt = conn.prepare(
-            "
-            SELECT id, tournament_id, player_name, user_id, status,
-                   waitlist_position, requested_at, reviewed_at, reviewed_by, army_id,
-                   army_list_1, army_list_2, bracket_list_1, bracket_list_2,
-                   army_list_1_id, army_list_2_id, bracket_list_1_id, bracket_list_2_id
-            FROM tournament_registrations WHERE id = ?1
-            ",
-        )?;
+        let mut stmt = conn.prepare(&format!("{REGISTRATION_SELECT} WHERE id = ?1"))?;
         let mut rows = stmt.query(params![id])?;
         if let Some(row) = rows.next()? {
             return Ok(Some(row_to_registration(row)?));
@@ -4106,6 +4164,20 @@ fn parse_outcome(value: &str) -> Option<MatchOutcome> {
         "draw" => Some(MatchOutcome::Draw),
         _ => None,
     }
+}
+
+fn registration_list_filled(value: &Option<String>) -> bool {
+    value.as_ref().is_some_and(|s| !s.trim().is_empty())
+}
+
+fn registration_lists_fully_validated(registration: &TournamentRegistration) -> bool {
+    if !registration_list_filled(&registration.army_list_1) || !registration.army_list_1_validated {
+        return false;
+    }
+    if registration_list_filled(&registration.army_list_2) && !registration.army_list_2_validated {
+        return false;
+    }
+    true
 }
 
 fn is_group_pool(tournament: &Tournament, pool: &Pool) -> bool {
@@ -4203,6 +4275,8 @@ fn row_to_registration(row: &rusqlite::Row<'_>) -> rusqlite::Result<TournamentRe
         army_list_2_id: row.get(15)?,
         bracket_list_1_id: row.get(16)?,
         bracket_list_2_id: row.get(17)?,
+        army_list_1_validated: row.get::<_, i64>(18)? != 0,
+        army_list_2_validated: row.get::<_, i64>(19)? != 0,
     })
 }
 
