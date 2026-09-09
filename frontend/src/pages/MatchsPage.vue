@@ -576,6 +576,7 @@ onMounted(async () => {
                     <PlayerLink
                       :name="item.player1"
                       :display-name="item.player1_display_name"
+                      :adversaire="item.adversaire"
                     />
                   </div>
                   <div class="flex items-center gap-2">
@@ -583,6 +584,7 @@ onMounted(async () => {
                     <PlayerLink
                       :name="item.player2"
                       :display-name="item.player2_display_name"
+                      :adversaire="item.adversaire"
                     />
                   </div>
                 </div>

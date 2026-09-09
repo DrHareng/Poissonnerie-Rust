@@ -191,6 +191,8 @@ export interface MatchRecord extends RatingUpdate, MatchScores {
   created_by?: string | null
   /** false = match amical (pas d'impact ELO). Défaut true pour l'historique. */
   counts_for_elo?: boolean
+  /** Pseudo libre si l’adversaire n’est pas un joueur inscrit. */
+  adversaire?: string | null
   recorded_at: number
 }
 

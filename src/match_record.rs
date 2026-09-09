@@ -200,6 +200,9 @@ pub struct MatchRecord {
     /// Si faux : match amical (pas d'impact ELO / W-D-L).
     #[serde(default = "default_counts_for_elo")]
     pub counts_for_elo: bool,
+    /// Pseudo libre si l’adversaire n’est pas un joueur inscrit.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub adversaire: Option<String>,
     pub recorded_at: u64,
 }
 
@@ -265,8 +268,16 @@ impl MatchRecord {
             partie_step: None,
             created_by: None,
             counts_for_elo: true,
+            adversaire: None,
             recorded_at,
         }
+    }
+
+    /// Si vrai : l’adversaire n’est pas un joueur inscrit (`adversaire` renseigné).
+    pub fn is_guest_opponent(&self) -> bool {
+        self.adversaire
+            .as_deref()
+            .is_some_and(|name| !name.trim().is_empty())
     }
 }
 

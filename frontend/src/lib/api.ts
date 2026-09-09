@@ -322,6 +322,7 @@ export function startMatch(payload: {
   player1_secondary_slugs: string[]
   player2_secondary_slugs: string[]
   counts_for_elo?: boolean
+  adversaire?: string
 }): Promise<MatchRecord> {
   return request<MatchRecord>('/api/matches/start', {
     method: 'POST',

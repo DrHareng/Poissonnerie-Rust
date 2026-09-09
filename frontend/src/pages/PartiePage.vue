@@ -417,6 +417,7 @@ async function onJoueursNext(payload: {
   army1: number
   player2: string
   army2: number
+  adversaire?: string
   counts_for_elo: boolean
   secondary_draw_mode: 'draw' | 'manual'
 }) {
@@ -443,6 +444,7 @@ async function onJoueursNext(payload: {
         player1_secondary_slugs: drawn.player1,
         player2_secondary_slugs: drawn.player2,
         counts_for_elo: payload.counts_for_elo,
+        adversaire: payload.adversaire,
       })
       setMatchId(record.id)
       setJoueurs(player1Name, payload.army1, payload.player2, payload.army2)

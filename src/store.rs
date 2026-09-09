@@ -178,7 +178,8 @@ impl Leaderboard {
                        m.recorded_at,
                        m.secondary_pool_slugs,
                        m.counts_for_elo,
-                       m.scenario_url
+                       m.scenario_url,
+                       m.adversaire
                 FROM matches m
                 LEFT JOIN scenarios s ON s.id = m.scenario_id
                 LEFT JOIN tournaments t ON t.id = m.tournament_id
@@ -256,10 +257,10 @@ impl Leaderboard {
                     partie_step, created_by,
                     player1_army_list_code, player2_army_list_code,
                     player1_army_list_id, player2_army_list_id,
-                    recorded_at, secondary_pool_slugs, counts_for_elo, scenario_url
+                    recorded_at, secondary_pool_slugs, counts_for_elo, scenario_url, adversaire
                 ) VALUES (
                     ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16,
-                    ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29, ?30, ?31, ?32, ?33, ?34, ?35, ?36
+                    ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29, ?30, ?31, ?32, ?33, ?34, ?35, ?36, ?37
                 )
                 ",
                 params![
@@ -299,6 +300,7 @@ impl Leaderboard {
                     encode_slug_list(record.secondary_pool_slugs.as_deref()),
                     if record.counts_for_elo { 1 } else { 0 },
                     record.scenario_url,
+                    record.adversaire,
                 ],
             )?;
 
@@ -697,6 +699,31 @@ impl Leaderboard {
         player2_secondary_slugs: Vec<String>,
         counts_for_elo: bool,
     ) -> Result<MatchRecord> {
+        self.start_match_with_adversaire(
+            player1,
+            player2,
+            player1_army_id,
+            player2_army_id,
+            created_by,
+            player1_secondary_slugs,
+            player2_secondary_slugs,
+            counts_for_elo,
+            None,
+        )
+    }
+
+    pub fn start_match_with_adversaire(
+        &mut self,
+        player1: &str,
+        player2: &str,
+        player1_army_id: u32,
+        player2_army_id: u32,
+        created_by: &str,
+        player1_secondary_slugs: Vec<String>,
+        player2_secondary_slugs: Vec<String>,
+        counts_for_elo: bool,
+        adversaire: Option<&str>,
+    ) -> Result<MatchRecord> {
         self.start_match_with_tournament(
             player1,
             player2,
@@ -710,6 +737,7 @@ impl Leaderboard {
             None,
             None,
             None,
+            adversaire,
         )
     }
 
@@ -727,9 +755,18 @@ impl Leaderboard {
         tournament_phase: Option<String>,
         scenario_id: Option<i64>,
         scenario_name: Option<String>,
+        adversaire: Option<&str>,
     ) -> Result<MatchRecord> {
-        if normalize_name(player1) == normalize_name(player2) {
+        let guest = adversaire
+            .map(str::trim)
+            .filter(|name| !name.is_empty())
+            .map(str::to_string);
+        let opponent_label = guest.as_deref().unwrap_or(player2);
+        if normalize_name(player1) == normalize_name(opponent_label) {
             bail!("un joueur ne peut pas jouer contre lui-même");
+        }
+        if guest.is_some() && counts_for_elo {
+            bail!("un match classé requiert un adversaire inscrit");
         }
         let defer_secondaries =
             player1_secondary_slugs.is_empty() && player2_secondary_slugs.is_empty();
@@ -741,16 +778,21 @@ impl Leaderboard {
             );
         }
         let key1 = normalize_name(player1);
-        let key2 = normalize_name(player2);
         if !self.players.contains_key(&key1) {
             bail!("joueur introuvable : {}", player1);
         }
-        if !self.players.contains_key(&key2) {
-            bail!("joueur introuvable : {}", player2);
-        }
+        let key2 = normalize_name(player2);
+        let (player2_name, rating2) = if guest.is_some() {
+            (opponent_label.to_string(), 0.0)
+        } else {
+            if !self.players.contains_key(&key2) {
+                bail!("joueur introuvable : {}", player2);
+            }
+            let player = self.players.get(&key2).unwrap();
+            (player.name.clone(), player.rating)
+        };
 
         let rating1 = self.players.get(&key1).unwrap().rating;
-        let rating2 = self.players.get(&key2).unwrap().rating;
         let next_id = self
             .matches
             .iter()
@@ -763,7 +805,7 @@ impl Leaderboard {
         let record = MatchRecord {
             id: next_id,
             player1: self.players.get(&key1).unwrap().name.clone(),
-            player2: self.players.get(&key2).unwrap().name.clone(),
+            player2: player2_name,
             status: MatchStatus::InProgress,
             outcome: None,
             player1_old: rating1,
@@ -812,6 +854,7 @@ impl Leaderboard {
             }),
             created_by: Some(created_by.to_string()),
             counts_for_elo,
+            adversaire: guest,
             recorded_at: now_unix(),
         };
 
@@ -934,11 +977,22 @@ impl Leaderboard {
         let key1 = normalize_name(&self.matches[index].player1.clone());
         let key2 = normalize_name(&self.matches[index].player2.clone());
         let counts_for_elo = self.matches[index].counts_for_elo;
+        let is_guest = self.matches[index].is_guest_opponent();
 
         let update = {
             let old1 = self.players.get(&key1).unwrap().rating;
-            let old2 = self.players.get(&key2).unwrap().rating;
+            let old2 = if is_guest {
+                0.0
+            } else {
+                self.players
+                    .get(&key2)
+                    .with_context(|| format!("joueur introuvable : {}", self.matches[index].player2))?
+                    .rating
+            };
             if counts_for_elo {
+                if is_guest {
+                    bail!("un match classé requiert un adversaire inscrit");
+                }
                 let score1 = outcome.score_for_player1();
                 let (new1, new2) = crate::elo::update_ratings(old1, old2, score1, k_factor);
                 let score2 = match score1 {
@@ -1711,6 +1765,7 @@ fn row_to_match(row: &rusqlite::Row<'_>) -> rusqlite::Result<MatchRecord> {
         secondary_pool_slugs: decode_slug_list(row.get(35)?),
         counts_for_elo: row.get::<_, i64>(36)? != 0,
         scenario_url: row.get(37)?,
+        adversaire: row.get(38)?,
     })
 }
 
@@ -3058,5 +3113,53 @@ mod tests {
         let removed = board.delete_unused_player("Charlie").unwrap();
         assert_eq!(removed.name, "Charlie");
         assert!(board.get_player("Charlie").is_err());
+    }
+
+    #[test]
+    fn start_match_accepts_guest_adversaire() {
+        let mut board = Leaderboard::default();
+        board.add_player("Alice").unwrap();
+        let record = board
+            .start_match_with_adversaire(
+                "Alice",
+                "Visiteur",
+                101,
+                201,
+                "Alice",
+                Vec::new(),
+                Vec::new(),
+                false,
+                Some("Visiteur"),
+            )
+            .unwrap();
+        assert!(record.is_guest_opponent());
+        assert_eq!(record.player2, "Visiteur");
+        assert_eq!(record.adversaire.as_deref(), Some("Visiteur"));
+        assert!(!record.counts_for_elo);
+
+        board
+            .complete_match(
+                record.id,
+                MatchOutcome::Player1Win,
+                32.0,
+                MatchScores::default(),
+            )
+            .unwrap();
+        assert_eq!(board.get_player("Alice").unwrap().wins, 0);
+
+        let ranked_error = board
+            .start_match_with_adversaire(
+                "Alice",
+                "Visiteur",
+                101,
+                201,
+                "Alice",
+                Vec::new(),
+                Vec::new(),
+                true,
+                Some("Visiteur"),
+            )
+            .unwrap_err();
+        assert!(ranked_error.to_string().contains("adversaire inscrit"));
     }
 }

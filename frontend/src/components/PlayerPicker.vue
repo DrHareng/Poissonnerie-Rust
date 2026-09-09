@@ -13,19 +13,23 @@ export interface PlayerPickerOption {
 const props = withDefaults(
   defineProps<{
     modelValue?: string
+    query?: string
     options: PlayerPickerOption[]
     disabled?: boolean
     placeholder?: string
     emptyMessage?: string
+    allowCustom?: boolean
   }>(),
   {
     placeholder: 'Tapez pour chercher un joueur',
     emptyMessage: 'Aucun joueur trouvé.',
+    allowCustom: false,
   },
 )
 
 const emit = defineEmits<{
   'update:modelValue': [value: string | undefined]
+  'update:query': [value: string]
 }>()
 
 const trigger = ref<HTMLElement | null>(null)
@@ -63,7 +67,7 @@ const inputValue = computed({
     if (open.value) {
       return query.value
     }
-    return selectedOption.value?.label ?? ''
+    return selectedOption.value?.label ?? props.modelValue ?? ''
   },
   set(value: string | number) {
     query.value = String(value)
@@ -71,14 +75,16 @@ const inputValue = computed({
   },
 })
 
-const { handleKeydown, handleBlur, isHighlighted, setOptionRef } = useSearchablePickerKeyboard({
-  open,
-  items: filteredOptions,
-  disabled: computed(() => !!props.disabled),
-  onSelect: selectOption,
-  onClose: closePicker,
-  onOpen: openPicker,
-})
+const { handleKeydown, handleBlur, isHighlighted, highlightedIndex, setOptionRef } =
+  useSearchablePickerKeyboard({
+    open,
+    items: filteredOptions,
+    disabled: computed(() => !!props.disabled),
+    onSelect: selectOption,
+    onClose: closePicker,
+    onOpen: openPicker,
+    autoHighlight: computed(() => !props.allowCustom),
+  })
 
 onClickOutside(
   trigger,
@@ -118,7 +124,9 @@ watch(open, async (isOpen) => {
 })
 
 function syncQueryWithSelection() {
-  query.value = selectedOption.value?.label ?? ''
+  query.value =
+    selectedOption.value?.label
+    ?? (props.allowCustom ? (props.modelValue ?? '') : '')
 }
 
 function openPicker() {
@@ -129,7 +137,17 @@ function openPicker() {
   query.value = ''
 }
 
+function commitCustomIfNeeded() {
+  if (!props.allowCustom) return
+  const typed = query.value.trim()
+  if (typed && !selectedOption.value) {
+    emit('update:modelValue', typed)
+    emit('update:query', typed)
+  }
+}
+
 function closePicker() {
+  commitCustomIfNeeded()
   open.value = false
   syncQueryWithSelection()
 }
@@ -145,9 +163,22 @@ function onInput() {
     open.value = true
   }
 
+  emit('update:query', query.value)
+
   if (selectedOption.value && query.value !== selectedOption.value.label) {
     emit('update:modelValue', undefined)
   }
+}
+
+function onKeydown(event: KeyboardEvent) {
+  if (props.allowCustom && event.key === 'Enter' && open.value) {
+    if (highlightedIndex.value < 0) {
+      event.preventDefault()
+      closePicker()
+      return
+    }
+  }
+  handleKeydown(event)
 }
 </script>
 
@@ -165,7 +196,7 @@ function onInput() {
         class="searchable-picker-input"
         @focus="openPicker"
         @blur="handleBlur(trigger, dropdown)"
-        @keydown="handleKeydown"
+        @keydown="onKeydown"
       />
 
       <button

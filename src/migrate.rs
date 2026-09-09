@@ -431,6 +431,10 @@ pub fn migrate(conn: &Connection) -> Result<()> {
         conn.execute("ALTER TABLE matches ADD COLUMN scenario_url TEXT", [])?;
     }
 
+    if !column_exists(conn, "matches", "adversaire")? {
+        conn.execute("ALTER TABLE matches ADD COLUMN adversaire TEXT", [])?;
+    }
+
     if !column_exists(conn, "tournaments", "description")? {
         conn.execute(
             "ALTER TABLE tournaments ADD COLUMN description TEXT NOT NULL DEFAULT ''",

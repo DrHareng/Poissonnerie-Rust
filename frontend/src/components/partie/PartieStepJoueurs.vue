@@ -32,6 +32,7 @@ const emit = defineEmits<{
       army1: number
       player2: string
       army2: number
+      adversaire?: string
       counts_for_elo: boolean
       secondary_draw_mode: SecondaryDrawMode
     },
@@ -40,6 +41,7 @@ const emit = defineEmits<{
 
 const player1 = ref<string | undefined>(props.lockedPlayer1Name ?? props.initialPlayer1)
 const player2 = ref<string | undefined>(props.initialPlayer2)
+const player2Query = ref(props.initialPlayer2 ?? '')
 const army1 = ref<string | undefined>(
   props.initialArmy1 != null ? String(props.initialArmy1) : undefined,
 )
@@ -62,11 +64,35 @@ const player2Options = computed(() =>
   playerOptions.value.filter((option) => option.value !== player1.value),
 )
 
-const canContinue = computed(
-  () =>
-    Boolean(player1.value && player2.value && army1.value && army2.value) &&
-    player1.value !== player2.value,
+function findRegisteredPlayer(raw: string) {
+  const needle = raw.trim().toLowerCase()
+  if (!needle) return undefined
+  return props.players.find(
+    (player) =>
+      player.name.toLowerCase() === needle
+      || player.display_name.toLowerCase() === needle,
+  )
+}
+
+const opponentDraft = computed(
+  () => (player2.value ?? player2Query.value).trim(),
 )
+
+const registeredOpponent = computed(() => findRegisteredPlayer(opponentDraft.value))
+
+const allowGuestOpponent = computed(() => eloMode.value === 'friendly')
+
+const canContinue = computed(() => {
+  if (!player1.value || !army1.value || !army2.value) return false
+  const opponent = opponentDraft.value
+  if (!opponent || opponent.toLowerCase() === player1.value.toLowerCase()) {
+    return false
+  }
+  if (eloMode.value === 'ranked') {
+    return Boolean(registeredOpponent.value)
+  }
+  return true
+})
 
 const lockedPlayer1 = computed(() =>
   props.players.find((player) => player.name === props.lockedPlayer1Name) ?? null,
@@ -108,20 +134,46 @@ watch(player1, () => {
   army1.value = undefined
 })
 
-watch(player2, () => {
-  army2.value = undefined
+watch(eloMode, (mode) => {
+  if (mode !== 'ranked') return
+  const current = opponentDraft.value
+  if (current && !findRegisteredPlayer(current)) {
+    player2.value = undefined
+    player2Query.value = ''
+  }
+})
+
+watch(opponentDraft, (next, prev) => {
+  if (next.trim().toLowerCase() !== (prev ?? '').trim().toLowerCase()) {
+    army2.value = undefined
+  }
 })
 
 function submit() {
-  if (!canContinue.value || !player1.value || !player2.value || !army1.value || !army2.value) {
+  if (!canContinue.value || !player1.value || !army1.value || !army2.value) {
+    return
+  }
+  const opponent = opponentDraft.value
+  const registered = findRegisteredPlayer(opponent)
+  if (eloMode.value === 'ranked') {
+    if (!registered) return
+    emit('next', {
+      player1: player1.value,
+      army1: Number(army1.value),
+      player2: registered.name,
+      army2: Number(army2.value),
+      counts_for_elo: true,
+      secondary_draw_mode: secondaryDrawMode.value,
+    })
     return
   }
   emit('next', {
     player1: player1.value,
     army1: Number(army1.value),
-    player2: player2.value,
+    player2: registered?.name ?? opponent,
     army2: Number(army2.value),
-    counts_for_elo: eloMode.value === 'ranked',
+    adversaire: registered ? undefined : opponent,
+    counts_for_elo: false,
     secondary_draw_mode: secondaryDrawMode.value,
   })
 }
@@ -239,24 +291,39 @@ function submit() {
       <section class="player-match-panel">
         <p class="player-match-panel-title">Joueur 2</p>
         <div class="grid gap-2">
-          <Label>Joueur</Label>
+          <Label>{{ allowGuestOpponent ? 'Joueur ou adversaire' : 'Joueur' }}</Label>
           <PlayerPicker
             v-model="player2"
+            v-model:query="player2Query"
             :options="player2Options"
-            :disabled="loading || playerOptions.length < 2"
-            placeholder="Tapez pour chercher un joueur"
+            :allow-custom="allowGuestOpponent"
+            :disabled="loading || (eloMode === 'ranked' && player2Options.length === 0)"
+            :placeholder="
+              allowGuestOpponent
+                ? 'Tapez un pseudo (inscrit ou libre)'
+                : 'Tapez pour chercher un joueur'
+            "
+            :empty-message="
+              allowGuestOpponent
+                ? 'Aucun joueur inscrit — le texte saisi sera l’adversaire.'
+                : 'Aucun joueur trouvé.'
+            "
           />
+          <p v-if="allowGuestOpponent" class="text-sm text-muted-foreground">
+            Choisissez un joueur dans la liste, ou validez un pseudo libre : il sera
+            enregistré comme adversaire (hors classement).
+          </p>
         </div>
         <div class="grid gap-2">
           <Label>Sectorielle</Label>
           <SectorialPicker
             v-model="army2"
             :armies="armies"
-            :disabled="!player2 || armiesLoading || armies.length === 0"
+            :disabled="!opponentDraft || armiesLoading || armies.length === 0"
             :placeholder="
-              player2
+              opponentDraft
                 ? 'Tapez pour chercher une sectorielle'
-                : 'Sélectionnez d\'abord le joueur'
+                : 'Indiquez d\'abord l\'adversaire'
             "
           />
         </div>

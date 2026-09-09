@@ -197,6 +197,7 @@ function formatEloCell(match: MatchRecord) {
                 <PlayerLink
                   :name="match.player1"
                   :display-name="match.player1_display_name"
+                  :adversaire="match.adversaire"
                 />
               </TableCell>
               <TableCell class="px-2">
@@ -227,6 +228,7 @@ function formatEloCell(match: MatchRecord) {
                 <PlayerLink
                   :name="match.player2"
                   :display-name="match.player2_display_name"
+                  :adversaire="match.adversaire"
                 />
               </TableCell>
               <TableCell>

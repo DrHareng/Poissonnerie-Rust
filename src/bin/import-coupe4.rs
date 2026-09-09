@@ -351,6 +351,7 @@ fn rebuild_leaderboard_from_matches(db_path: &Path) -> Result<()> {
             partie_step: None,
             created_by: None,
             counts_for_elo: true,
+            adversaire: None,
             recorded_at: row.get(18)?,
         })
     })?;

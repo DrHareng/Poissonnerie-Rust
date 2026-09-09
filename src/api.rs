@@ -118,7 +118,10 @@ struct ClaimPlayerRequest {
 #[derive(Debug, Deserialize)]
 struct StartMatchRequest {
     player1: String,
+    #[serde(default)]
     player2: String,
+    #[serde(default)]
+    adversaire: Option<String>,
     player1_army_id: u32,
     player2_army_id: u32,
     player1_secondary_slugs: Vec<String>,
@@ -1475,6 +1478,39 @@ async fn start_match(
         }
     }
 
+    let player2_raw = payload.player2.trim();
+    let adversaire_raw = payload
+        .adversaire
+        .as_deref()
+        .map(str::trim)
+        .filter(|name| !name.is_empty());
+
+    let (opponent_name, guest_adversaire) = {
+        let board = state.board.lock().unwrap();
+        let registered = !player2_raw.is_empty()
+            && board
+                .get_player(player2_raw)
+                .is_ok();
+        if registered {
+            (player2_raw.to_string(), None)
+        } else {
+            let label = if !player2_raw.is_empty() {
+                player2_raw
+            } else {
+                adversaire_raw.unwrap_or("")
+            };
+            if label.is_empty() {
+                return Err(ApiError::bad_request("indiquez un adversaire"));
+            }
+            if payload.counts_for_elo {
+                return Err(ApiError::bad_request(
+                    "un match classé requiert un adversaire inscrit",
+                ));
+            }
+            (label.to_string(), Some(label.to_string()))
+        }
+    };
+
     let mut board = state.board.lock().unwrap();
     if crate::normalize_name(&payload.player1) != crate::normalize_name(&created_by) {
         return Err(ApiError::bad_request(
@@ -1482,15 +1518,16 @@ async fn start_match(
         ));
     }
     let record = board
-        .start_match(
+        .start_match_with_adversaire(
             &payload.player1,
-            &payload.player2,
+            &opponent_name,
             payload.player1_army_id,
             payload.player2_army_id,
             &created_by,
             payload.player1_secondary_slugs,
             payload.player2_secondary_slugs,
             payload.counts_for_elo,
+            guest_adversaire.as_deref(),
         )
         .map_err(|error| ApiError::bad_request(error.to_string()))?;
     board

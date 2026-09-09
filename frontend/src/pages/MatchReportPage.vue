@@ -349,6 +349,7 @@ async function removeTemplate() {
             <PlayerLink
               :name="match.player1"
               :display-name="match.player1_display_name"
+              :adversaire="match.adversaire"
               class="truncate text-sm"
             />
             <ArmyLogo :army-id="match.player1_army_id" />
@@ -359,6 +360,7 @@ async function removeTemplate() {
             <PlayerLink
               :name="match.player2"
               :display-name="match.player2_display_name"
+              :adversaire="match.adversaire"
               class="truncate text-sm"
             />
           </div>

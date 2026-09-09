@@ -545,6 +545,7 @@ onMounted(loadMatch)
                 <PlayerLink
                   :name="match.player1"
                   :display-name="match.player1_display_name"
+                  :adversaire="match.adversaire"
                   class="text-lg font-semibold"
                 />
               </div>
@@ -690,6 +691,7 @@ onMounted(loadMatch)
                 <PlayerLink
                   :name="match.player2"
                   :display-name="match.player2_display_name"
+                  :adversaire="match.adversaire"
                   class="text-lg font-semibold"
                 />
               </div>

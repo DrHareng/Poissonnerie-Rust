@@ -8,6 +8,13 @@ export function isSamePlayer(a: string, b: string) {
   return normalize(a) === normalize(b)
 }
 
+/** L’adversaire libre (`adversaire`) occupe ce nom, même après inversion de perspective. */
+export function isGuestOpponentName(match: MatchRecord, playerName: string) {
+  const guest = match.adversaire?.trim()
+  if (!guest) return false
+  return isSamePlayer(guest, playerName)
+}
+
 function flipOutcome(outcome: MatchOutcome | null | undefined): MatchOutcome {
   if (!outcome || outcome === 'draw') return 'draw'
   if (outcome === 'player1_win') return 'player2_win'

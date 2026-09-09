@@ -1,4 +1,4 @@
-import { nextTick, ref, watch, type ComputedRef, type Ref } from 'vue'
+import { computed, nextTick, ref, watch, type ComputedRef, type Ref } from 'vue'
 
 export function useSearchablePickerKeyboard<T>({
   open,
@@ -7,6 +7,7 @@ export function useSearchablePickerKeyboard<T>({
   onSelect,
   onClose,
   onOpen,
+  autoHighlight = true,
 }: {
   open: Ref<boolean>
   items: ComputedRef<T[]>
@@ -14,17 +15,23 @@ export function useSearchablePickerKeyboard<T>({
   onSelect: (item: T) => void
   onClose: () => void
   onOpen: () => void
+  autoHighlight?: boolean | ComputedRef<boolean>
 }) {
   const highlightedIndex = ref(-1)
   const optionRefs = ref<(HTMLElement | null)[]>([])
+  const shouldAutoHighlight = computed(() =>
+    typeof autoHighlight === 'boolean' ? autoHighlight : autoHighlight.value,
+  )
 
   watch(items, () => {
     if (!open.value) return
-    highlightedIndex.value = items.value.length > 0 ? 0 : -1
+    highlightedIndex.value =
+      shouldAutoHighlight.value && items.value.length > 0 ? 0 : -1
   })
 
   watch(open, (isOpen) => {
-    highlightedIndex.value = isOpen && items.value.length > 0 ? 0 : -1
+    highlightedIndex.value =
+      isOpen && shouldAutoHighlight.value && items.value.length > 0 ? 0 : -1
     if (!isOpen) {
       optionRefs.value = []
     }
@@ -123,6 +130,7 @@ export function useSearchablePickerKeyboard<T>({
     handleKeydown,
     handleBlur,
     isHighlighted,
+    highlightedIndex,
     setOptionRef,
   }
 }

@@ -312,6 +312,7 @@ onMounted(async () => {
                   <PlayerLink
                     :name="match.player1"
                     :display-name="match.player1_display_name"
+                    :adversaire="match.adversaire"
                     class="truncate text-xs"
                   />
                   <ArmyLogo :army-id="match.player1_army_id" />
@@ -339,6 +340,7 @@ onMounted(async () => {
                   <PlayerLink
                     :name="match.player2"
                     :display-name="match.player2_display_name"
+                    :adversaire="match.adversaire"
                     class="truncate text-xs"
                   />
                 </div>

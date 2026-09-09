@@ -56,9 +56,20 @@ impl<'a> PlayerDisplayResolver<'a> {
     }
 
     pub fn enrich_match(&self, record: MatchRecord) -> EnrichedMatchRecord {
+        let player2_display_name = if record.is_guest_opponent() {
+            record
+                .adversaire
+                .as_deref()
+                .map(str::trim)
+                .filter(|name| !name.is_empty())
+                .unwrap_or(record.player2.as_str())
+                .to_string()
+        } else {
+            self.resolve(&record.player2)
+        };
         EnrichedMatchRecord {
             player1_display_name: self.resolve(&record.player1),
-            player2_display_name: self.resolve(&record.player2),
+            player2_display_name,
             record,
         }
     }
