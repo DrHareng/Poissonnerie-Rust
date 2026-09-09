@@ -172,10 +172,189 @@ onMounted(async () => {
 <template>
   <div class="page-stack">
     <div
-      class="grid min-h-0 flex-1 grid-cols-1 items-start gap-4 lg:grid-cols-[minmax(0,20rem)_minmax(0,1fr)] xl:grid-cols-[minmax(0,22rem)_minmax(0,1fr)]"
+      class="grid min-h-0 flex-1 grid-cols-1 items-start gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,20rem)] xl:grid-cols-[minmax(0,1fr)_minmax(0,22rem)]"
     >
+      <div class="grid min-w-0 gap-4 self-start">
+        <Card class="neon-panel">
+          <CardHeader class="pb-3">
+            <div class="flex items-center justify-between gap-3">
+              <CardTitle class="flex items-center gap-2">
+                <Trophy class="size-5 text-primary" />
+                Dernier tournoi
+              </CardTitle>
+              <RouterLink
+                to="/tournois"
+                class="text-sm font-medium text-primary hover:underline"
+              >
+                Voir tout
+              </RouterLink>
+            </div>
+          </CardHeader>
+          <CardContent>
+            <div
+              v-if="loading"
+              class="rounded-lg border border-dashed p-6 text-center text-sm text-muted-foreground"
+            >
+              Chargement…
+            </div>
+            <div
+              v-else-if="!tournament"
+              class="rounded-lg border border-dashed p-6 text-center text-sm text-muted-foreground"
+            >
+              Aucun tournoi.
+            </div>
+            <button
+              v-else
+              type="button"
+              class="grid w-full gap-3 rounded-lg border p-4 text-left transition hover:border-primary/50 hover:bg-muted/30"
+              @click="openTournament"
+            >
+              <div class="flex items-start justify-between gap-4">
+                <div class="min-w-0 space-y-1">
+                  <p class="font-medium">{{ tournament.name }}</p>
+                  <p class="text-sm text-muted-foreground">
+                    {{
+                      formatRegistrationSummary(
+                        tournament.registered_count,
+                        tournament.waitlist_count,
+                        tournamentRegistrationCapacity(
+                          tournament.pool_count,
+                          tournament.structure,
+                        ),
+                      )
+                    }}
+                  </p>
+                </div>
+                <Badge variant="outline" class="shrink-0">
+                  {{ tournament.display_status }}
+                </Badge>
+              </div>
+              <TournamentDescriptionWithRegistrants
+                v-if="
+                  isTournamentRegistrationPhase(tournament.status)
+                  && (tournament.description?.trim()
+                    || (tournament.registrations?.length ?? 0) > 0
+                    || (tournament.pool_scenarios?.length ?? 0) > 0)
+                "
+                :description="tournament.description"
+                :registrations="tournament.registrations ?? []"
+                :scenarios="tournament.pool_scenarios ?? []"
+                compact
+              />
+              <div
+                v-else-if="tournament.description?.trim()"
+                class="prose prose-sm max-w-none text-left text-muted-foreground"
+              >
+                <MarkdownContent :source="tournament.description" />
+              </div>
+              <div
+                v-if="
+                  (tournament.pool_scenarios?.length ?? 0) > 0
+                  && !isTournamentRegistrationPhase(tournament.status)
+                "
+                class="space-y-1 text-left"
+              >
+                <p class="text-xs font-medium text-muted-foreground">Scénarios de poules</p>
+                <TournamentPoolScenarioLinks :scenarios="tournament.pool_scenarios ?? []" />
+              </div>
+              <BracketTree
+                v-if="tournament.bracket_matches?.length"
+                :matches="tournament.bracket_matches"
+                compact
+              />
+            </button>
+          </CardContent>
+        </Card>
+
+        <Card class="neon-panel">
+          <CardHeader class="pb-2">
+            <div class="flex items-center justify-between gap-3">
+              <CardTitle class="flex items-center gap-2">
+                <History class="size-5 text-primary" />
+                Dernières parties
+              </CardTitle>
+              <RouterLink
+                to="/matchs"
+                class="text-sm font-medium text-primary hover:underline"
+              >
+                Voir tout
+              </RouterLink>
+            </div>
+          </CardHeader>
+          <CardContent class="pt-0">
+            <div
+              v-if="loading"
+              class="rounded-lg border border-dashed p-4 text-center text-sm text-muted-foreground"
+            >
+              Chargement…
+            </div>
+            <div
+              v-else-if="matches.length === 0"
+              class="rounded-lg border border-dashed p-4 text-center text-sm text-muted-foreground"
+            >
+              Aucune partie pour l’instant.
+            </div>
+            <div v-else class="divide-y divide-border/60 rounded-lg border">
+              <div
+                v-for="match in matches"
+                :key="match.id"
+                role="link"
+                tabindex="0"
+                class="grid w-full cursor-pointer grid-cols-[2.35rem_minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-x-1 px-2 py-1 text-left transition hover:bg-muted/30 sm:grid-cols-[2.35rem_minmax(0,1fr)_auto_minmax(0,1fr)_minmax(4.5rem,0.65fr)] sm:gap-x-1.5 sm:px-2 sm:py-1.5"
+                @click="openMatch(match.id)"
+                @keydown.enter.prevent="openMatch(match.id)"
+                @keydown.space.prevent="openMatch(match.id)"
+              >
+                <span class="tabular-nums text-[11px] text-muted-foreground">
+                  {{ matchShortDate(match.recorded_at) ?? '—' }}
+                </span>
+                <div class="flex min-w-0 items-center justify-end gap-1">
+                  <PlayerLink
+                    :name="match.player1"
+                    :display-name="match.player1_display_name"
+                    class="truncate text-xs"
+                  />
+                  <ArmyLogo :army-id="match.player1_army_id" />
+                  <ArmyListQuickActions
+                    :code="match.player1_army_list_code"
+                    icon-only
+                    class="shrink-0"
+                    @click.stop
+                  />
+                </div>
+                <div class="home-match-score shrink-0 [&_.mx-auto]:mx-0 [&_[data-slot=badge]]:h-5 [&_[data-slot=badge]]:px-1.5 [&_[data-slot=badge]]:text-[10px] [&_[data-slot=badge]]:leading-none">
+                  <MatchResultBadges
+                    :match="match"
+                    :badge-min-ch="scoreBadgeMinCh"
+                  />
+                </div>
+                <div class="flex min-w-0 items-center gap-1">
+                  <ArmyLogo :army-id="match.player2_army_id" />
+                  <ArmyListQuickActions
+                    :code="match.player2_army_list_code"
+                    icon-only
+                    class="shrink-0"
+                    @click.stop
+                  />
+                  <PlayerLink
+                    :name="match.player2"
+                    :display-name="match.player2_display_name"
+                    class="truncate text-xs"
+                  />
+                </div>
+                <span
+                  class="hidden truncate justify-self-end text-[11px] text-muted-foreground sm:block"
+                >
+                  {{ matchContextLabel(match) }}
+                </span>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+
       <div class="grid w-full min-w-0 gap-4 self-start">
-      <Card class="neon-panel h-fit w-full self-start">
+        <Card class="neon-panel h-fit w-full self-start">
         <CardHeader class="pb-3">
           <div class="flex items-center justify-between gap-3">
             <CardTitle class="flex items-center gap-2">
@@ -299,178 +478,6 @@ onMounted(async () => {
           </Table>
         </CardContent>
       </Card>
-      </div>
-
-      <div class="grid min-w-0 gap-4 self-start">
-        <Card class="neon-panel">
-          <CardHeader class="pb-3">
-            <div class="flex items-center justify-between gap-3">
-              <CardTitle class="flex items-center gap-2">
-                <Trophy class="size-5 text-primary" />
-                Dernier tournoi
-              </CardTitle>
-              <RouterLink
-                to="/tournois"
-                class="text-sm font-medium text-primary hover:underline"
-              >
-                Voir tout
-              </RouterLink>
-            </div>
-          </CardHeader>
-          <CardContent>
-            <div
-              v-if="loading"
-              class="rounded-lg border border-dashed p-6 text-center text-sm text-muted-foreground"
-            >
-              Chargement…
-            </div>
-            <div
-              v-else-if="!tournament"
-              class="rounded-lg border border-dashed p-6 text-center text-sm text-muted-foreground"
-            >
-              Aucun tournoi.
-            </div>
-            <button
-              v-else
-              type="button"
-              class="grid w-full gap-3 rounded-lg border p-4 text-left transition hover:border-primary/50 hover:bg-muted/30"
-              @click="openTournament"
-            >
-              <div class="flex items-start justify-between gap-4">
-                <div class="min-w-0 space-y-1">
-                  <p class="font-medium">{{ tournament.name }}</p>
-                  <p class="text-sm text-muted-foreground">
-                    {{
-                      formatRegistrationSummary(
-                        tournament.registered_count,
-                        tournament.waitlist_count,
-                        tournamentRegistrationCapacity(
-                          tournament.pool_count,
-                          tournament.structure,
-                        ),
-                      )
-                    }}
-                  </p>
-                </div>
-                <Badge variant="outline" class="shrink-0">
-                  {{ tournament.display_status }}
-                </Badge>
-              </div>
-              <TournamentDescriptionWithRegistrants
-                v-if="
-                  isTournamentRegistrationPhase(tournament.status)
-                  && (tournament.description?.trim() || (tournament.registrations?.length ?? 0) > 0)
-                "
-                :description="tournament.description"
-                :registrations="tournament.registrations ?? []"
-              />
-              <div
-                v-else-if="tournament.description?.trim()"
-                class="prose prose-sm max-w-none text-left text-muted-foreground"
-              >
-                <MarkdownContent :source="tournament.description" />
-              </div>
-              <div
-                v-if="(tournament.pool_scenarios?.length ?? 0) > 0"
-                class="space-y-1 text-left"
-              >
-                <p class="text-xs font-medium text-muted-foreground">Scénarios de poules</p>
-                <TournamentPoolScenarioLinks :scenarios="tournament.pool_scenarios ?? []" />
-              </div>
-              <BracketTree
-                v-if="tournament.bracket_matches?.length"
-                :matches="tournament.bracket_matches"
-                compact
-              />
-            </button>
-          </CardContent>
-        </Card>
-
-        <Card class="neon-panel">
-          <CardHeader class="pb-2">
-            <div class="flex items-center justify-between gap-3">
-              <CardTitle class="flex items-center gap-2">
-                <History class="size-5 text-primary" />
-                Dernières parties
-              </CardTitle>
-              <RouterLink
-                to="/matchs"
-                class="text-sm font-medium text-primary hover:underline"
-              >
-                Voir tout
-              </RouterLink>
-            </div>
-          </CardHeader>
-          <CardContent class="pt-0">
-            <div
-              v-if="loading"
-              class="rounded-lg border border-dashed p-4 text-center text-sm text-muted-foreground"
-            >
-              Chargement…
-            </div>
-            <div
-              v-else-if="matches.length === 0"
-              class="rounded-lg border border-dashed p-4 text-center text-sm text-muted-foreground"
-            >
-              Aucune partie pour l’instant.
-            </div>
-            <div v-else class="divide-y divide-border/60 rounded-lg border">
-              <div
-                v-for="match in matches"
-                :key="match.id"
-                role="link"
-                tabindex="0"
-                class="grid w-full cursor-pointer grid-cols-[2.35rem_minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-x-1 px-2 py-1 text-left transition hover:bg-muted/30 sm:grid-cols-[2.35rem_minmax(0,1fr)_auto_minmax(0,1fr)_minmax(4.5rem,0.65fr)] sm:gap-x-1.5 sm:px-2 sm:py-1.5"
-                @click="openMatch(match.id)"
-                @keydown.enter.prevent="openMatch(match.id)"
-                @keydown.space.prevent="openMatch(match.id)"
-              >
-                <span class="tabular-nums text-[11px] text-muted-foreground">
-                  {{ matchShortDate(match.recorded_at) ?? '—' }}
-                </span>
-                <div class="flex min-w-0 items-center justify-end gap-1">
-                  <PlayerLink
-                    :name="match.player1"
-                    :display-name="match.player1_display_name"
-                    class="truncate text-xs"
-                  />
-                  <ArmyLogo :army-id="match.player1_army_id" />
-                  <ArmyListQuickActions
-                    :code="match.player1_army_list_code"
-                    icon-only
-                    class="shrink-0"
-                    @click.stop
-                  />
-                </div>
-                <div class="home-match-score shrink-0 [&_.mx-auto]:mx-0 [&_[data-slot=badge]]:h-5 [&_[data-slot=badge]]:px-1.5 [&_[data-slot=badge]]:text-[10px] [&_[data-slot=badge]]:leading-none">
-                  <MatchResultBadges
-                    :match="match"
-                    :badge-min-ch="scoreBadgeMinCh"
-                  />
-                </div>
-                <div class="flex min-w-0 items-center gap-1">
-                  <ArmyLogo :army-id="match.player2_army_id" />
-                  <ArmyListQuickActions
-                    :code="match.player2_army_list_code"
-                    icon-only
-                    class="shrink-0"
-                    @click.stop
-                  />
-                  <PlayerLink
-                    :name="match.player2"
-                    :display-name="match.player2_display_name"
-                    class="truncate text-xs"
-                  />
-                </div>
-                <span
-                  class="hidden truncate justify-self-end text-[11px] text-muted-foreground sm:block"
-                >
-                  {{ matchContextLabel(match) }}
-                </span>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
       </div>
     </div>
   </div>

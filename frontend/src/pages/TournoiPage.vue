@@ -59,7 +59,6 @@ import TournamentMatchCard from '@/components/TournamentMatchCard.vue'
 import TournamentScenarioPicker from '@/components/TournamentScenarioPicker.vue'
 import AdminContentEditor from '@/components/AdminContentEditor.vue'
 import MarkdownContent from '@/components/MarkdownContent.vue'
-import TournamentPoolScenarioLinks from '@/components/TournamentPoolScenarioLinks.vue'
 import type { TournamentMatchForm } from '@/components/TournamentMatchCard.vue'
 import TournamentDescriptionWithRegistrants from '@/components/TournamentDescriptionWithRegistrants.vue'
 import {
@@ -2134,19 +2133,17 @@ onMounted(refresh)
             </CardHeader>
             <CardContent class="grid gap-4">
               <TournamentDescriptionWithRegistrants
-                v-if="detail.description?.trim() || activeRegistrations.length > 0"
+                v-if="
+                  detail.description?.trim()
+                  || activeRegistrations.length > 0
+                  || (detail.pool_scenarios?.length ?? 0) > 0
+                "
                 :description="detail.description"
                 :registrations="activeRegistrations"
+                :scenarios="detail.pool_scenarios ?? []"
+                list-max-class="max-h-[min(32rem,60vh)]"
                 show-status
               />
-
-              <div
-                v-if="(detail.pool_scenarios?.length ?? 0) > 0"
-                class="space-y-1"
-              >
-                <p class="text-sm font-medium">Scénarios de poules</p>
-                <TournamentPoolScenarioLinks :scenarios="detail.pool_scenarios ?? []" />
-              </div>
 
               <div
                 v-if="hasPlayer && !myRegistration && !isListValidator && detail.status === 'registration_open'"

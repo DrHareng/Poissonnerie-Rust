@@ -268,10 +268,14 @@ onMounted(() => {
               <TournamentDescriptionWithRegistrants
                 v-if="
                   isTournamentRegistrationPhase(tournament.status)
-                  && (tournament.description?.trim() || (tournament.registrations?.length ?? 0) > 0)
+                  && (tournament.description?.trim()
+                    || (tournament.registrations?.length ?? 0) > 0
+                    || (tournament.pool_scenarios?.length ?? 0) > 0)
                 "
                 :description="tournament.description"
                 :registrations="tournament.registrations ?? []"
+                :scenarios="tournament.pool_scenarios ?? []"
+                compact
               />
               <div
                 v-else-if="tournament.description?.trim()"
@@ -280,7 +284,10 @@ onMounted(() => {
                 <MarkdownContent :source="tournament.description" />
               </div>
               <div
-                v-if="(tournament.pool_scenarios?.length ?? 0) > 0"
+                v-if="
+                  (tournament.pool_scenarios?.length ?? 0) > 0
+                  && !isTournamentRegistrationPhase(tournament.status)
+                "
                 class="space-y-1"
               >
                 <p class="text-xs font-medium text-muted-foreground">Scénarios de poules</p>
