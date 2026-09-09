@@ -5,6 +5,7 @@ APP_DIR="/opt/poissonnerie"
 BACKUP_DIR="$APP_DIR/.deploy-backup/previous"
 SERVER_BIN="$APP_DIR/target/release/poissonnerie-server"
 FRONTEND_DIST="$APP_DIR/frontend/dist"
+DAUPHINE_DIST="$APP_DIR/frontend-dauphine/dist"
 HEALTH_URL="${DEPLOY_HEALTH_URL:-http://127.0.0.1:3000/api/health}"
 
 ROLLBACK_ENABLED=0
@@ -37,6 +38,10 @@ backup_current_release() {
     if [[ -d "$FRONTEND_DIST" ]]; then
         cp -a "$FRONTEND_DIST" "$BACKUP_DIR/dist"
     fi
+
+    if [[ -d "$DAUPHINE_DIST" ]]; then
+        cp -a "$DAUPHINE_DIST" "$BACKUP_DIR/dauphine-dist"
+    fi
 }
 
 rollback() {
@@ -54,6 +59,11 @@ rollback() {
     if [[ -d "$BACKUP_DIR/dist" ]]; then
         rm -rf "$FRONTEND_DIST"
         cp -a "$BACKUP_DIR/dist" "$FRONTEND_DIST"
+    fi
+
+    if [[ -d "$BACKUP_DIR/dauphine-dist" ]]; then
+        rm -rf "$DAUPHINE_DIST"
+        cp -a "$BACKUP_DIR/dauphine-dist" "$DAUPHINE_DIST"
     fi
 
     if [[ -f "$BACKUP_DIR/commit" ]]; then
@@ -85,7 +95,15 @@ verify_frontend_dist() {
     local asset_count
     asset_count="$(find "$FRONTEND_DIST/assets" -type f 2>/dev/null | wc -l | tr -d ' ')"
     [[ "$asset_count" -gt 0 ]] || die "frontend/dist/assets est vide après build"
-    log "Frontend OK ($asset_count fichiers dans dist/assets)"
+    log "Frontend Infinity OK ($asset_count fichiers dans dist/assets)"
+}
+
+verify_dauphine_dist() {
+    [[ -f "$DAUPHINE_DIST/index.html" ]] || die "frontend-dauphine/dist/index.html introuvable après build"
+    local asset_count
+    asset_count="$(find "$DAUPHINE_DIST/assets" -type f 2>/dev/null | wc -l | tr -d ' ')"
+    [[ "$asset_count" -gt 0 ]] || die "frontend-dauphine/dist/assets est vide après build"
+    log "Frontend Dauphiné OK ($asset_count fichiers dans dist/assets)"
 }
 
 verify_health() {
@@ -137,13 +155,21 @@ fi
 log "cargo build --release"
 cargo build --release -p poissonnerie-elo --bin poissonnerie-server
 
-log "build frontend"
+log "build frontend Infinity"
 (
     cd frontend
     npm ci
     npm run build
 )
 verify_frontend_dist
+
+log "build frontend Dauphiné"
+(
+    cd frontend-dauphine
+    npm ci
+    npm run build
+)
+verify_dauphine_dist
 
 log "restart poissonnerie"
 sudo systemctl restart poissonnerie
@@ -153,5 +179,7 @@ reload_nginx_if_present
 ROLLBACK_ENABLED=0
 trap - ERR
 
-log "Terminé — commit ${new_commit:0:8}, frontend $(stat -c '%y' "$FRONTEND_DIST/index.html" 2>/dev/null || stat -f '%Sm' "$FRONTEND_DIST/index.html")"
+log "Terminé — commit ${new_commit:0:8}"
+log "Infinity  : $(stat -c '%y' "$FRONTEND_DIST/index.html" 2>/dev/null || stat -f '%Sm' "$FRONTEND_DIST/index.html")"
+log "Dauphiné  : $(stat -c '%y' "$DAUPHINE_DIST/index.html" 2>/dev/null || stat -f '%Sm' "$DAUPHINE_DIST/index.html")"
 log "Si le visuel n'a pas changé dans le navigateur : Ctrl+Shift+R (hard refresh)."

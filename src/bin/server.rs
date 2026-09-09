@@ -47,6 +47,7 @@ async fn main() -> Result<()> {
         army_lists: Arc::new(army_lists),
         users: Arc::new(users),
         tournaments: Arc::new(poissonnerie_elo::TournamentStore::open(&args.db)?),
+        dauphine: Arc::new(poissonnerie_elo::DauphineStore::open(&args.db)?),
         scenarios: Arc::new(poissonnerie_elo::ScenarioStore::open(&args.db)?),
         report_templates: Arc::new(poissonnerie_elo::ReportTemplateStore::open(&args.db)?),
         site_content: Arc::new(poissonnerie_elo::SiteContentStore::open(&args.db)?),

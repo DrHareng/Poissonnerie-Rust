@@ -4,6 +4,9 @@ pub mod api;
 pub mod army;
 pub mod army_list;
 pub mod army_list_store;
+pub mod dauphine;
+pub mod dauphine_api;
+pub mod dauphine_store;
 pub mod auth;
 pub mod elo;
 pub mod match_record;
@@ -23,6 +26,7 @@ pub mod user;
 pub use api::{default_state, router, AppState};
 pub use army::{default_db_path, Army, ArmyStore};
 pub use army_list_store::{ArmyList, ArmyListStatsGroup, ArmyListStore};
+pub use dauphine_store::DauphineStore;
 pub use auth::AuthConfig;
 pub use elo::{expected_score, update_ratings, MatchScore, DEFAULT_K_FACTOR};
 pub use match_record::{

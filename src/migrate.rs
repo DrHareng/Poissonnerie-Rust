@@ -649,6 +649,7 @@ pub fn migrate(conn: &Connection) -> Result<()> {
     )?;
 
     migrate_scenario_pack_schema(conn)?;
+    migrate_dauphine_schema(conn)?;
 
     backfill_matches_from_tournaments(conn)?;
 
@@ -938,6 +939,57 @@ fn migrate_match_reports(conn: &Connection) -> Result<()> {
         [],
     )?;
 
+    Ok(())
+}
+
+fn migrate_dauphine_schema(conn: &Connection) -> Result<()> {
+    conn.execute_batch(
+        "
+        CREATE TABLE IF NOT EXISTS dauphine_editions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            slug TEXT NOT NULL UNIQUE,
+            title TEXT NOT NULL,
+            year INTEGER NOT NULL,
+            status TEXT NOT NULL DEFAULT 'draft',
+            tagline TEXT NOT NULL DEFAULT '',
+            body_md TEXT NOT NULL DEFAULT '',
+            created_at INTEGER NOT NULL,
+            updated_at INTEGER NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS dauphine_teams (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            edition_id INTEGER NOT NULL REFERENCES dauphine_editions(id),
+            name TEXT NOT NULL,
+            captain_user_id INTEGER NOT NULL REFERENCES users(id),
+            created_at INTEGER NOT NULL,
+            UNIQUE(edition_id, name)
+        );
+
+        CREATE TABLE IF NOT EXISTS dauphine_team_members (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            team_id INTEGER NOT NULL REFERENCES dauphine_teams(id),
+            user_id INTEGER NOT NULL REFERENCES users(id),
+            role TEXT NOT NULL DEFAULT 'player',
+            army_id INTEGER,
+            created_at INTEGER NOT NULL,
+            UNIQUE(team_id, user_id)
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_dauphine_team_members_user
+            ON dauphine_team_members(user_id);
+
+        CREATE TABLE IF NOT EXISTS dauphine_rounds (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            edition_id INTEGER NOT NULL REFERENCES dauphine_editions(id),
+            position INTEGER NOT NULL,
+            title TEXT NOT NULL,
+            kind TEXT NOT NULL DEFAULT 'match',
+            body_md TEXT NOT NULL DEFAULT '',
+            UNIQUE(edition_id, position)
+        );
+        ",
+    )?;
     Ok(())
 }
 

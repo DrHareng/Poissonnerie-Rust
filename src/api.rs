@@ -17,10 +17,10 @@ use tower_sessions::{Expiry, Session, SessionManagerLayer};
 
 use crate::{
     auth::{self, AuthConfig, CallbackQuery},
-    default_db_path, scenario::ScenarioStore, session_store::SqliteSessionStore, tournament_api,
-    ArmyListStore, ArmyStore, Leaderboard, MatchOutcome, MatchRecord, MatchScores, Player,
-    ReportStatus, ReportTemplateStore, SiteContentStore, TournamentStore, User, UserStore,
-    DEFAULT_K_FACTOR, RESSOURCES_KEY,
+    dauphine_api, default_db_path, scenario::ScenarioStore, session_store::SqliteSessionStore,
+    tournament_api, ArmyListStore, ArmyStore, DauphineStore, Leaderboard, MatchOutcome,
+    MatchRecord, MatchScores, Player, ReportStatus, ReportTemplateStore, SiteContentStore,
+    TournamentStore, User, UserStore, DEFAULT_K_FACTOR, RESSOURCES_KEY,
 };
 use crate::army_list_store::ArmyListStatsGroup;
 use crate::tournament::TournamentStatus;
@@ -35,6 +35,7 @@ pub struct AppState {
     pub army_lists: Arc<ArmyListStore>,
     pub users: Arc<UserStore>,
     pub tournaments: Arc<TournamentStore>,
+    pub dauphine: Arc<DauphineStore>,
     pub scenarios: Arc<ScenarioStore>,
     pub report_templates: Arc<ReportTemplateStore>,
     pub site_content: Arc<SiteContentStore>,
@@ -295,6 +296,7 @@ pub fn router(state: AppState) -> Result<Router> {
     let session_store = SqliteSessionStore::open(&state.db_path)?;
     let session_layer = SessionManagerLayer::new(session_store)
         .with_secure(false)
+        .with_path("/")
         .with_expiry(Expiry::OnInactivity(Duration::days(SESSION_INACTIVITY_DAYS)));
 
     Ok(Router::new()
@@ -344,6 +346,7 @@ pub fn router(state: AppState) -> Result<Router> {
         .route("/api/health", get(health))
         .route("/api/ressources", get(get_ressources).patch(update_ressources))
         .merge(tournament_api::tournament_routes())
+        .merge(dauphine_api::dauphine_routes())
         .layer(cors_layer())
         .layer(session_layer)
         .with_state(state))
@@ -1991,6 +1994,7 @@ pub fn default_state() -> anyhow::Result<AppState> {
     let army_lists = ArmyListStore::open(&db_path)?;
     let users = UserStore::open(&db_path)?;
     let tournaments = TournamentStore::open(&db_path)?;
+    let dauphine = DauphineStore::open(&db_path)?;
     let scenarios = ScenarioStore::open(&db_path)?;
     let report_templates = ReportTemplateStore::open(&db_path)?;
     let site_content = SiteContentStore::open(&db_path)?;
@@ -2001,6 +2005,7 @@ pub fn default_state() -> anyhow::Result<AppState> {
         army_lists: Arc::new(army_lists),
         users: Arc::new(users),
         tournaments: Arc::new(tournaments),
+        dauphine: Arc::new(dauphine),
         scenarios: Arc::new(scenarios),
         report_templates: Arc::new(report_templates),
         site_content: Arc::new(site_content),

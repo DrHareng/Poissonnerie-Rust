@@ -1,4 +1,4 @@
-# Exemple Nginx — Poissonnerie sous /infinity/
+# Exemple Nginx — Poissonnerie (/infinity) + Dauphiné (/dauphine)
 #
 # Sur le VPS :
 #   sudo cp deploy/nginx-infinity.conf.example /etc/nginx/sites-available/poissonnerie
@@ -23,7 +23,7 @@ server {
         proxy_connect_timeout 10s;
     }
 
-    # Front Vue (SPA) — alias + fallback named location (évite la boucle try_files)
+    # Front Vue Infinity (SPA) — alias + fallback named location (évite la boucle try_files)
     location /infinity/ {
         alias /opt/poissonnerie/frontend/dist/;
         try_files $uri $uri/ @infinity_spa;
@@ -37,7 +37,33 @@ server {
         alias /opt/poissonnerie/frontend/dist/index.html;
     }
 
-    # Optionnel : racine du VPS → app
+    # API Dauphiné (même backend) /dauphine/api → serveur Rust /api
+    location /dauphine/api/ {
+        proxy_pass http://127.0.0.1:3000/api/;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_read_timeout 60s;
+        proxy_connect_timeout 10s;
+    }
+
+    # Front Vue Dauphiné (SPA distincte)
+    location /dauphine/ {
+        alias /opt/poissonnerie/frontend-dauphine/dist/;
+        try_files $uri $uri/ @dauphine_spa;
+    }
+
+    location @dauphine_spa {
+        rewrite ^ /dauphine/index.html last;
+    }
+
+    location = /dauphine/index.html {
+        alias /opt/poissonnerie/frontend-dauphine/dist/index.html;
+    }
+
+    # Optionnel : racine du VPS → app Infinity
     location = / {
         return 302 /infinity/;
     }

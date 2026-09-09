@@ -6,8 +6,10 @@ RUN_DIR="$ROOT_DIR/.run"
 LOG_DIR="$RUN_DIR/logs"
 SERVER_PID_FILE="$RUN_DIR/server.pid"
 FRONTEND_PID_FILE="$RUN_DIR/frontend.pid"
+DAUPHINE_PID_FILE="$RUN_DIR/dauphine.pid"
 SERVER_LOG="$LOG_DIR/server.log"
 FRONTEND_LOG="$LOG_DIR/frontend.log"
+DAUPHINE_LOG="$LOG_DIR/dauphine.log"
 
 case "$(uname -s)" in
     MINGW* | MSYS* | CYGWIN*)
@@ -28,13 +30,14 @@ SYNC_BIN="$ROOT_DIR/target/debug/poissonnerie-sync-armies${EXE_EXT}"
 IMPORT_BIN="$ROOT_DIR/target/debug/poissonnerie-import-coupe${EXE_EXT}"
 SERVER_ADDR="127.0.0.1:3000"
 FRONTEND_ADDR="127.0.0.1:5173"
+DAUPHINE_ADDR="127.0.0.1:5174"
 
 usage() {
     cat <<EOF
 Usage: $(basename "$0") {start|stop|restart|status|import-coupe|import-coupes}
 
-  start          Synchronise les armées, lance l'API Rust et le frontend Vite
-  stop           Arrête l'API et le frontend
+  start          Synchronise les armées, lance l'API Rust, Infinity et le Dauphiné
+  stop           Arrête l'API et les deux frontends
   restart        stop puis start
   status         Affiche l'état des services
   import-coupe   Importe une coupe (5-10) : import-coupe 5 [--dry-run] [--force]
@@ -216,19 +219,20 @@ build_rust_bins() {
     fi
 }
 
-ensure_frontend_deps() {
-    local frontend_dir="$ROOT_DIR/frontend"
+ensure_npm_deps() {
+    local app_dir="$1"
+    local label="$2"
     local needs_install=0
 
-    if [[ ! -d "$frontend_dir/node_modules" ]]; then
+    if [[ ! -d "$app_dir/node_modules" ]]; then
         needs_install=1
-    elif [[ "$EXE_EXT" == ".exe" ]] && [[ ! -f "$frontend_dir/node_modules/.bin/vite.cmd" ]]; then
+    elif [[ "$EXE_EXT" == ".exe" ]] && [[ ! -f "$app_dir/node_modules/.bin/vite.cmd" ]]; then
         needs_install=1
     fi
 
     if [[ "$needs_install" == 1 ]]; then
-        log "Installation des dépendances npm..."
-        npm --prefix "$frontend_dir" install
+        log "Installation des dépendances npm ($label)..."
+        npm --prefix "$app_dir" install
     fi
 }
 
@@ -276,45 +280,60 @@ start_server() {
     log "API démarrée (PID $(read_pid "$SERVER_PID_FILE"), http://$SERVER_ADDR)"
 }
 
-start_frontend() {
+start_vite() {
+    local pid_file="$1"
+    local log_file="$2"
+    local addr="$3"
+    local app_dir="$4"
+    local label="$5"
+    local port="${addr##*:}"
     local pid
-    pid="$(read_pid "$FRONTEND_PID_FILE")"
+
+    pid="$(read_pid "$pid_file")"
     if pid_is_running "$pid"; then
-        log "Frontend déjà en cours (PID $pid)"
+        log "$label déjà en cours (PID $pid)"
         return 0
     fi
 
-    if port_is_open "$FRONTEND_ADDR"; then
+    if port_is_open "$addr"; then
         local tracked_pid
-        tracked_pid="$(read_pid "$FRONTEND_PID_FILE")"
+        tracked_pid="$(read_pid "$pid_file")"
         if ! pid_is_running "$tracked_pid"; then
-            log "Port ${FRONTEND_ADDR##*:} occupé par un processus orphelin, libération..."
-            kill_port_listeners "${FRONTEND_ADDR##*:}"
+            log "Port $port occupé par un processus orphelin, libération..."
+            kill_port_listeners "$port"
             sleep 1
         fi
     fi
 
-    if port_is_open "$FRONTEND_ADDR"; then
-        err "le port $FRONTEND_ADDR est déjà utilisé"
+    if port_is_open "$addr"; then
+        err "le port $addr est déjà utilisé"
         return 1
     fi
 
-    ensure_frontend_deps
+    ensure_npm_deps "$app_dir" "$label"
 
-    : >"$FRONTEND_LOG"
+    : >"$log_file"
     load_node
     (
-        cd "$ROOT_DIR/frontend"
+        cd "$app_dir"
         if [[ "$HAS_SETSID" == 1 ]]; then
-            exec setsid npm run dev -- --host 127.0.0.1 --port 5173 --strictPort
+            exec setsid npm run dev -- --host 127.0.0.1 --port "$port" --strictPort
         else
-            exec npm run dev -- --host 127.0.0.1 --port 5173 --strictPort
+            exec npm run dev -- --host 127.0.0.1 --port "$port" --strictPort
         fi
-    ) >>"$FRONTEND_LOG" 2>&1 &
-    echo $! >"$FRONTEND_PID_FILE"
+    ) >>"$log_file" 2>&1 &
+    echo $! >"$pid_file"
 
-    wait_for_port "$FRONTEND_ADDR" "Frontend" 60 "$FRONTEND_PID_FILE" "$FRONTEND_LOG" || return 1
-    log "Frontend démarré (PID $(read_pid "$FRONTEND_PID_FILE"), http://$FRONTEND_ADDR)"
+    wait_for_port "$addr" "$label" 60 "$pid_file" "$log_file" || return 1
+    log "$label démarré (PID $(read_pid "$pid_file"), http://$addr)"
+}
+
+start_frontend() {
+    start_vite "$FRONTEND_PID_FILE" "$FRONTEND_LOG" "$FRONTEND_ADDR" "$ROOT_DIR/frontend" "Infinity"
+}
+
+start_dauphine() {
+    start_vite "$DAUPHINE_PID_FILE" "$DAUPHINE_LOG" "$DAUPHINE_ADDR" "$ROOT_DIR/frontend-dauphine" "Dauphiné"
 }
 
 stop_process() {
@@ -346,13 +365,25 @@ stop_process() {
     log "$label arrêté (SIGKILL)"
 }
 
-stop_frontend() {
-    stop_process "$FRONTEND_PID_FILE" "Frontend"
-    if port_is_open "$FRONTEND_ADDR"; then
-        log "Libération du port ${FRONTEND_ADDR##*:}..."
-        kill_port_listeners "${FRONTEND_ADDR##*:}"
+stop_vite() {
+    local pid_file="$1"
+    local label="$2"
+    local addr="$3"
+
+    stop_process "$pid_file" "$label"
+    if port_is_open "$addr"; then
+        log "Libération du port ${addr##*:}..."
+        kill_port_listeners "${addr##*:}"
         sleep 1
     fi
+}
+
+stop_frontend() {
+    stop_vite "$FRONTEND_PID_FILE" "Infinity" "$FRONTEND_ADDR"
+}
+
+stop_dauphine() {
+    stop_vite "$DAUPHINE_PID_FILE" "Dauphiné" "$DAUPHINE_ADDR"
 }
 
 cmd_start() {
@@ -363,12 +394,21 @@ cmd_start() {
     if ! start_frontend; then
         stop_process "$SERVER_PID_FILE" "API"
         stop_frontend
+        stop_dauphine
         exit 1
     fi
-    log "Tout est prêt. Logs : $LOG_DIR"
+    if ! start_dauphine; then
+        stop_process "$SERVER_PID_FILE" "API"
+        stop_frontend
+        stop_dauphine
+        exit 1
+    fi
+    log "Tout est prêt. Infinity : http://$FRONTEND_ADDR/infinity/ — Dauphiné : http://$DAUPHINE_ADDR/dauphine/"
+    log "Logs : $LOG_DIR"
 }
 
 cmd_stop() {
+    stop_dauphine
     stop_frontend
     stop_process "$SERVER_PID_FILE" "API"
 }
@@ -379,10 +419,11 @@ cmd_restart() {
 }
 
 cmd_status() {
-    local server_pid frontend_pid
+    local server_pid frontend_pid dauphine_pid
 
     server_pid="$(read_pid "$SERVER_PID_FILE")"
     frontend_pid="$(read_pid "$FRONTEND_PID_FILE")"
+    dauphine_pid="$(read_pid "$DAUPHINE_PID_FILE")"
 
     if pid_is_running "$server_pid" || port_is_open "$SERVER_ADDR"; then
         if pid_is_running "$server_pid"; then
@@ -396,12 +437,22 @@ cmd_status() {
 
     if pid_is_running "$frontend_pid" || port_is_open "$FRONTEND_ADDR"; then
         if pid_is_running "$frontend_pid"; then
-            printf 'Frontend  : en cours (PID %s, http://%s)\n' "$frontend_pid" "$FRONTEND_ADDR"
+            printf 'Infinity  : en cours (PID %s, http://%s/infinity/)\n' "$frontend_pid" "$FRONTEND_ADDR"
         else
-            printf 'Frontend  : port %s ouvert (PID inconnu)\n' "$FRONTEND_ADDR"
+            printf 'Infinity  : port %s ouvert (PID inconnu)\n' "$FRONTEND_ADDR"
         fi
     else
-        printf 'Frontend  : arrêté\n'
+        printf 'Infinity  : arrêté\n'
+    fi
+
+    if pid_is_running "$dauphine_pid" || port_is_open "$DAUPHINE_ADDR"; then
+        if pid_is_running "$dauphine_pid"; then
+            printf 'Dauphiné  : en cours (PID %s, http://%s/dauphine/)\n' "$dauphine_pid" "$DAUPHINE_ADDR"
+        else
+            printf 'Dauphiné  : port %s ouvert (PID inconnu)\n' "$DAUPHINE_ADDR"
+        fi
+    else
+        printf 'Dauphiné  : arrêté\n'
     fi
 
     if [[ -d "$LOG_DIR" ]]; then
