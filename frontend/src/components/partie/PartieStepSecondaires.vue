@@ -395,8 +395,8 @@ watch(
         a été tiré au sort pour commencer.
       </p>
 
-      <!-- Rangée 1 : joueurs + timeline + ban + 3 picks -->
-      <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
+      <!-- Joueurs : ban + 3 picks, l’un sous l’autre -->
+      <div class="grid grid-cols-1 gap-4">
         <section
           class="player-match-panel"
           :class="{ 'combat-esprit-player--active': activeSlot === 'player1' }"
@@ -592,12 +592,12 @@ watch(
           Indiquez le secondaire déjà tiré pour chaque joueur.
         </template>
         <template v-else>
-          Chaque joueur pioche 3 objectifs et en choisit 1 via le cercle. Cliquez sur une
-          carte pour l'agrandir.
+          Chaque joueur pioche 3 objectifs et en choisit 1. Cliquez sur une carte pour
+          la sélectionner.
         </template>
       </p>
 
-      <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
+      <div class="grid grid-cols-1 gap-4">
         <section class="player-match-panel grid gap-3">
           <p class="player-match-panel-title">{{ player1Name }}</p>
           <template v-if="isManual">
@@ -626,9 +626,7 @@ watch(
             <SecondaryCardGrid
               v-if="drawnPlayer1.length > 0"
               :secondaries="resolveSlugs(drawnPlayer1)"
-              viewable
               choosable
-              choice-name="secondary-player1"
               :selected-slug="chosenPlayer1 ?? undefined"
               @choose="chosenPlayer1 = $event"
             />
@@ -664,9 +662,7 @@ watch(
             <SecondaryCardGrid
               v-if="drawnPlayer2.length > 0"
               :secondaries="resolveSlugs(drawnPlayer2)"
-              viewable
               choosable
-              choice-name="secondary-player2"
               :selected-slug="chosenPlayer2 ?? undefined"
               @choose="chosenPlayer2 = $event"
             />

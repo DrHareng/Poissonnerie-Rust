@@ -225,7 +225,7 @@
   }
 
   .topbar {
-    @apply mb-6 flex shrink-0 flex-col gap-4 rounded-lg border border-primary/20 bg-card/70 p-4 backdrop-blur-md md:flex-row md:items-center md:justify-between;
+    @apply relative z-20 mb-6 flex shrink-0 items-center justify-between gap-3 rounded-lg border border-primary/20 bg-card/70 p-3 backdrop-blur-md md:gap-4 md:p-4;
     box-shadow: 0 0 30px oklch(0.8 0.14 195 / 15%);
   }
 
@@ -238,11 +238,28 @@
   }
 
   .topbar-subtitle {
-    @apply truncate text-xs tracking-[0.14em] text-accent uppercase;
+    @apply hidden truncate text-xs tracking-[0.14em] text-accent uppercase md:block;
+  }
+
+  .topbar-end {
+    @apply flex min-w-0 shrink-0 items-center gap-2 md:gap-4;
+  }
+
+  .topbar-menu-trigger {
+    @apply inline-flex size-9 items-center justify-center rounded-md border border-transparent text-muted-foreground transition-colors outline-none md:hidden;
+  }
+
+  .topbar-menu-trigger:hover,
+  .topbar-menu-trigger[data-state='open'] {
+    @apply border-primary/30 bg-primary/10 text-primary;
   }
 
   .topbar-nav {
-    @apply flex flex-wrap gap-2;
+    @apply hidden flex-wrap gap-2 md:flex;
+  }
+
+  .topbar-nav-item {
+    @apply relative;
   }
 
   .topbar-link {
@@ -259,7 +276,7 @@
   }
 
   .topbar-cta {
-    @apply inline-flex items-center gap-2 rounded-md border border-primary/50 bg-primary/20 px-4 py-2 text-sm font-semibold text-primary no-underline transition-colors;
+    @apply relative inline-flex size-9 items-center justify-center gap-2 rounded-md border border-primary/50 bg-primary/20 text-sm font-semibold text-primary no-underline transition-colors md:h-auto md:w-auto md:px-4 md:py-2;
     box-shadow: 0 0 20px oklch(0.8 0.14 195 / 18%);
   }
 
@@ -268,7 +285,33 @@
   }
 
   .topbar-cta-active {
-    @apply border-primary bg-primary/35 text-primary-foreground;
+    @apply border-primary bg-primary/35 text-primary;
+  }
+
+  .topbar-cta-count {
+    @apply absolute -top-1 -right-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-primary px-1 text-[10px] leading-none font-bold text-primary-foreground;
+  }
+
+  .topbar-flyout {
+    @apply absolute top-full left-0 z-50 min-w-44 pt-1;
+  }
+
+  .topbar-flyout-panel {
+    @apply rounded-lg border border-primary/20 bg-card/95 p-1 shadow-md backdrop-blur-md;
+    box-shadow: 0 0 24px oklch(0.8 0.14 195 / 15%);
+  }
+
+  .topbar-flyout-link {
+    @apply flex w-full items-center rounded-md px-2 py-1.5 text-sm text-muted-foreground no-underline transition-colors;
+  }
+
+  .topbar-flyout-link:hover,
+  .topbar-flyout-link-active {
+    @apply bg-primary/10 text-primary;
+  }
+
+  .topbar-menu-child {
+    @apply pl-8 text-muted-foreground;
   }
 
   .partie-stepper {
@@ -354,7 +397,7 @@
   }
 
   .page-title-tab {
-    @apply relative shrink-0 border-l border-border/45 px-5 pb-3 font-display text-2xl font-bold tracking-wide uppercase transition md:text-3xl;
+    @apply relative shrink-0 border-l border-border/45 px-3 pb-1.5 font-display text-lg font-bold tracking-wide uppercase transition md:text-xl;
     @apply text-muted-foreground/40 hover:text-muted-foreground;
   }
 
@@ -378,7 +421,7 @@
 
   .page-title-tab--active::after {
     content: '';
-    @apply absolute bottom-0 left-0 right-0 h-[3px] rounded-full bg-primary;
+    @apply absolute right-0 bottom-0 left-0 h-0.5 rounded-full bg-primary;
     box-shadow: 0 0 10px oklch(0.8 0.14 195 / 55%);
   }
 
@@ -1124,32 +1167,6 @@
     stroke-width: 3.5;
     stroke-linecap: round;
     filter: drop-shadow(0 0 8px oklch(0.65 0.25 25 / 70%));
-  }
-
-  .secondary-card-choice {
-    @apply absolute top-2 right-2 z-10 inline-flex size-8 cursor-pointer items-center justify-center;
-  }
-
-  .secondary-card-radio {
-    @apply sr-only;
-  }
-
-  .secondary-card-radio-visual {
-    @apply size-5 rounded-full border-2 border-white/80 bg-background/70 shadow-md transition;
-    box-shadow: 0 0 0 1px oklch(0.8 0.14 195 / 35%);
-  }
-
-  .secondary-card-radio:checked + .secondary-card-radio-visual,
-  .secondary-card-radio:focus-visible + .secondary-card-radio-visual {
-    @apply border-primary bg-primary;
-    box-shadow:
-      inset 0 0 0 3px oklch(0.12 0.02 260),
-      0 0 12px oklch(0.8 0.14 195 / 45%);
-  }
-
-  .secondary-card-radio:focus-visible + .secondary-card-radio-visual {
-    outline: 2px solid oklch(0.8 0.14 195 / 70%);
-    outline-offset: 2px;
   }
 
   .secondary-card-image {

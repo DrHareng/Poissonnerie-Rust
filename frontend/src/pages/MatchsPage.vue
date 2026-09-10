@@ -470,14 +470,7 @@ onMounted(async () => {
     <PageTitleTabs
       :tabs="matchsTabs"
       ariaLabel="Sections des matchs"
-    >
-      <template v-if="isAuthenticated" #actions>
-        <RouterLink to="/partie" class="topbar-cta">
-          <Play class="size-4" />
-          Démarrer une partie
-        </RouterLink>
-      </template>
-    </PageTitleTabs>
+    />
 
     <Alert v-if="!apiOnline" variant="destructive" class="neon-panel-accent">
       <AlertTitle>API indisponible</AlertTitle>

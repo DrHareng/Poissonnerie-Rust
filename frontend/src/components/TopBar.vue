@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { computed } from 'vue'
-import { useRoute } from 'vue-router'
+import { computed, onBeforeUnmount, ref, watch, type Component } from 'vue'
+import { useRoute, useRouter, type RouteLocationRaw } from 'vue-router'
 import {
   BookOpen,
   ChevronDown,
@@ -8,6 +8,7 @@ import {
   LogIn,
   LogOut,
   Map,
+  Menu,
   Pencil,
   Play,
   Podium,
@@ -31,22 +32,97 @@ import { withBase } from '@/lib/basePath'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 
+type NavChild = {
+  to: RouteLocationRaw
+  label: string
+}
+
+type NavLink = {
+  to: string
+  label: string
+  icon: Component
+  children?: NavChild[]
+}
+
 const route = useRoute()
+const router = useRouter()
 const { user, player, isAuthenticated, hasPlayer, loading, login, logout } =
   useAuth()
 const { isAdmin, isEditMode, setEditMode } = useAdminEditMode()
-const { menuLabel: inProgressMenuLabel, menuRoute: inProgressRoute } =
-  useMyInProgressMatches()
+const {
+  count: inProgressCount,
+  menuLabel: inProgressMenuLabel,
+  menuRoute: inProgressRoute,
+} = useMyInProgressMatches()
 
-const links = [
-  { to: '/scenarios', label: 'Scénarios', icon: Map },
-  { to: '/matchs', label: 'Matchs', icon: Swords },
-  { to: '/tournois', label: 'Tournois', icon: Trophy },
-  { to: '/classement', label: 'Classement', icon: Podium },
+const links: NavLink[] = [
+  {
+    to: '/scenarios',
+    label: 'Scénarios',
+    icon: Map,
+    children: [
+      { to: { name: 'scenarios' }, label: 'Scénarios' },
+      {
+        to: { name: 'scenarios', query: { tab: 'secondaires' } },
+        label: 'Secondaires',
+      },
+      { to: { name: 'scenarios', query: { tab: 'regles' } }, label: 'Règles' },
+    ],
+  },
+  {
+    to: '/matchs',
+    label: 'Matchs',
+    icon: Swords,
+    children: [
+      { to: { name: 'matchs' }, label: 'Matchs' },
+      { to: { name: 'matchs-listes' }, label: 'Listes' },
+      { to: { name: 'matchs-cr' }, label: 'Rapports' },
+    ],
+  },
+  {
+    to: '/tournois',
+    label: 'Tournois',
+    icon: Trophy,
+    children: [
+      { to: { name: 'tournois' }, label: 'En cours' },
+      { to: { name: 'tournois-termines' }, label: 'Terminés' },
+    ],
+  },
+  {
+    to: '/classement',
+    label: 'Classement',
+    icon: Podium,
+    children: [
+      { to: { name: 'classement' }, label: 'Joueurs' },
+      { to: { name: 'sectorielles' }, label: 'Sectorielles' },
+    ],
+  },
   { to: '/ressources', label: 'Ressources', icon: BookOpen },
 ]
 
 const activePath = computed(() => route.path)
+const openFlyout = ref<string | null>(null)
+let flyoutCloseTimer: ReturnType<typeof setTimeout> | null = null
+
+const partieCta = computed(() => {
+  if (inProgressCount.value >= 1 && inProgressRoute.value) {
+    const several = inProgressCount.value > 1
+    return {
+      to: inProgressRoute.value,
+      label: several ? `Reprendre (${inProgressCount.value})` : 'Reprendre',
+      ariaLabel: several
+        ? `Reprendre (${inProgressCount.value} parties en cours)`
+        : 'Reprendre la partie',
+    }
+  }
+  return {
+    to: '/partie',
+    label: 'Démarrer une partie',
+    ariaLabel: 'Démarrer une partie',
+  }
+})
+
+const isPartieCtaActive = computed(() => route.path.startsWith('/partie'))
 
 function isLinkActive(to: string) {
   const path = activePath.value
@@ -71,6 +147,66 @@ function isLinkActive(to: string) {
   }
   return path === to
 }
+
+function isChildActive(to: RouteLocationRaw) {
+  const resolved = router.resolve(to)
+  if (resolved.path !== route.path) return false
+  const resolvedTab = String(resolved.query.tab ?? '')
+  const currentTab = String(route.query.tab ?? '')
+  if (resolvedTab || currentTab) return resolvedTab === currentTab
+  return true
+}
+
+function extraChildren(link: NavLink): NavChild[] {
+  const parentPath = router.resolve(link.to).fullPath
+  return (link.children ?? []).filter(
+    (child) => router.resolve(child.to).fullPath !== parentPath,
+  )
+}
+
+function clearFlyoutTimer() {
+  if (flyoutCloseTimer == null) return
+  clearTimeout(flyoutCloseTimer)
+  flyoutCloseTimer = null
+}
+
+function showFlyout(id: string) {
+  clearFlyoutTimer()
+  openFlyout.value = id
+}
+
+function onNavEnter(link: NavLink) {
+  if (link.children?.length) showFlyout(link.to)
+}
+
+function onNavLeave(link: NavLink) {
+  if (link.children?.length) scheduleHideFlyout()
+}
+
+function scheduleHideFlyout() {
+  clearFlyoutTimer()
+  flyoutCloseTimer = setTimeout(() => {
+    openFlyout.value = null
+    flyoutCloseTimer = null
+  }, 160)
+}
+
+function onNavFocusOut(event: FocusEvent) {
+  const current = event.currentTarget as HTMLElement
+  const next = event.relatedTarget as Node | null
+  if (next && current.contains(next)) return
+  scheduleHideFlyout()
+}
+
+watch(
+  () => route.fullPath,
+  () => {
+    clearFlyoutTimer()
+    openFlyout.value = null
+  },
+)
+
+onBeforeUnmount(clearFlyoutTimer)
 
 const playerPageRoute = computed(() =>
   hasPlayer.value && player.value
@@ -100,19 +236,99 @@ async function handleLogout() {
       </div>
     </RouterLink>
 
-    <div class="flex flex-col gap-3 md:flex-row md:items-center md:gap-4">
-      <nav class="topbar-nav" aria-label="Navigation principale">
-        <RouterLink
+    <div class="topbar-end">
+      <DropdownMenuRoot>
+        <DropdownMenuTrigger class="topbar-menu-trigger" aria-label="Menu de navigation">
+          <Menu class="size-5" />
+        </DropdownMenuTrigger>
+        <DropdownMenuPortal>
+          <DropdownMenuContent
+            align="start"
+            :side-offset="8"
+            class="topbar-user-menu max-h-[min(70vh,28rem)] overflow-y-auto"
+          >
+            <template v-for="(link, index) in links" :key="link.to">
+              <DropdownMenuSeparator
+                v-if="index > 0"
+                class="topbar-user-menu-separator"
+              />
+              <DropdownMenuItem as-child>
+                <RouterLink :to="link.to" :class="menuItemClass">
+                  <component :is="link.icon" class="size-4" />
+                  {{ link.label }}
+                </RouterLink>
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                v-for="child in extraChildren(link)"
+                :key="`${link.to}-${child.label}`"
+                as-child
+              >
+                <RouterLink
+                  :to="child.to"
+                  :class="[menuItemClass, 'topbar-menu-child']"
+                >
+                  {{ child.label }}
+                </RouterLink>
+              </DropdownMenuItem>
+            </template>
+          </DropdownMenuContent>
+        </DropdownMenuPortal>
+      </DropdownMenuRoot>
+
+      <nav class="topbar-nav" aria-label="Navigation principale" @keydown.escape="openFlyout = null">
+        <div
           v-for="link in links"
           :key="link.to"
-          :to="link.to"
-          class="topbar-link"
-          :class="{ 'topbar-link-active': isLinkActive(link.to) }"
+          class="topbar-nav-item"
+          @pointerenter="onNavEnter(link)"
+          @pointerleave="onNavLeave(link)"
+          @focusin="onNavEnter(link)"
+          @focusout="onNavFocusOut"
         >
-          <component :is="link.icon" class="size-4" />
-          {{ link.label }}
-        </RouterLink>
+          <RouterLink
+            :to="link.to"
+            class="topbar-link"
+            :class="{ 'topbar-link-active': isLinkActive(link.to) }"
+          >
+            <component :is="link.icon" class="size-4" />
+            {{ link.label }}
+          </RouterLink>
+          <div
+            v-if="link.children && openFlyout === link.to"
+            class="topbar-flyout"
+          >
+            <div class="topbar-flyout-panel">
+              <RouterLink
+                v-for="child in link.children"
+                :key="child.label"
+                :to="child.to"
+                class="topbar-flyout-link"
+                :class="{ 'topbar-flyout-link-active': isChildActive(child.to) }"
+              >
+                {{ child.label }}
+              </RouterLink>
+            </div>
+          </div>
+        </div>
       </nav>
+
+      <RouterLink
+        v-if="!loading && isAuthenticated"
+        :to="partieCta.to"
+        class="topbar-cta"
+        :class="{ 'topbar-cta-active': isPartieCtaActive }"
+        :aria-label="partieCta.ariaLabel"
+        :title="partieCta.ariaLabel"
+      >
+        <Play class="size-4" />
+        <span class="hidden md:inline">{{ partieCta.label }}</span>
+        <span
+          v-if="inProgressCount > 0"
+          class="topbar-cta-count md:hidden"
+        >
+          {{ inProgressCount }}
+        </span>
+      </RouterLink>
 
       <div class="topbar-auth">
         <div v-if="loading" class="text-sm text-muted-foreground">
@@ -129,10 +345,10 @@ async function handleLogout() {
                 :alt="user.effective_display_name"
                 class="size-8 rounded-full border border-primary/30 object-cover"
               />
-              <span class="truncate text-sm font-medium">{{
+              <span class="hidden max-w-36 truncate text-sm font-medium md:inline">{{
                 user.effective_display_name
               }}</span>
-              <ChevronDown class="size-4 shrink-0 opacity-60" />
+              <ChevronDown class="hidden size-4 shrink-0 opacity-60 md:block" />
             </DropdownMenuTrigger>
             <DropdownMenuPortal>
               <DropdownMenuContent
@@ -211,7 +427,8 @@ async function handleLogout() {
         </template>
         <Button v-else size="sm" @click="login">
           <LogIn class="size-4" />
-          Connexion Discord
+          <span class="hidden sm:inline">Connexion Discord</span>
+          <span class="sm:hidden">Connexion</span>
         </Button>
       </div>
     </div>

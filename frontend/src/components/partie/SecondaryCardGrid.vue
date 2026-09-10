@@ -8,7 +8,6 @@ const props = defineProps<{
   viewable?: boolean
   choosable?: boolean
   selectedSlug?: string
-  choiceName?: string
   /** Affichage grisé + croix rouge (bannis). */
   banned?: boolean
   compact?: boolean
@@ -20,7 +19,18 @@ const emit = defineEmits<{
   choose: [slug: string]
 }>()
 
+function isClickable(slug: string) {
+  if (props.banned) return false
+  if (props.choosable) return true
+  if (props.selectable || props.viewable) return !!secondaryImageSrc(slug)
+  return false
+}
+
 function onImageClick(slug: string) {
+  if (props.choosable) {
+    emit('choose', slug)
+    return
+  }
   if (props.selectable) {
     emit('select', slug)
     return
@@ -28,11 +38,6 @@ function onImageClick(slug: string) {
   if (props.viewable && secondaryImageSrc(slug)) {
     emit('view', slug)
   }
-}
-
-function onChoose(slug: string) {
-  if (!props.choosable) return
-  emit('choose', slug)
 }
 </script>
 
@@ -47,28 +52,10 @@ function onChoose(slug: string) {
       class="neon-panel secondary-card relative shrink-0 overflow-hidden p-0"
       :class="{
         'secondary-card--selected':
-          choosable && selectedSlug === secondary.slug,
-        'ring-2 ring-primary': selectable && selectedSlug === secondary.slug,
+          (choosable || selectable) && selectedSlug === secondary.slug,
         'secondary-card--banned': banned,
       }"
     >
-      <label
-        v-if="choosable"
-        class="secondary-card-choice"
-        :title="`Choisir ${secondary.name}`"
-      >
-        <input
-          type="radio"
-          class="secondary-card-radio"
-          :name="choiceName"
-          :value="secondary.slug"
-          :checked="selectedSlug === secondary.slug"
-          @change="onChoose(secondary.slug)"
-        />
-        <span class="secondary-card-radio-visual" aria-hidden="true" />
-        <span class="sr-only">Choisir {{ secondary.name }}</span>
-      </label>
-
       <span
         v-if="banned"
         class="secondary-card-ban-mark"
@@ -84,20 +71,13 @@ function onChoose(slug: string) {
         type="button"
         class="block w-full p-0 text-left"
         :class="{
-          'secondary-card--clickable':
-            !banned &&
-            (selectable || viewable) &&
-            !!secondaryImageSrc(secondary.slug),
+          'secondary-card--clickable': isClickable(secondary.slug),
         }"
-        :disabled="
-          banned
-            ? true
-            : selectable
-              ? !secondaryImageSrc(secondary.slug)
-              : viewable
-                ? !secondaryImageSrc(secondary.slug)
-                : true
+        :disabled="!isClickable(secondary.slug)"
+        :aria-pressed="
+          choosable ? selectedSlug === secondary.slug : undefined
         "
+        :title="choosable ? `Choisir ${secondary.name}` : undefined"
         @click="onImageClick(secondary.slug)"
       >
         <img
