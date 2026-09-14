@@ -103,6 +103,7 @@ const registerList2 = ref('')
 const adminPlayerName = ref<string>()
 const adminList1 = ref('')
 const adminList2 = ref('')
+const adminPoolId = ref<string>()
 const listValidatorUserId = ref<string>()
 const savingListValidator = ref(false)
 const bracketList1 = ref('')
@@ -427,9 +428,26 @@ const availablePlayersForAdmin = computed(() => {
 const canAdminAddPlayer = computed(
   () =>
     isAdmin.value &&
-    detail.value &&
-    (detail.value.status === 'registration_open' ||
-      detail.value.status === 'registration_closed'),
+    !!detail.value &&
+    (detail.value.status === 'registration_open'
+      || detail.value.status === 'registration_closed'
+      || (detail.value.status === 'started'
+        && !detail.value.pools_finalized_at
+        && tournamentStructure.value !== 'swiss'
+        && (detail.value.pools?.length ?? 0) > 0)),
+)
+
+const adminAddRequiresPool = computed(
+  () => detail.value?.status === 'started',
+)
+
+const adminPoolOptions = computed(() =>
+  sortedPools.value
+    .filter((pool) => (pool.players?.length ?? 0) < 6)
+    .map((pool) => ({
+      value: String(pool.id),
+      label: `${pool.name} (${pool.players?.length ?? 0}/6)`,
+    })),
 )
 
 const canDeleteTournament = computed(
@@ -884,6 +902,10 @@ async function adminAddPlayer() {
     toast.error('Choisissez un joueur.')
     return
   }
+  if (adminAddRequiresPool.value && !adminPoolId.value) {
+    toast.error('Choisissez une poule.')
+    return
+  }
   const list1 = normalizeArmyListCode(adminList1.value)
   const list2 = normalizeArmyListCode(adminList2.value)
   if (!list1) {
@@ -896,18 +918,24 @@ async function adminAddPlayer() {
   }
   adminAdding.value = true
   try {
+    const poolId = adminPoolId.value ? Number(adminPoolId.value) : undefined
     await adminRegisterForTournament(
       tournamentId.value,
       adminPlayerName.value,
       list1,
       list2,
+      undefined,
+      poolId,
     )
     toast.success(
-      `${availablePlayersForAdmin.value.find((p) => p.value === adminPlayerName.value)?.label ?? adminPlayerName.value} ajouté au tournoi`,
+      adminAddRequiresPool.value
+        ? `${availablePlayersForAdmin.value.find((p) => p.value === adminPlayerName.value)?.label ?? adminPlayerName.value} ajouté — matchs de poule recalculés`
+        : `${availablePlayersForAdmin.value.find((p) => p.value === adminPlayerName.value)?.label ?? adminPlayerName.value} ajouté au tournoi`,
     )
     adminPlayerName.value = undefined
     adminList1.value = ''
     adminList2.value = ''
+    adminPoolId.value = undefined
     await refresh()
   } catch (error) {
     toast.error(error instanceof Error ? error.message : 'Erreur')
@@ -2742,7 +2770,13 @@ onMounted(refresh)
             <CardHeader>
               <CardTitle>Ajouter un joueur</CardTitle>
               <CardDescription>
-                Inscription manuelle avec codes de listes (sectorielle déduite, validée automatiquement).
+                <template v-if="adminAddRequiresPool">
+                  Ajout après démarrage : choisissez la poule. Les matchs à jouer de cette poule
+                  sont recalculés (les résultats déjà saisis sont conservés).
+                </template>
+                <template v-else>
+                  Inscription manuelle avec codes de listes (sectorielle déduite, validée automatiquement).
+                </template>
               </CardDescription>
             </CardHeader>
             <CardContent class="grid gap-3">
@@ -2752,6 +2786,18 @@ onMounted(refresh)
                   v-model="adminPlayerName"
                   :options="availablePlayersForAdmin"
                   placeholder="Tapez pour chercher un joueur"
+                />
+              </div>
+              <div
+                v-if="adminAddRequiresPool"
+                class="grid min-w-[14rem] max-w-md gap-2"
+              >
+                <Label>Poule</Label>
+                <PlayerPicker
+                  v-model="adminPoolId"
+                  :options="adminPoolOptions"
+                  placeholder="Choisir une poule"
+                  empty-message="Aucune poule disponible (6 joueurs max)."
                 />
               </div>
               <div class="grid gap-2 sm:max-w-2xl">
@@ -2776,8 +2822,18 @@ onMounted(refresh)
                   <ArmyListQuickActions :code="adminList2" />
                 </div>
               </div>
-              <Button class="w-fit" :disabled="adminAdding" @click="adminAddPlayer">
-                {{ adminAdding ? 'Ajout...' : 'Ajouter au tournoi' }}
+              <Button
+                class="w-fit"
+                :disabled="adminAdding || (adminAddRequiresPool && adminPoolOptions.length === 0)"
+                @click="adminAddPlayer"
+              >
+                {{
+                  adminAdding
+                    ? 'Ajout...'
+                    : adminAddRequiresPool
+                      ? 'Ajouter à la poule'
+                      : 'Ajouter au tournoi'
+                }}
               </Button>
             </CardContent>
           </Card>

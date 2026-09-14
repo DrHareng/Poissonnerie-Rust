@@ -915,17 +915,49 @@ async fn admin_register(
         payload.army_id,
     )?;
 
-    let registration = state
+    let tournament = state
         .tournaments
-        .admin_register(
-            id,
-            player_name,
-            admin.id,
-            army_id,
-            &payload.army_list_1,
-            &payload.army_list_2,
-        )
-        .map_err(|error| ApiError::bad_request(error.to_string()))?;
+        .get(id)
+        .map_err(|error| ApiError::bad_request(error.to_string()))?
+        .ok_or_else(|| ApiError::bad_request("tournoi introuvable"))?;
+
+    let registration = if tournament.status == TournamentStatus::Started {
+        let pool_id = payload.pool_id.ok_or_else(|| {
+            ApiError::bad_request("choisissez une poule pour ajouter ce joueur")
+        })?;
+        let start_rating = {
+            let board = state.board.lock().unwrap();
+            board
+                .get_player(player_name)
+                .ok()
+                .map(|p| p.rating)
+                .unwrap_or(crate::player::DEFAULT_RATING)
+        };
+        state
+            .tournaments
+            .admin_add_to_pool(
+                id,
+                player_name,
+                admin.id,
+                &payload.army_list_1,
+                &payload.army_list_2,
+                pool_id,
+                start_rating,
+            )
+            .map_err(|error| ApiError::bad_request(error.to_string()))?
+    } else {
+        state
+            .tournaments
+            .admin_register(
+                id,
+                player_name,
+                admin.id,
+                army_id,
+                &payload.army_list_1,
+                &payload.army_list_2,
+            )
+            .map_err(|error| ApiError::bad_request(error.to_string()))?
+    };
     Ok((StatusCode::CREATED, Json(registration)))
 }
 

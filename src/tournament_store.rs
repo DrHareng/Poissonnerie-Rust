@@ -96,6 +96,9 @@ pub struct AdminRegisterRequest {
     pub army_list_1: String,
     #[serde(default)]
     pub army_list_2: String,
+    /// Requis si le tournoi est déjà démarré (ajout en poule).
+    #[serde(default)]
+    pub pool_id: Option<i64>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -974,6 +977,131 @@ impl TournamentStore {
             .get_registration_in_conn(&conn, reg_id)?
             .context("inscription introuvable")?;
         self.approve_registration(&conn, &registration, admin_id, now)?;
+        self.get_registration_in_conn(&conn, reg_id)?
+            .context("inscription introuvable")
+    }
+
+    /// Ajoute un joueur après démarrage dans une poule, puis recalcule les matchs à jouer.
+    pub fn admin_add_to_pool(
+        &self,
+        tournament_id: i64,
+        player_name: &str,
+        admin_id: i64,
+        army_list_1: &str,
+        army_list_2: &str,
+        pool_id: i64,
+        start_rating: f64,
+    ) -> Result<TournamentRegistration> {
+        let (list1, list2) = require_lists(army_list_1, army_list_2)?;
+        let conn = self.conn.lock().unwrap();
+        let tournament = self
+            .get_in_conn(&conn, tournament_id)?
+            .context("tournoi introuvable")?;
+
+        if tournament.status != TournamentStatus::Started {
+            bail!("le tournoi n'est pas démarré");
+        }
+        if tournament.pools_finalized_at.is_some() {
+            bail!("impossible d'ajouter un joueur après la clôture des poules");
+        }
+        if !tournament.structure.uses_pools() {
+            bail!("ce format n'utilise pas de poules");
+        }
+
+        let pool = self
+            .list_pools_in_conn(&conn, tournament_id)?
+            .into_iter()
+            .find(|p| p.id == pool_id)
+            .context("poule introuvable")?;
+        if !is_group_pool(&tournament, &pool) {
+            bail!("impossible d'ajouter un joueur dans cette poule");
+        }
+        if pool.players.len() >= MAX_POOL_SIZE {
+            bail!("maximum {MAX_POOL_SIZE} joueurs par poule");
+        }
+
+        let key = normalize_name(player_name);
+        if self.registration_for_player_in_conn(&conn, tournament_id, &key)?.is_some() {
+            bail!("ce joueur est déjà inscrit");
+        }
+
+        let list1_entry = get_or_create_in_conn(&conn, &list1)?;
+        let list2_id = list2
+            .as_ref()
+            .map(|code| get_or_create_in_conn(&conn, code).map(|entry| entry.id))
+            .transpose()?;
+        let resolved_army_id = list1_entry.army_id;
+        let now = now_unix();
+        let next_seed = pool
+            .players
+            .iter()
+            .map(|p| p.seed)
+            .max()
+            .map(|s| s + 1)
+            .unwrap_or(0);
+
+        let tx = conn.unchecked_transaction()?;
+        tx.execute(
+            "
+            INSERT INTO tournament_registrations
+                (tournament_id, player_name_key, player_name, status, requested_at,
+                 reviewed_at, reviewed_by, army_id, army_list_1, army_list_2,
+                 army_list_1_id, army_list_2_id,
+                 army_list_1_validated, army_list_2_validated)
+            VALUES (?1, ?2, ?3, ?4, ?5, ?5, ?6, ?7, ?8, ?9, ?10, ?11, 1, ?12)
+            ",
+            params![
+                tournament_id,
+                key,
+                player_name,
+                RegistrationStatus::Approved.as_str(),
+                now,
+                admin_id,
+                resolved_army_id,
+                list1,
+                list2.as_deref().unwrap_or(""),
+                list1_entry.id,
+                list2_id,
+                i64::from(list2.is_some()),
+            ],
+        )?;
+        let reg_id = tx.last_insert_rowid();
+
+        tx.execute(
+            "
+            INSERT OR REPLACE INTO tournament_players
+                (tournament_id, player_name_key, player_name, start_rating, bracket_rating)
+            VALUES (?1, ?2, ?3, ?4, ?4)
+            ",
+            params![tournament_id, key, player_name, start_rating],
+        )?;
+
+        tx.execute(
+            "
+            INSERT INTO pool_players (pool_id, player_name_key, player_name, seed)
+            VALUES (?1, ?2, ?3, ?4)
+            ",
+            params![pool_id, key, player_name, next_seed],
+        )?;
+
+        let pool_scenarios = self.list_scenarios_in_conn(&*tx, tournament_id, "pool")?;
+        let expected = expected_pool_scenario_count(&tournament);
+        if pool_scenarios.len() < expected {
+            bail!("définissez les {expected} scénarios de poule avant d'ajouter un joueur");
+        }
+        let letter_to_id: HashMap<char, i64> = pool_scenarios
+            .iter()
+            .filter_map(|s| {
+                let letter = s.slot.chars().next()?;
+                Some((letter, s.scenario_id))
+            })
+            .collect();
+
+        let mut updated_pool = pool;
+        updated_pool.players = self.list_pool_players_in_conn(&*tx, pool_id, tournament_id)?;
+        rebuild_pool_playable_matches(&*tx, tournament_id, &updated_pool, &letter_to_id)?;
+
+        tx.commit()?;
         self.get_registration_in_conn(&conn, reg_id)?
             .context("inscription introuvable")
     }
@@ -4284,6 +4412,84 @@ fn insert_round_robin_matches(
     for (i, j) in pairs {
         let p1 = &players[i];
         let p2 = &players[j];
+        let scenario_id = pool_scenario_letter(n, p1.seed as usize, p2.seed as usize)
+            .and_then(|letter| letter_to_id.get(&letter).copied());
+        conn.execute(
+            "
+            INSERT INTO tournament_matches
+                (tournament_id, phase, pool_id, player1, player2, status, scenario_id)
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+            ",
+            params![
+                tournament_id,
+                TournamentPhase::Pool.as_str(),
+                pool.id,
+                p1.player_name,
+                p2.player_name,
+                TournamentMatchStatus::Scheduled.as_str(),
+                scenario_id,
+            ],
+        )?;
+    }
+    Ok(())
+}
+
+/// Recalcule les matchs à jouer d'une poule : conserve les matchs déjà progressés,
+/// régénère les scheduled restants selon le round-robin à jour.
+fn rebuild_pool_playable_matches(
+    conn: &Connection,
+    tournament_id: i64,
+    pool: &Pool,
+    letter_to_id: &HashMap<char, i64>,
+) -> Result<()> {
+    conn.execute(
+        "
+        DELETE FROM tournament_matches
+        WHERE tournament_id = ?1
+          AND pool_id = ?2
+          AND phase = 'pool'
+          AND status = 'scheduled'
+          AND elo_match_id IS NULL
+          AND is_forfeit = 0
+          AND is_unplayed = 0
+        ",
+        params![tournament_id, pool.id],
+    )?;
+
+    let mut kept_pairs: Vec<(String, String)> = Vec::new();
+    {
+        let mut stmt = conn.prepare(
+            "
+            SELECT player1, player2 FROM tournament_matches
+            WHERE tournament_id = ?1 AND pool_id = ?2 AND phase = 'pool'
+              AND player1 IS NOT NULL AND player2 IS NOT NULL
+            ",
+        )?;
+        let rows = stmt.query_map(params![tournament_id, pool.id], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        })?;
+        for row in rows {
+            kept_pairs.push(row?);
+        }
+    }
+
+    let mut players = pool.players.clone();
+    players.sort_by_key(|player| player.seed);
+    let n = players.len();
+    let pairs = pool_round_robin_pairs(n);
+    for (i, j) in pairs {
+        let p1 = &players[i];
+        let p2 = &players[j];
+        let already = kept_pairs.iter().any(|(a, b)| {
+            let a = normalize_name(a);
+            let b = normalize_name(b);
+            let x = normalize_name(&p1.player_name);
+            let y = normalize_name(&p2.player_name);
+            (a == x && b == y) || (a == y && b == x)
+        });
+        if already {
+            continue;
+        }
         let scenario_id = pool_scenario_letter(n, p1.seed as usize, p2.seed as usize)
             .and_then(|letter| letter_to_id.get(&letter).copied());
         conn.execute(

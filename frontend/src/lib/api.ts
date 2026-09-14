@@ -638,6 +638,7 @@ export function adminRegisterForTournament(
   army_list_1: string,
   army_list_2 = '',
   army_id?: number,
+  pool_id?: number,
 ): Promise<TournamentRegistration> {
   return request<TournamentRegistration>(`/api/tournaments/${id}/registrations`, {
     method: 'POST',
@@ -646,6 +647,7 @@ export function adminRegisterForTournament(
       army_list_1,
       army_list_2,
       ...(army_id != null ? { army_id } : {}),
+      ...(pool_id != null ? { pool_id } : {}),
     }),
   })
 }
