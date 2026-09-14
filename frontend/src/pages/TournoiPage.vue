@@ -1127,6 +1127,15 @@ function poolPlayerArmyId(pp: PoolPlayer) {
   return pp.army_id ?? armyIdForPlayer(pp.player_name)
 }
 
+/** Statut visible tant que les sectorielles de la poule sont masquées. */
+function poolPlayerPendingStatus(pp: PoolPlayer): string | null {
+  if (poolPlayerArmyId(pp)) return null
+  const reg = registrationForPlayer(pp.player_name)
+  if (!reg) return null
+  if (registrationListsFullyValidated(reg) || reg.status === 'approved') return null
+  return registrationStatusLabel(reg)
+}
+
 function addPlayerToPool(poolIndex: number) {
   const playerName = poolPickerValues.value[poolIndex]
   if (!playerName) {
@@ -2238,6 +2247,13 @@ onMounted(refresh)
                               :army-id="poolPlayerArmyId(pp)!"
                               class="shrink-0"
                             />
+                            <Badge
+                              v-else-if="poolPlayerPendingStatus(pp)"
+                              variant="outline"
+                              class="shrink-0 text-xs font-normal"
+                            >
+                              {{ poolPlayerPendingStatus(pp) }}
+                            </Badge>
                           </span>
                         </td>
                         <td class="pool-col-stat">{{ pp.points }}</td>
