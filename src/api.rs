@@ -395,6 +395,7 @@ pub fn router(state: AppState) -> Result<Router> {
     Ok(Router::new()
         .route("/api/auth/discord", get(discord_login))
         .route("/api/auth/callback", get(discord_callback))
+        .route("/api/auth/native-return", get(native_auth_return))
         .route("/api/auth/me", get(auth_me).patch(update_profile))
         .route("/api/auth/logout", post(auth_logout))
         .route("/api/prefs", get(get_prefs).patch(update_prefs))
@@ -515,6 +516,69 @@ async fn discord_login(
     Ok(Redirect::to(&auth.authorize_url_with_state(oauth_state)))
 }
 
+fn native_return_url(auth: &AuthConfig) -> Result<String, ApiError> {
+    let base = auth
+        .redirect_uri
+        .strip_suffix("/auth/callback")
+        .ok_or_else(|| {
+            ApiError::bad_request(
+                "DISCORD_REDIRECT_URI doit se terminer par /auth/callback pour le login mobile",
+            )
+        })?;
+    Ok(format!("{base}/auth/native-return"))
+}
+
+fn native_handoff_html(session_id: &str) -> String {
+    let encoded = urlencoding::encode(session_id);
+    let deep_link = format!("poissonnerie://auth?session={encoded}");
+    let intent_link = format!(
+        "intent://auth?session={encoded}#Intent;scheme=poissonnerie;package=fr.poissonnerie.app;end"
+    );
+    let deep_json = serde_json::to_string(&deep_link).unwrap_or_else(|_| "\"\"".into());
+    let intent_json = serde_json::to_string(&intent_link).unwrap_or_else(|_| "\"\"".into());
+    format!(
+        r#"<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Retour a l'application</title>
+  <style>
+    body {{
+      margin: 0;
+      min-height: 100vh;
+      display: grid;
+      place-items: center;
+      font-family: system-ui, sans-serif;
+      background: #050505;
+      color: #f5f5f5;
+      text-align: center;
+      padding: 1.5rem;
+    }}
+    a {{
+      color: #7dd3fc;
+      font-size: 1.1rem;
+    }}
+  </style>
+  <script>
+    (function () {{
+      var deep = {deep_json};
+      var intent = {intent_json};
+      window.location.href = deep;
+      setTimeout(function () {{ window.location.href = intent; }}, 400);
+    }})();
+  </script>
+</head>
+<body>
+  <div>
+    <p>Connexion reussie.</p>
+    <p><a href="{deep_link}">Ouvrir La Poissonnerie</a></p>
+  </div>
+</body>
+</html>"#
+    )
+}
+
 async fn discord_callback(
     State(state): State<AppState>,
     session: Session,
@@ -537,63 +601,45 @@ async fn discord_callback(
         .unwrap_or(false);
     let _ = session.remove::<bool>(auth::SESSION_OAUTH_MOBILE).await;
     if mobile_from_state || mobile_from_session {
+        // Important: ne jamais mettre poissonnerie:// dans un header Location
+        // (nginx peut répondre 502 "upstream sent invalid header").
+        // On redirige d'abord vers une URL HTTP, puis la page ouvre le deep link.
         let session_id = session
             .id()
             .ok_or_else(|| ApiError::bad_request("session mobile introuvable"))?
             .to_string();
-        let encoded = urlencoding::encode(&session_id);
-        let deep_link = format!("poissonnerie://auth?session={encoded}");
-        let intent_link = format!(
-            "intent://auth?session={encoded}#Intent;scheme=poissonnerie;package=fr.poissonnerie.app;end"
+        let target = format!(
+            "{}?session={}",
+            native_return_url(auth)?,
+            urlencoding::encode(&session_id)
         );
-        let html = format!(
-            r#"<!DOCTYPE html>
-<html lang="fr">
-<head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <meta http-equiv="refresh" content="0;url={deep_link}" />
-  <title>Retour à l'application</title>
-  <style>
-    body {{
-      margin: 0;
-      min-height: 100vh;
-      display: grid;
-      place-items: center;
-      font-family: system-ui, sans-serif;
-      background: #050505;
-      color: #f5f5f5;
-      text-align: center;
-      padding: 1.5rem;
-    }}
-    a {{
-      color: #7dd3fc;
-    }}
-  </style>
-  <script>
-    (function () {{
-      var deep = {deep_json};
-      var intent = {intent_json};
-      window.location.replace(deep);
-      setTimeout(function () {{ window.location.replace(intent); }}, 350);
-    }})();
-  </script>
-</head>
-<body>
-  <div>
-    <p>Connexion réussie.</p>
-    <p><a href="{deep_link}">Ouvrir La Poissonnerie</a></p>
-  </div>
-</body>
-</html>"#,
-            deep_link = deep_link,
-            deep_json = serde_json::to_string(&deep_link).unwrap_or_else(|_| "\"\"".into()),
-            intent_json = serde_json::to_string(&intent_link).unwrap_or_else(|_| "\"\"".into()),
-        );
-        return Ok(Html(html).into_response());
+        return Ok(Redirect::to(&target).into_response());
     }
 
     Ok(Redirect::to(&auth.frontend_url).into_response())
+}
+
+#[derive(Debug, Deserialize)]
+struct NativeReturnQuery {
+    #[serde(default)]
+    session: String,
+}
+
+async fn native_auth_return(
+    session: Session,
+    Query(query): Query<NativeReturnQuery>,
+) -> Result<Response, ApiError> {
+    let session_id = if !query.session.trim().is_empty() {
+        query.session.trim().to_string()
+    } else {
+        session
+            .id()
+            .ok_or_else(|| {
+                ApiError::bad_request("session mobile introuvable — réessayez depuis l'app")
+            })?
+            .to_string()
+    };
+    Ok(Html(native_handoff_html(&session_id)).into_response())
 }
 
 async fn auth_me(
