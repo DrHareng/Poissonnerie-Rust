@@ -215,15 +215,35 @@ const hasPoolWithoutMatches = computed(() => {
 
 const selectedPoolId = ref<number | null>(null)
 
+function isMatchPlayed(match: TournamentMatch) {
+  return match.status === 'confirmed' || match.is_unplayed
+}
+
 const myTournamentMatches = computed(() => {
   if (!player.value || !detail.value) return []
   const name = player.value.name.toLowerCase()
-  return detail.value.matches.filter(
-    (match) =>
-      match.player1?.toLowerCase() === name
-      || match.player2?.toLowerCase() === name,
-  )
+  return detail.value.matches
+    .filter(
+      (match) =>
+        match.player1?.toLowerCase() === name
+        || match.player2?.toLowerCase() === name,
+    )
+    .slice()
+    .sort((a, b) => {
+      const aPlayed = isMatchPlayed(a) ? 1 : 0
+      const bPlayed = isMatchPlayed(b) ? 1 : 0
+      if (aPlayed !== bPlayed) return aPlayed - bPlayed
+      return a.id - b.id
+    })
 })
+
+const myUpcomingMatches = computed(() =>
+  myTournamentMatches.value.filter((match) => !isMatchPlayed(match)),
+)
+
+const myPlayedMatches = computed(() =>
+  myTournamentMatches.value.filter((match) => isMatchPlayed(match)),
+)
 
 type TournamentTabId = 'arbre' | 'poules' | 'inscriptions' | 'admin'
 
@@ -256,8 +276,17 @@ const showInscriptionsTab = computed(
   () => detail.value?.status === 'registration_open',
 )
 
+const myListsFullyValidated = computed(() =>
+  registrationListsFullyValidated(myRegistration.value),
+)
+
 const showMyMatchesSide = computed(
-  () => isAuthenticated.value && hasPlayer.value && myTournamentMatches.value.length > 0,
+  () =>
+    isAuthenticated.value
+    && hasPlayer.value
+    && !!myRegistration.value
+    && myListsFullyValidated.value
+    && (detail.value?.status === 'started' || detail.value?.status === 'completed'),
 )
 
 const tournamentTabs = computed(() => {
@@ -736,8 +765,15 @@ const canEditRegistrationLists = computed(() => {
   )
 })
 
+/** Panneau listes : masqué une fois démarré + listes validées (place aux matchs). */
 const showRegistrationListsSide = computed(
-  () => !!myRegistration.value && canEditRegistrationLists.value,
+  () =>
+    !!myRegistration.value
+    && canEditRegistrationLists.value
+    && !(
+      (detail.value?.status === 'started' || detail.value?.status === 'completed')
+      && myListsFullyValidated.value
+    ),
 )
 
 const showCustomSide = computed(
@@ -1644,33 +1680,77 @@ onMounted(refresh)
                 Vos parties dans ce tournoi.
               </CardDescription>
             </CardHeader>
-            <CardContent class="flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto">
-              <TournamentMatchCard
-                v-for="match in myTournamentMatches"
-                :key="match.id"
-                compact
-                :match="match"
-                :form="getForm(match)"
-                :can-interact="canInteractWithMatch(match)"
-                :is-admin="isAdmin"
-                :current-player-name="player?.name"
-                :player1-army-id="matchPlayerArmyId(match, 'player1')"
-                :player2-army-id="matchPlayerArmyId(match, 'player2')"
-                :player1-has-list2="matchHasList2(match, 'player1')"
-                :player2-has-list2="matchHasList2(match, 'player2')"
-                :status-label="matchStatusLabel(match)"
-                :phase-label="phaseLabels[match.phase] ?? match.phase"
-                :lists-ready="matchListsReady(match)"
-                :lists-ready-message="matchListsReadyMessage(match)"
-                :is-online="isOnline"
-                @start="startPartie(match)"
-                @resume="resumePartie(match)"
-                @confirm="confirmMatch(match)"
-                @correct="correctMatch(match, $event)"
-                @forfeit="forfeitMatch(match, $event)"
-                @cancel-forfeit="cancelForfeit(match)"
-                @unplayed="markMatchUnplayed(match)"
-              />
+            <CardContent class="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto">
+              <p
+                v-if="myTournamentMatches.length === 0"
+                class="text-sm text-muted-foreground"
+              >
+                Aucun match pour le moment.
+              </p>
+              <template v-else>
+                <div v-if="myUpcomingMatches.length > 0" class="grid gap-2">
+                  <h3 class="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                    À venir
+                  </h3>
+                  <TournamentMatchCard
+                    v-for="match in myUpcomingMatches"
+                    :key="match.id"
+                    compact
+                    :match="match"
+                    :form="getForm(match)"
+                    :can-interact="canInteractWithMatch(match)"
+                    :is-admin="isAdmin"
+                    :current-player-name="player?.name"
+                    :player1-army-id="matchPlayerArmyId(match, 'player1')"
+                    :player2-army-id="matchPlayerArmyId(match, 'player2')"
+                    :player1-has-list2="matchHasList2(match, 'player1')"
+                    :player2-has-list2="matchHasList2(match, 'player2')"
+                    :status-label="matchStatusLabel(match)"
+                    :phase-label="phaseLabels[match.phase] ?? match.phase"
+                    :lists-ready="matchListsReady(match)"
+                    :lists-ready-message="matchListsReadyMessage(match)"
+                    :is-online="isOnline"
+                    @start="startPartie(match)"
+                    @resume="resumePartie(match)"
+                    @confirm="confirmMatch(match)"
+                    @correct="correctMatch(match, $event)"
+                    @forfeit="forfeitMatch(match, $event)"
+                    @cancel-forfeit="cancelForfeit(match)"
+                    @unplayed="markMatchUnplayed(match)"
+                  />
+                </div>
+                <div v-if="myPlayedMatches.length > 0" class="grid gap-2">
+                  <h3 class="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                    Joués
+                  </h3>
+                  <TournamentMatchCard
+                    v-for="match in myPlayedMatches"
+                    :key="match.id"
+                    compact
+                    :match="match"
+                    :form="getForm(match)"
+                    :can-interact="canInteractWithMatch(match)"
+                    :is-admin="isAdmin"
+                    :current-player-name="player?.name"
+                    :player1-army-id="matchPlayerArmyId(match, 'player1')"
+                    :player2-army-id="matchPlayerArmyId(match, 'player2')"
+                    :player1-has-list2="matchHasList2(match, 'player1')"
+                    :player2-has-list2="matchHasList2(match, 'player2')"
+                    :status-label="matchStatusLabel(match)"
+                    :phase-label="phaseLabels[match.phase] ?? match.phase"
+                    :lists-ready="matchListsReady(match)"
+                    :lists-ready-message="matchListsReadyMessage(match)"
+                    :is-online="isOnline"
+                    @start="startPartie(match)"
+                    @resume="resumePartie(match)"
+                    @confirm="confirmMatch(match)"
+                    @correct="correctMatch(match, $event)"
+                    @forfeit="forfeitMatch(match, $event)"
+                    @cancel-forfeit="cancelForfeit(match)"
+                    @unplayed="markMatchUnplayed(match)"
+                  />
+                </div>
+              </template>
             </CardContent>
           </Card>
         </Teleport>
@@ -1788,33 +1868,77 @@ onMounted(refresh)
               Vos parties dans ce tournoi.
             </CardDescription>
           </CardHeader>
-          <CardContent class="flex flex-col gap-2">
-            <TournamentMatchCard
-              v-for="match in myTournamentMatches"
-              :key="`mobile-${match.id}`"
-              compact
-              :match="match"
-              :form="getForm(match)"
-              :can-interact="canInteractWithMatch(match)"
-              :is-admin="isAdmin"
-              :current-player-name="player?.name"
-              :player1-army-id="matchPlayerArmyId(match, 'player1')"
-              :player2-army-id="matchPlayerArmyId(match, 'player2')"
-              :player1-has-list2="matchHasList2(match, 'player1')"
-              :player2-has-list2="matchHasList2(match, 'player2')"
-              :status-label="matchStatusLabel(match)"
-              :phase-label="phaseLabels[match.phase] ?? match.phase"
-              :lists-ready="matchListsReady(match)"
-              :lists-ready-message="matchListsReadyMessage(match)"
-              :is-online="isOnline"
-              @start="startPartie(match)"
-              @resume="resumePartie(match)"
-              @confirm="confirmMatch(match)"
-              @correct="correctMatch(match, $event)"
-              @forfeit="forfeitMatch(match, $event)"
-              @cancel-forfeit="cancelForfeit(match)"
-              @unplayed="markMatchUnplayed(match)"
-            />
+          <CardContent class="flex flex-col gap-3">
+            <p
+              v-if="myTournamentMatches.length === 0"
+              class="text-sm text-muted-foreground"
+            >
+              Aucun match pour le moment.
+            </p>
+            <template v-else>
+              <div v-if="myUpcomingMatches.length > 0" class="grid gap-2">
+                <h3 class="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                  À venir
+                </h3>
+                <TournamentMatchCard
+                  v-for="match in myUpcomingMatches"
+                  :key="`mobile-${match.id}`"
+                  compact
+                  :match="match"
+                  :form="getForm(match)"
+                  :can-interact="canInteractWithMatch(match)"
+                  :is-admin="isAdmin"
+                  :current-player-name="player?.name"
+                  :player1-army-id="matchPlayerArmyId(match, 'player1')"
+                  :player2-army-id="matchPlayerArmyId(match, 'player2')"
+                  :player1-has-list2="matchHasList2(match, 'player1')"
+                  :player2-has-list2="matchHasList2(match, 'player2')"
+                  :status-label="matchStatusLabel(match)"
+                  :phase-label="phaseLabels[match.phase] ?? match.phase"
+                  :lists-ready="matchListsReady(match)"
+                  :lists-ready-message="matchListsReadyMessage(match)"
+                  :is-online="isOnline"
+                  @start="startPartie(match)"
+                  @resume="resumePartie(match)"
+                  @confirm="confirmMatch(match)"
+                  @correct="correctMatch(match, $event)"
+                  @forfeit="forfeitMatch(match, $event)"
+                  @cancel-forfeit="cancelForfeit(match)"
+                  @unplayed="markMatchUnplayed(match)"
+                />
+              </div>
+              <div v-if="myPlayedMatches.length > 0" class="grid gap-2">
+                <h3 class="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                  Joués
+                </h3>
+                <TournamentMatchCard
+                  v-for="match in myPlayedMatches"
+                  :key="`mobile-played-${match.id}`"
+                  compact
+                  :match="match"
+                  :form="getForm(match)"
+                  :can-interact="canInteractWithMatch(match)"
+                  :is-admin="isAdmin"
+                  :current-player-name="player?.name"
+                  :player1-army-id="matchPlayerArmyId(match, 'player1')"
+                  :player2-army-id="matchPlayerArmyId(match, 'player2')"
+                  :player1-has-list2="matchHasList2(match, 'player1')"
+                  :player2-has-list2="matchHasList2(match, 'player2')"
+                  :status-label="matchStatusLabel(match)"
+                  :phase-label="phaseLabels[match.phase] ?? match.phase"
+                  :lists-ready="matchListsReady(match)"
+                  :lists-ready-message="matchListsReadyMessage(match)"
+                  :is-online="isOnline"
+                  @start="startPartie(match)"
+                  @resume="resumePartie(match)"
+                  @confirm="confirmMatch(match)"
+                  @correct="correctMatch(match, $event)"
+                  @forfeit="forfeitMatch(match, $event)"
+                  @cancel-forfeit="cancelForfeit(match)"
+                  @unplayed="markMatchUnplayed(match)"
+                />
+              </div>
+            </template>
           </CardContent>
         </Card>
 

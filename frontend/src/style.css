@@ -756,6 +756,10 @@
     @apply min-w-0 text-center;
   }
 
+  .pool-col-scenario {
+    @apply max-w-[10rem] truncate text-muted-foreground;
+  }
+
   .pool-col-admin {
     @apply w-28 text-right whitespace-nowrap;
   }

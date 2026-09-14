@@ -144,6 +144,7 @@ void showActions
         <th class="pool-col-player">Joueur 1</th>
         <th class="pool-col-score">Score</th>
         <th class="pool-col-player">Joueur 2</th>
+        <th class="pool-col-scenario">Scénario</th>
         <th class="pool-col-admin" />
         <th class="pool-col-status">Statut</th>
       </tr>
@@ -187,6 +188,12 @@ void showActions
                 class="shrink-0"
               />
             </span>
+          </td>
+          <td
+            class="pool-col-scenario"
+            :title="match.scenario_name ?? match.scenario_other ?? undefined"
+          >
+            {{ match.scenario_name || match.scenario_other || '—' }}
           </td>
           <td class="pool-col-admin">
             <div class="pool-match-admin-actions">
@@ -242,7 +249,7 @@ void showActions
           v-if="isCorrecting(match) || (canInteract(match) && match.status === 'scheduled' && !match.is_unplayed)"
           class="pool-match-edit-row"
         >
-          <td colspan="5">
+          <td colspan="6">
             <div class="pool-match-edit-panel">
               <template v-if="isCorrecting(match)">
                 <TournamentMatchScoreboard
