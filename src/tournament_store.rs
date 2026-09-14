@@ -775,9 +775,12 @@ impl TournamentStore {
         let tournament = self
             .get_in_conn(&conn, tournament_id)?
             .context("tournoi introuvable")?;
-        if tournament.status != TournamentStatus::RegistrationOpen
-            && tournament.status != TournamentStatus::RegistrationClosed
-        {
+        if !matches!(
+            tournament.status,
+            TournamentStatus::RegistrationOpen
+                | TournamentStatus::RegistrationClosed
+                | TournamentStatus::Started
+        ) {
             bail!("impossible de mettre à jour les listes pour ce tournoi");
         }
 
@@ -1190,7 +1193,10 @@ impl TournamentStore {
 
         let capacity = tournament_capacity(&tournament) as i64;
 
-        if approved_count >= capacity {
+        // Après démarrage, le joueur est déjà dans le tableau : on valide sans waitlist.
+        let force_approve = tournament.status == TournamentStatus::Started;
+
+        if !force_approve && approved_count >= capacity {
             let waitlist_position = waitlisted_count + 1;
             conn.execute(
                 "
@@ -1241,10 +1247,11 @@ impl TournamentStore {
             bail!("impossible de démarrer le tournoi dans cet état");
         }
 
-        let approved: Vec<(String, String)> = conn.prepare(
+        // pending + approved (waitlist hors scope : acceptation 1 par 1).
+        let starters: Vec<(String, String)> = conn.prepare(
             "
             SELECT player_name_key, player_name FROM tournament_registrations
-            WHERE tournament_id = ?1 AND status = 'approved'
+            WHERE tournament_id = ?1 AND status IN ('approved', 'pending')
             ",
         )?
         .query_map(params![tournament_id], |row| {
@@ -1252,8 +1259,8 @@ impl TournamentStore {
         })?
         .collect::<Result<Vec<_>, _>>()?;
 
-        if approved.is_empty() {
-            bail!("aucun joueur validé");
+        if starters.is_empty() {
+            bail!("aucun joueur à démarrer");
         }
 
         if tournament.list_validator_user_id.is_none() {
@@ -1263,7 +1270,7 @@ impl TournamentStore {
         let now = now_unix();
         let tx = conn.unchecked_transaction()?;
 
-        for (key, name) in &approved {
+        for (key, name) in &starters {
             let rating = player_ratings
                 .iter()
                 .find(|(n, _)| normalize_name(n) == *key)
@@ -1289,6 +1296,92 @@ impl TournamentStore {
         )?;
 
         tx.commit()?;
+        drop(conn);
+
+        if tournament.structure.uses_pools() {
+            self.draw_pools(tournament_id)?;
+            let conn = self.conn.lock().unwrap();
+            let scenarios = self.list_scenarios_in_conn(&conn, tournament_id, "pool")?;
+            let expected = expected_pool_scenario_count(&tournament);
+            drop(conn);
+            if scenarios.len() >= expected {
+                self.generate_pool_matches(tournament_id)?;
+            }
+        }
+
+        self.get(tournament_id)?.context("tournoi introuvable")
+    }
+
+    /// Annule le démarrage : conserve inscriptions / listes / scénarios,
+    /// efface joueurs démarrés, poules et matchs.
+    pub fn unstart(&self, tournament_id: i64) -> Result<Tournament> {
+        let conn = self.conn.lock().unwrap();
+        let tournament = self
+            .get_in_conn(&conn, tournament_id)?
+            .context("tournoi introuvable")?;
+
+        if tournament.status != TournamentStatus::Started {
+            bail!("le tournoi n'est pas démarré");
+        }
+        if tournament.pools_finalized_at.is_some() {
+            bail!("impossible d'annuler : les poules sont déjà clôturées");
+        }
+
+        let progressed: i64 = conn.query_row(
+            "
+            SELECT COUNT(*) FROM tournament_matches
+            WHERE tournament_id = ?1
+              AND (
+                status != 'scheduled'
+                OR elo_match_id IS NOT NULL
+                OR is_forfeit != 0
+                OR is_unplayed != 0
+              )
+            ",
+            params![tournament_id],
+            |row| row.get(0),
+        )?;
+        if progressed > 0 {
+            bail!("impossible d'annuler : des matchs ont déjà progressé");
+        }
+
+        let tx = conn.unchecked_transaction()?;
+        tx.execute(
+            "UPDATE matches SET tournament_id = NULL, tournament_phase = NULL WHERE tournament_id = ?1",
+            params![tournament_id],
+        )?;
+        tx.execute(
+            "DELETE FROM tournament_matches WHERE tournament_id = ?1",
+            params![tournament_id],
+        )?;
+        tx.execute(
+            "
+            DELETE FROM pool_players
+            WHERE pool_id IN (SELECT id FROM pools WHERE tournament_id = ?1)
+            ",
+            params![tournament_id],
+        )?;
+        tx.execute(
+            "DELETE FROM pools WHERE tournament_id = ?1",
+            params![tournament_id],
+        )?;
+        tx.execute(
+            "DELETE FROM tournament_players WHERE tournament_id = ?1",
+            params![tournament_id],
+        )?;
+        tx.execute(
+            "
+            UPDATE tournaments
+            SET status = ?1, started_at = NULL, pools_finalized_at = NULL
+            WHERE id = ?2
+            ",
+            params![
+                TournamentStatus::RegistrationClosed.as_str(),
+                tournament_id
+            ],
+        )?;
+        tx.commit()?;
+
         self.get_in_conn(&conn, tournament_id)?
             .context("tournoi introuvable")
     }
@@ -4171,13 +4264,7 @@ fn registration_list_filled(value: &Option<String>) -> bool {
 }
 
 fn registration_lists_fully_validated(registration: &TournamentRegistration) -> bool {
-    if !registration_list_filled(&registration.army_list_1) || !registration.army_list_1_validated {
-        return false;
-    }
-    if registration_list_filled(&registration.army_list_2) && !registration.army_list_2_validated {
-        return false;
-    }
-    true
+    registration.lists_fully_validated()
 }
 
 fn is_group_pool(tournament: &Tournament, pool: &Pool) -> bool {

@@ -145,15 +145,79 @@ fn enrich_list_validator_display_name(
     }
 }
 
+/// Joueurs dont la sectorielle peut être affichée (clés normalisées).
+/// Règle : personne (admin / validateur inclus) tant que la poule n'est pas
+/// entièrement validée ; révélation dès validation complète. Codes de listes
+/// restent gérés à part (validateur / soi).
+fn army_visible_player_keys(
+    tournament: &crate::tournament::Tournament,
+    registrations: &[crate::tournament::TournamentRegistration],
+    pools: &[crate::tournament::Pool],
+) -> HashSet<String> {
+    use crate::store::normalize_name;
+
+    if tournament.status == TournamentStatus::Completed {
+        return registrations
+            .iter()
+            .map(|r| normalize_name(&r.player_name))
+            .collect();
+    }
+
+    if tournament.status != TournamentStatus::Started {
+        return HashSet::new();
+    }
+
+    let by_key: HashMap<String, &crate::tournament::TournamentRegistration> = registrations
+        .iter()
+        .map(|r| (normalize_name(&r.player_name), r))
+        .collect();
+
+    let mut visible = HashSet::new();
+
+    if tournament.structure.uses_pools() {
+        for pool in pools {
+            if pool.players.is_empty() {
+                continue;
+            }
+            let all_validated = pool.players.iter().all(|player| {
+                by_key
+                    .get(&normalize_name(&player.player_name))
+                    .is_some_and(|reg| reg.lists_fully_validated())
+            });
+            if all_validated {
+                for player in &pool.players {
+                    visible.insert(normalize_name(&player.player_name));
+                }
+            }
+        }
+    } else {
+        // Swiss : révélation globale quand tous les inscrits démarrés sont validés.
+        let starters: Vec<_> = registrations
+            .iter()
+            .filter(|r| {
+                matches!(
+                    r.status,
+                    crate::tournament::RegistrationStatus::Approved
+                        | crate::tournament::RegistrationStatus::Pending
+                )
+            })
+            .collect();
+        if !starters.is_empty() && starters.iter().all(|r| r.lists_fully_validated()) {
+            for reg in starters {
+                visible.insert(normalize_name(&reg.player_name));
+            }
+        }
+    }
+
+    visible
+}
+
 fn mask_registrations(
     tournament: &crate::tournament::Tournament,
     registrations: Vec<crate::tournament::TournamentRegistration>,
     viewer: &ViewerContext,
+    army_visible: &HashSet<String>,
 ) -> Vec<crate::tournament::TournamentRegistration> {
-    let armies_public = matches!(
-        tournament.status,
-        crate::tournament::TournamentStatus::Started | crate::tournament::TournamentStatus::Completed
-    );
     let lists_public = tournament.status == crate::tournament::TournamentStatus::Completed;
     let is_list_validator = is_viewer_list_validator(tournament, viewer);
 
@@ -185,9 +249,11 @@ fn mask_registrations(
                         == crate::store::normalize_name(&registration.player_name)
                 });
 
-            if !armies_public && !is_list_validator && !is_own {
+            let key = crate::store::normalize_name(&registration.player_name);
+            if !army_visible.contains(&key) {
                 registration.army_id = None;
             }
+
             // Listes secrètes jusqu'à la fin du tournoi (sauf pour soi / validateur).
             let can_see_lists = lists_public || is_own || is_list_validator;
             if !can_see_lists {
@@ -199,6 +265,38 @@ fn mask_registrations(
             registration
         })
         .collect()
+}
+
+fn mask_pool_armies(
+    pools: &mut [crate::tournament::Pool],
+    army_visible: &HashSet<String>,
+) {
+    for pool in pools {
+        for player in &mut pool.players {
+            let key = crate::store::normalize_name(&player.player_name);
+            if !army_visible.contains(&key) {
+                player.army_id = None;
+            }
+        }
+    }
+}
+
+fn mask_match_armies(
+    matches: &mut [crate::tournament::TournamentMatch],
+    army_visible: &HashSet<String>,
+) {
+    for tm in matches {
+        if let Some(ref name) = tm.player1 {
+            if !army_visible.contains(&crate::store::normalize_name(name)) {
+                tm.player1_army_id = None;
+            }
+        }
+        if let Some(ref name) = tm.player2 {
+            if !army_visible.contains(&crate::store::normalize_name(name)) {
+                tm.player2_army_id = None;
+            }
+        }
+    }
 }
 
 fn mask_tournament_match_lists(
@@ -320,6 +418,7 @@ pub fn tournament_routes() -> axum::Router<AppState> {
             post(set_list_validator),
         )
         .route("/api/tournaments/{id}/start", post(start_tournament))
+        .route("/api/tournaments/{id}/unstart", post(unstart_tournament))
         .route("/api/tournaments/{id}/pools", post(setup_pools))
         .route("/api/tournaments/{id}/draw-pools", post(draw_pools))
         .route(
@@ -638,8 +737,19 @@ async fn get_tournament(
 
     enrich_list_validator_display_name(&state, &mut detail.tournament);
 
-    detail.registrations =
-        mask_registrations(&detail.tournament, detail.registrations, &viewer);
+    let army_visible = army_visible_player_keys(
+        &detail.tournament,
+        &detail.registrations,
+        &detail.pools,
+    );
+    detail.registrations = mask_registrations(
+        &detail.tournament,
+        detail.registrations,
+        &viewer,
+        &army_visible,
+    );
+    mask_pool_armies(&mut detail.pools, &army_visible);
+    mask_match_armies(&mut detail.matches, &army_visible);
     mask_tournament_match_lists(&detail.tournament, &mut detail.matches, &viewer);
 
     let board = state.board.lock().unwrap();
@@ -842,10 +952,16 @@ async fn list_registrations(
         user_id: Some(user.id),
         player_name: None,
     };
+    let army_visible = army_visible_player_keys(
+        &detail.tournament,
+        &detail.registrations,
+        &detail.pools,
+    );
     Ok(Json(mask_registrations(
         &detail.tournament,
         detail.registrations,
         &viewer,
+        &army_visible,
     )))
 }
 
@@ -951,6 +1067,19 @@ async fn start_tournament(
     let tournament = state
         .tournaments
         .start(id, &ratings)
+        .map_err(|error| ApiError::bad_request(error.to_string()))?;
+    Ok(Json(tournament))
+}
+
+async fn unstart_tournament(
+    State(state): State<AppState>,
+    session: Session,
+    Path(id): Path<i64>,
+) -> Result<Json<crate::tournament::Tournament>, ApiError> {
+    require_admin(&state, &session).await?;
+    let tournament = state
+        .tournaments
+        .unstart(id)
         .map_err(|error| ApiError::bad_request(error.to_string()))?;
     Ok(Json(tournament))
 }
@@ -1352,6 +1481,23 @@ async fn start_tournament_partie(
         if !ready(&r1) || !ready(&r2) {
             return Err(ApiError::bad_request(
                 "les deux joueurs doivent avoir saisi leurs listes d'arbre",
+            ));
+        }
+    } else {
+        let r1 = state
+            .tournaments
+            .get_registration_for_player(tm.tournament_id, &p1)
+            .map_err(|error| ApiError::bad_request(error.to_string()))?;
+        let r2 = state
+            .tournaments
+            .get_registration_for_player(tm.tournament_id, &p2)
+            .map_err(|error| ApiError::bad_request(error.to_string()))?;
+        let pool_ready = |reg: &Option<crate::tournament::TournamentRegistration>| {
+            reg.as_ref().is_some_and(|r| r.lists_fully_validated())
+        };
+        if !pool_ready(&r1) || !pool_ready(&r2) {
+            return Err(ApiError::bad_request(
+                "les deux joueurs doivent avoir des listes validées",
             ));
         }
     }

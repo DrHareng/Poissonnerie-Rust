@@ -711,6 +711,10 @@ export function startTournament(id: number): Promise<Tournament> {
   return request<Tournament>(`/api/tournaments/${id}/start`, { method: 'POST' })
 }
 
+export function unstartTournament(id: number): Promise<Tournament> {
+  return request<Tournament>(`/api/tournaments/${id}/unstart`, { method: 'POST' })
+}
+
 export function setupTournamentPools(
   id: number,
   pools: { name: string; position: number; players: string[] }[],

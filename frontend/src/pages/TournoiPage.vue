@@ -31,6 +31,7 @@ import {
   setupTournamentPools,
   startTournament,
   startTournamentPartie,
+  unstartTournament,
   unregisterFromTournament,
   updateMyBracketLists,
   updateTournamentDetails,
@@ -190,6 +191,13 @@ const canStartTournament = computed(
     && (detail.value.status === 'registration_open'
       || detail.value.status === 'registration_closed')
     && detail.value.list_validator_user_id != null,
+)
+
+const canUnstartTournament = computed(
+  () =>
+    isAdmin.value
+    && detail.value?.status === 'started'
+    && !detail.value.pools_finalized_at,
 )
 
 const poolMatches = computed(() =>
@@ -360,10 +368,6 @@ const availableUsersForValidator = computed(() => {
       label: u.effective_display_name || u.display_name || u.username,
     }))
 })
-
-const armiesRevealed = computed(
-  () => detail.value?.status === 'started' || detail.value?.status === 'completed',
-)
 
 const activeRegistrations = computed(() =>
   sortRegistrationsForDisplay(
@@ -548,6 +552,16 @@ const approvedRegistrations = computed(() =>
   ),
 )
 
+/** Joueurs pouvant être placés en poule (approved + pending une fois démarré). */
+const poolEligibleRegistrations = computed(() =>
+  sortRegistrationsForDisplay(
+    detail.value?.registrations.filter((r) => {
+      if (r.status === 'approved') return true
+      return detail.value?.status === 'started' && r.status === 'pending'
+    }) ?? [],
+  ),
+)
+
 const registrationByPlayer = computed(() => {
   const map = new Map<string, TournamentRegistration>()
   for (const registration of detail.value?.registrations ?? []) {
@@ -566,7 +580,7 @@ const assignedPlayerNames = computed(
 )
 
 const unassignedPlayerOptions = computed(() =>
-  approvedRegistrations.value
+  poolEligibleRegistrations.value
     .filter(
       (registration) =>
         !assignedPlayerNames.value.has(registration.player_name.toLowerCase()),
@@ -645,6 +659,18 @@ async function onDeleteTournament() {
   }
 }
 
+async function onUnstartTournament() {
+  if (!canUnstartTournament.value) return
+  if (
+    !window.confirm(
+      'Annuler le démarrage ? Les poules et matchs seront effacés. Les inscriptions et listes sont conservées.',
+    )
+  ) {
+    return
+  }
+  await act(() => unstartTournament(tournamentId.value), 'Démarrage annulé')
+}
+
 async function persistTournamentDetails(payload: { name?: string; body: string }) {
   const updated = await updateTournamentDetails(tournamentId.value, {
     name: payload.name ?? detail.value?.name ?? '',
@@ -704,7 +730,7 @@ const needsRegistrationLists = computed(() => {
   return !reg.has_army_lists
 })
 
-/** Modifier les listes tant que le tournoi n'a pas démarré. */
+/** Modifier les listes tant que le tournoi n'est pas terminé (y compris après démarrage). */
 const canEditRegistrationLists = computed(() => {
   if (!myRegistration.value || !detail.value) return false
   if (myRegistration.value.status === 'rejected') return false
@@ -712,6 +738,7 @@ const canEditRegistrationLists = computed(() => {
     detail.value.status === 'registration_open'
     || detail.value.status === 'registration_closed'
     || detail.value.status === 'draft'
+    || detail.value.status === 'started'
   )
 })
 
@@ -975,12 +1002,14 @@ watch(
 )
 
 function showArmyForRegistration(reg: TournamentRegistration) {
-  if (!reg.army_id) return false
-  if (isAdmin.value || isListValidator.value || armiesRevealed.value) return true
-  return (
-    !!player.value &&
-    reg.player_name.toLowerCase() === player.value.name.toLowerCase()
-  )
+  // L'API masque army_id tant que la poule n'est pas entièrement validée.
+  return !!reg.army_id
+}
+
+function registrationListsFullyValidated(reg: TournamentRegistration | undefined) {
+  if (!reg?.has_army_lists || !reg.army_list_1_validated) return false
+  if (reg.has_army_list_2 && !reg.army_list_2_validated) return false
+  return true
 }
 
 async function reviewList(
@@ -1307,14 +1336,26 @@ function registrationFor(name: string | null | undefined) {
 }
 
 function matchListsReady(match: TournamentMatch) {
-  if (match.phase === 'pool') return true
   const r1 = registrationFor(match.player1)
   const r2 = registrationFor(match.player2)
+  if (match.phase === 'pool') {
+    return registrationListsFullyValidated(r1) && registrationListsFullyValidated(r2)
+  }
   return Boolean(r1?.has_bracket_lists && r2?.has_bracket_lists)
 }
 
 function matchListsReadyMessage(match: TournamentMatch) {
   const missing: string[] = []
+  if (match.phase === 'pool') {
+    if (!registrationListsFullyValidated(registrationFor(match.player1))) {
+      missing.push(match.player1_display_name ?? match.player1 ?? 'Joueur 1')
+    }
+    if (!registrationListsFullyValidated(registrationFor(match.player2))) {
+      missing.push(match.player2_display_name ?? match.player2 ?? 'Joueur 2')
+    }
+    if (missing.length === 0) return ''
+    return `Listes non validées pour : ${missing.join(', ')}.`
+  }
   if (!registrationFor(match.player1)?.has_bracket_lists) {
     missing.push(match.player1_display_name ?? match.player1 ?? 'Joueur 1')
   }
@@ -1525,10 +1566,10 @@ onMounted(refresh)
                   :title="'Votre sectorielle'"
                 />
                 <span
-                  v-else-if="myRegistration?.army_id || !armiesRevealed"
+                  v-else-if="myRegistration?.has_army_lists || detail.status === 'started'"
                   class="text-sm text-muted-foreground"
                 >
-                  Sectorielle secrète jusqu'au démarrage
+                  Sectorielle secrète jusqu'à validation de toute la poule
                 </span>
               </div>
               <p class="text-sm text-muted-foreground">
@@ -1668,10 +1709,10 @@ onMounted(refresh)
                 :title="'Votre sectorielle'"
               />
               <span
-                v-else-if="myRegistration?.army_id || !armiesRevealed"
+                v-else-if="myRegistration?.has_army_lists || detail.status === 'started'"
                 class="text-sm text-muted-foreground"
               >
-                Sectorielle secrète jusqu'au démarrage
+                Sectorielle secrète jusqu'à validation de toute la poule
               </span>
             </div>
             <p class="text-sm text-muted-foreground">
@@ -1965,8 +2006,8 @@ onMounted(refresh)
                         :display-name="registrationForPlayer(playerName)?.player_display_name"
                       />
                       <ArmyLogo
-                        v-if="registrationForPlayer(playerName)?.army_id"
-                        :army-id="registrationForPlayer(playerName)!.army_id!"
+                        v-if="armyIdForPlayer(playerName)"
+                        :army-id="armyIdForPlayer(playerName)!"
                       />
                     </div>
                     <Button
@@ -2002,7 +2043,7 @@ onMounted(refresh)
 
               <div class="flex flex-wrap items-center justify-between gap-3 border-t pt-3 md:col-span-2">
                 <p class="text-sm text-muted-foreground">
-                  {{ assignedPlayerNames.size }}/{{ approvedRegistrations.length }} joueurs répartis
+                  {{ assignedPlayerNames.size }}/{{ poolEligibleRegistrations.length }} joueurs répartis
                   <span v-if="unassignedPlayerOptions.length > 0">
                     — {{ unassignedPlayerOptions.length }} non assigné(s)
                   </span>
@@ -2219,10 +2260,10 @@ onMounted(refresh)
                     :title="'Votre sectorielle'"
                   />
                   <span
-                    v-else-if="myRegistration.army_id || !armiesRevealed"
+                    v-else-if="myRegistration.has_army_lists || detail.status === 'started'"
                     class="text-sm text-muted-foreground"
                   >
-                    Sectorielle secrète jusqu'au démarrage
+                    Sectorielle secrète jusqu'à validation de toute la poule
                   </span>
                 </div>
 
@@ -2329,7 +2370,8 @@ onMounted(refresh)
               <CardTitle>Validateur de listes</CardTitle>
               <CardDescription>
                 Utilisateur chargé de valider les listes d'armées. Prérequis pour démarrer le tournoi ;
-                il ne peut pas s'inscrire.
+                il ne peut pas s'inscrire. Les sectorielles restent masquées jusqu'à validation
+                complète de chaque poule (les codes restent visibles pour la review).
               </CardDescription>
             </CardHeader>
             <CardContent class="grid gap-3">
@@ -2507,6 +2549,14 @@ onMounted(refresh)
                   @click="act(() => startTournament(tournamentId), 'Tournoi démarré')"
                 >
                   Démarrer le tournoi
+                </Button>
+                <Button
+                  v-if="canUnstartTournament"
+                  size="sm"
+                  variant="outline"
+                  @click="onUnstartTournament"
+                >
+                  Annuler le démarrage
                 </Button>
                 <Button
                   v-if="
@@ -2694,7 +2744,7 @@ onMounted(refresh)
                     :name="reg.player_name"
                     :display-name="reg.player_display_name"
                   />
-                  <ArmyLogo v-if="reg.army_id" :army-id="reg.army_id" />
+                  <ArmyLogo v-if="showArmyForRegistration(reg)" :army-id="reg.army_id!" />
                 </div>
                 <template v-if="reg.army_list_1">
                   <div class="grid gap-2">
@@ -2716,7 +2766,7 @@ onMounted(refresh)
                       <Button
                         v-else
                         size="sm"
-                        :disabled="!reg.army_id"
+                        :disabled="!reg.has_army_lists"
                         @click="reviewList(reg, 1, 'approved')"
                       >
                         <Check class="size-4" />
@@ -2803,7 +2853,7 @@ onMounted(refresh)
                     :name="reg.player_name"
                     :display-name="reg.player_display_name"
                   />
-                  <ArmyLogo v-if="reg.army_id" :army-id="reg.army_id" />
+                  <ArmyLogo v-if="showArmyForRegistration(reg)" :army-id="reg.army_id!" />
                   <Badge variant="outline" class="text-xs">
                     {{ registrationStatusLabel(reg) }}
                   </Badge>

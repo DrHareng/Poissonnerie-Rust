@@ -325,6 +325,23 @@ pub struct TournamentRegistration {
     pub army_list_2_validated: bool,
 }
 
+impl TournamentRegistration {
+    fn list_filled(value: &Option<String>) -> bool {
+        value.as_ref().is_some_and(|s| !s.trim().is_empty())
+    }
+
+    /// Liste 1 présente et validée ; liste 2 validée si renseignée.
+    pub fn lists_fully_validated(&self) -> bool {
+        if !Self::list_filled(&self.army_list_1) || !self.army_list_1_validated {
+            return false;
+        }
+        if Self::list_filled(&self.army_list_2) && !self.army_list_2_validated {
+            return false;
+        }
+        true
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct TournamentScenarioSlot {
     /// `pool`, `bracket_pool` (4 scénarios choisis) ou `bracket` (assignés aux tours).
