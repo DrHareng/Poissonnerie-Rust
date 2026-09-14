@@ -14,7 +14,7 @@ use axum::{
 use serde::{Deserialize, Serialize};
 use time::Duration;
 use tower_http::cors::{AllowHeaders, AllowMethods, AllowOrigin, CorsLayer};
-use tower_sessions::{Expiry, Session, SessionManagerLayer};
+use tower_sessions::{cookie::SameSite, Expiry, Session, SessionManagerLayer};
 
 use crate::{
     auth::{self, AuthConfig, CallbackQuery},
@@ -390,6 +390,8 @@ pub fn router(state: AppState) -> Result<Router> {
     let session_layer = SessionManagerLayer::new(session_store)
         .with_secure(false)
         .with_path("/")
+        // Lax est requis pour OAuth Discord (retour cross-site en top-level GET).
+        .with_same_site(SameSite::Lax)
         .with_expiry(Expiry::OnInactivity(Duration::days(SESSION_INACTIVITY_DAYS)));
 
     Ok(Router::new()
@@ -604,6 +606,12 @@ async fn discord_callback(
         // Important: ne jamais mettre poissonnerie:// dans un header Location
         // (nginx peut répondre 502 "upstream sent invalid header").
         // On redirige d'abord vers une URL HTTP, puis la page ouvre le deep link.
+        //
+        // tower-sessions n'assigne l'id qu'au `save()` (pas juste à `insert`).
+        session
+            .save()
+            .await
+            .map_err(|error| ApiError::bad_request(error.to_string()))?;
         let session_id = session
             .id()
             .ok_or_else(|| ApiError::bad_request("session mobile introuvable"))?
