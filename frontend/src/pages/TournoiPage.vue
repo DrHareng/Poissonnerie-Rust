@@ -546,12 +546,6 @@ const isFullRoundOf16Format = computed(
     && (detail.value?.pool_count ?? 0) >= 8,
 )
 
-const approvedRegistrations = computed(() =>
-  sortRegistrationsForDisplay(
-    detail.value?.registrations.filter((r) => r.status === 'approved') ?? [],
-  ),
-)
-
 /** Joueurs pouvant être placés en poule (approved + pending une fois démarré). */
 const poolEligibleRegistrations = computed(() =>
   sortRegistrationsForDisplay(
@@ -2260,7 +2254,7 @@ onMounted(refresh)
                     :title="'Votre sectorielle'"
                   />
                   <span
-                    v-else-if="myRegistration.has_army_lists || detail.status === 'started'"
+                    v-else-if="myRegistration.has_army_lists"
                     class="text-sm text-muted-foreground"
                   >
                     Sectorielle secrète jusqu'à validation de toute la poule
