@@ -5,6 +5,7 @@ import PlayerLink from '@/components/PlayerLink.vue'
 import TournamentMatchScoreboard from '@/components/TournamentMatchScoreboard.vue'
 import { Button } from '@/components/ui/button'
 import { matchPlayerScores } from '@/lib/tournamentMatchDisplay'
+import { COUPE_REQUIRES_NETWORK } from '@/lib/partieOffline'
 import type { TournamentMatchForm } from '@/components/TournamentMatchCard.vue'
 import type { TournamentMatch } from '@/types/elo'
 
@@ -21,10 +22,12 @@ const props = withDefaults(
     allowUnplayed?: boolean
     listsReady?: (match: TournamentMatch) => boolean
     listsReadyMessage?: (match: TournamentMatch) => string
+    isOnline?: boolean
   }>(),
   {
     allowUnplayed: true,
     currentPlayerName: null,
+    isOnline: true,
   },
 )
 
@@ -190,6 +193,8 @@ void showActions
               <Button
                 v-if="canStart(match)"
                 size="sm"
+                :disabled="!isOnline"
+                :title="!isOnline ? COUPE_REQUIRES_NETWORK : undefined"
                 @click="emit('start', match)"
               >
                 Démarrer
@@ -197,6 +202,8 @@ void showActions
               <Button
                 v-if="canResume(match)"
                 size="sm"
+                :disabled="!isOnline"
+                :title="!isOnline ? COUPE_REQUIRES_NETWORK : undefined"
                 @click="emit('resume', match)"
               >
                 Reprendre

@@ -12,6 +12,15 @@ dist
 dist-ssr
 *.local
 
+android/.gradle
+android/app/build
+android/build
+android/local.properties
+android/captures
+android/.idea
+*.apk
+*.ap_
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json

@@ -179,7 +179,8 @@ impl Leaderboard {
                        m.secondary_pool_slugs,
                        m.counts_for_elo,
                        m.scenario_url,
-                       m.adversaire
+                       m.adversaire,
+                       m.client_uuid
                 FROM matches m
                 LEFT JOIN scenarios s ON s.id = m.scenario_id
                 LEFT JOIN tournaments t ON t.id = m.tournament_id
@@ -257,10 +258,11 @@ impl Leaderboard {
                     partie_step, created_by,
                     player1_army_list_code, player2_army_list_code,
                     player1_army_list_id, player2_army_list_id,
-                    recorded_at, secondary_pool_slugs, counts_for_elo, scenario_url, adversaire
+                    recorded_at, secondary_pool_slugs, counts_for_elo, scenario_url, adversaire,
+                    client_uuid
                 ) VALUES (
                     ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16,
-                    ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29, ?30, ?31, ?32, ?33, ?34, ?35, ?36, ?37
+                    ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29, ?30, ?31, ?32, ?33, ?34, ?35, ?36, ?37, ?38
                 )
                 ",
                 params![
@@ -301,6 +303,7 @@ impl Leaderboard {
                     if record.counts_for_elo { 1 } else { 0 },
                     record.scenario_url,
                     record.adversaire,
+                    record.client_uuid,
                 ],
             )?;
 
@@ -635,6 +638,15 @@ impl Leaderboard {
         self.matches.iter().find(|record| record.id == id)
     }
 
+    pub fn get_match_by_client_uuid(&self, client_uuid: &str) -> Option<&MatchRecord> {
+        let Ok(uuid) = crate::match_record::normalize_client_uuid(client_uuid) else {
+            return None;
+        };
+        self.matches
+            .iter()
+            .find(|record| record.client_uuid.as_deref() == Some(uuid.as_str()))
+    }
+
     pub fn delete_match(&mut self, id: u64) -> Result<MatchRecord> {
         let index = self
             .matches
@@ -738,6 +750,7 @@ impl Leaderboard {
             None,
             None,
             adversaire,
+            None,
         )
     }
 
@@ -756,7 +769,21 @@ impl Leaderboard {
         scenario_id: Option<i64>,
         scenario_name: Option<String>,
         adversaire: Option<&str>,
+        client_uuid: Option<String>,
     ) -> Result<MatchRecord> {
+        let client_uuid = match client_uuid {
+            Some(value) => Some(crate::match_record::normalize_client_uuid(&value)?),
+            None => None,
+        };
+        if let Some(uuid) = client_uuid.as_deref() {
+            if self
+                .matches
+                .iter()
+                .any(|record| record.client_uuid.as_deref() == Some(uuid))
+            {
+                bail!("une partie existe déjà avec cet identifiant");
+            }
+        }
         let guest = adversaire
             .map(str::trim)
             .filter(|name| !name.is_empty())
@@ -855,6 +882,7 @@ impl Leaderboard {
             created_by: Some(created_by.to_string()),
             counts_for_elo,
             adversaire: guest,
+            client_uuid,
             recorded_at: now_unix(),
         };
 
@@ -932,6 +960,89 @@ impl Leaderboard {
             if record.secondary_pool_slugs.is_some() {
                 bail!("le deck de secondaires est déjà figé");
             }
+            record.secondary_pool_slugs = Some(slugs);
+        }
+        if let Some(chosen) = update.player1_chosen_secondary {
+            record.player1_chosen_secondary = chosen;
+        }
+        if let Some(chosen) = update.player2_chosen_secondary {
+            record.player2_chosen_secondary = chosen;
+        }
+        if let Some(winner) = update.lieutenant_winner {
+            record.lieutenant_winner = Some(winner);
+        }
+        if let Some(choice) = update.lieutenant_winner_choice {
+            record.lieutenant_winner_choice = Some(choice);
+        }
+        if let Some(choice) = update.lieutenant_other_choice {
+            record.lieutenant_other_choice = Some(choice);
+        }
+        if let Some(step) = update.partie_step {
+            record.partie_step = Some(step);
+        }
+
+        Ok(record.clone())
+    }
+
+    /// Applique un snapshot hors ligne sur une partie en cours (source de vérité client).
+    /// N’accepte pas les matchs de coupe : ceux-ci se saisissent uniquement en ligne.
+    pub fn apply_offline_partie_snapshot(
+        &mut self,
+        id: u64,
+        update: InProgressMatchUpdate,
+    ) -> Result<MatchRecord> {
+        let record = self
+            .matches
+            .iter_mut()
+            .find(|record| record.id == id)
+            .ok_or_else(|| anyhow::anyhow!("match introuvable"))?;
+
+        if record.status != MatchStatus::InProgress {
+            bail!("ce match n'est plus en cours");
+        }
+        if record.tournament_id.is_some() {
+            bail!("les parties de coupe se saisissent uniquement en ligne");
+        }
+
+        if let Some(scenario_id) = update.scenario_id {
+            record.scenario_id = Some(scenario_id);
+            record.scenario_other = None;
+            record.scenario_url = None;
+        }
+        if let Some(scenario_other) = update.scenario_other {
+            let trimmed = scenario_other.trim().to_string();
+            if trimmed.is_empty() {
+                record.scenario_other = None;
+            } else {
+                record.scenario_other = Some(trimmed);
+                record.scenario_id = None;
+            }
+        }
+        if let Some(scenario_name) = update.scenario_name {
+            record.scenario_name = scenario_name;
+        }
+        if let Some(scenario_url) = update.scenario_url {
+            let trimmed = scenario_url.trim().to_string();
+            record.scenario_url = if trimmed.is_empty() {
+                None
+            } else {
+                Some(trimmed)
+            };
+        }
+        if update.clear_secondary_draws {
+            record.player1_secondary_slugs = None;
+            record.player2_secondary_slugs = None;
+            record.player1_chosen_secondary = None;
+            record.player2_chosen_secondary = None;
+            record.secondary_pool_slugs = None;
+        }
+        if let Some(slugs) = update.player1_secondary_slugs {
+            record.player1_secondary_slugs = Some(slugs);
+        }
+        if let Some(slugs) = update.player2_secondary_slugs {
+            record.player2_secondary_slugs = Some(slugs);
+        }
+        if let Some(slugs) = update.secondary_pool_slugs {
             record.secondary_pool_slugs = Some(slugs);
         }
         if let Some(chosen) = update.player1_chosen_secondary {
@@ -1766,6 +1877,7 @@ fn row_to_match(row: &rusqlite::Row<'_>) -> rusqlite::Result<MatchRecord> {
         counts_for_elo: row.get::<_, i64>(36)? != 0,
         scenario_url: row.get(37)?,
         adversaire: row.get(38)?,
+        client_uuid: row.get(39)?,
     })
 }
 
@@ -3161,5 +3273,115 @@ mod tests {
             )
             .unwrap_err();
         assert!(ranked_error.to_string().contains("adversaire inscrit"));
+    }
+
+    #[test]
+    fn offline_sync_applies_elo_only_on_complete_and_rejects_duplicate_uuid() {
+        let mut board = Leaderboard::default();
+        board.add_player("Alice").unwrap();
+        board.add_player("Bob").unwrap();
+        let rating_before = board.get_player("Alice").unwrap().rating;
+        let uuid = "11111111-1111-4111-8111-111111111111".to_string();
+
+        let started = board
+            .start_match_with_tournament(
+                "Alice",
+                "Bob",
+                101,
+                201,
+                "Alice",
+                Vec::new(),
+                Vec::new(),
+                true,
+                None,
+                None,
+                None,
+                None,
+                None,
+                Some(uuid.clone()),
+            )
+            .unwrap();
+        assert_eq!(started.status, MatchStatus::InProgress);
+        assert_eq!(started.client_uuid.as_deref(), Some(uuid.as_str()));
+        assert_eq!(board.get_player("Alice").unwrap().rating, rating_before);
+
+        board
+            .apply_offline_partie_snapshot(
+                started.id,
+                InProgressMatchUpdate {
+                    partie_step: Some("resultat".into()),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        assert_eq!(board.get_player("Alice").unwrap().rating, rating_before);
+
+        let completed = board
+            .complete_match(
+                started.id,
+                MatchOutcome::Player1Win,
+                32.0,
+                MatchScores::default(),
+            )
+            .unwrap();
+        assert_eq!(completed.status, MatchStatus::Completed);
+        let rating_after = board.get_player("Alice").unwrap().rating;
+        assert!(rating_after > rating_before);
+
+        let duplicate = board
+            .start_match_with_tournament(
+                "Alice",
+                "Bob",
+                101,
+                201,
+                "Alice",
+                Vec::new(),
+                Vec::new(),
+                true,
+                None,
+                None,
+                None,
+                None,
+                None,
+                Some(uuid),
+            )
+            .unwrap_err();
+        assert!(duplicate.to_string().contains("existe déjà"));
+        assert_eq!(board.get_player("Alice").unwrap().rating, rating_after);
+        assert_eq!(
+            board
+                .get_match_by_client_uuid("11111111-1111-4111-8111-111111111111")
+                .map(|record| record.id),
+            Some(completed.id)
+        );
+    }
+
+    #[test]
+    fn offline_snapshot_rejects_tournament_matches() {
+        let mut board = Leaderboard::default();
+        board.add_player("Alice").unwrap();
+        board.add_player("Bob").unwrap();
+        let record = board
+            .start_match_with_tournament(
+                "Alice",
+                "Bob",
+                101,
+                201,
+                "Alice",
+                Vec::new(),
+                Vec::new(),
+                false,
+                Some(1),
+                Some("pool".into()),
+                None,
+                None,
+                None,
+                None,
+            )
+            .unwrap();
+        let error = board
+            .apply_offline_partie_snapshot(record.id, InProgressMatchUpdate::default())
+            .unwrap_err();
+        assert!(error.to_string().contains("uniquement en ligne"));
     }
 }

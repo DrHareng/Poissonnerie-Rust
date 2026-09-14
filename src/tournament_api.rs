@@ -1405,6 +1405,7 @@ async fn start_tournament_partie(
                 tm.scenario_id,
                 tm.scenario_name.clone(),
                 None,
+                None,
             )
             .map_err(|error| ApiError::bad_request(error.to_string()))?;
         board

@@ -32,16 +32,24 @@ import type {
   User,
 } from '@/types/elo'
 import { withBase } from '@/lib/basePath'
+import {
+  getNativeSession,
+  isNativeApp,
+  openNativeDiscordLogin,
+  setNativeSession,
+} from '@/lib/nativeApp'
 
 const defaultFetchOptions: RequestInit = {
   credentials: 'include',
 }
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
+  const sessionId = getNativeSession()
   const response = await fetch(withBase(path), {
     ...defaultFetchOptions,
     headers: {
       'Content-Type': 'application/json',
+      ...(sessionId ? { 'X-Poissonnerie-Session': sessionId } : {}),
       ...init?.headers,
     },
     ...init,
@@ -92,7 +100,13 @@ export function fetchArmyPlayers(id: number): Promise<ArmyPlayerStats[]> {
 }
 
 export async function fetchMe(): Promise<AuthUser | null> {
-  const response = await fetch(withBase('/api/auth/me'), defaultFetchOptions)
+  const sessionId = getNativeSession()
+  const response = await fetch(withBase('/api/auth/me'), {
+    ...defaultFetchOptions,
+    headers: {
+      ...(sessionId ? { 'X-Poissonnerie-Session': sessionId } : {}),
+    },
+  })
   if (response.status === 401) {
     return null
   }
@@ -111,12 +125,18 @@ export async function fetchMe(): Promise<AuthUser | null> {
   return (await response.json()) as AuthUser
 }
 
-export function loginWithDiscord() {
+export async function loginWithDiscord() {
+  if (isNativeApp()) {
+    await openNativeDiscordLogin(`${withBase('/api/auth/discord')}?mobile=1`)
+    return
+  }
   window.location.href = withBase('/api/auth/discord')
 }
 
 export function logout(): Promise<void> {
-  return request<void>('/api/auth/logout', { method: 'POST' })
+  return request<void>('/api/auth/logout', { method: 'POST' }).finally(() => {
+    setNativeSession(null)
+  })
 }
 
 export function updateProfile(payload: {
@@ -323,8 +343,43 @@ export function startMatch(payload: {
   player2_secondary_slugs: string[]
   counts_for_elo?: boolean
   adversaire?: string
+  client_uuid?: string
 }): Promise<MatchRecord> {
   return request<MatchRecord>('/api/matches/start', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  })
+}
+
+export function syncPartie(payload: {
+  client_uuid: string
+  player1: string
+  player2: string
+  adversaire?: string
+  player1_army_id: number
+  player2_army_id: number
+  player1_secondary_slugs?: string[]
+  player2_secondary_slugs?: string[]
+  counts_for_elo?: boolean
+  scenario_id?: number
+  scenario_other?: string
+  scenario_url?: string
+  secondary_pool_slugs?: string[]
+  player1_chosen_secondary?: string | null
+  player2_chosen_secondary?: string | null
+  lieutenant_winner?: string
+  lieutenant_winner_choice?: string
+  lieutenant_other_choice?: string
+  partie_step?: string
+  complete?: {
+    outcome: MatchOutcome
+    player1_objectives: number
+    player1_survivors: number
+    player2_objectives: number
+    player2_survivors: number
+  }
+}): Promise<MatchRecord> {
+  return request<MatchRecord>('/api/matches/sync', {
     method: 'POST',
     body: JSON.stringify(payload),
   })

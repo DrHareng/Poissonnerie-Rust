@@ -6,3 +6,10 @@
 /frontend/dist
 /frontend-dauphine/node_modules
 /frontend-dauphine/dist
+/frontend/android/.gradle
+/frontend/android/app/build
+/frontend/android/build
+/frontend/android/local.properties
+/frontend/android/captures
+/dist-apk/
+/tools/

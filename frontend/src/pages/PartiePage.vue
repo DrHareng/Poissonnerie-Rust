@@ -17,6 +17,7 @@ import {
 import { DEFAULT_SCENARIO_PACK_SLUG } from '@/types/elo'
 import type {
   Army,
+  MatchOutcome,
   MatchRecord,
   RankedPlayer,
   ScenarioSummary,
@@ -35,12 +36,26 @@ import ScenarioDetailView from '@/components/ScenarioDetailView.vue'
 import ImageViewer, { type ImageViewerItem } from '@/components/ImageViewer.vue'
 import { useAuth } from '@/composables/useAuth'
 import { useAppSidePanel } from '@/composables/useAppSidePanel'
+import { useNetworkStatus } from '@/composables/useNetworkStatus'
 import {
   usePartieFlow,
   type PartieStep,
 } from '@/composables/usePartieFlow'
 import type { PartieLieutenant } from '@/lib/lieutenantRoll'
 import { COMBAT_ESPRIT_SLUG } from '@/lib/combatEspritDraft'
+import {
+  COUPE_REQUIRES_NETWORK,
+  flushOneLocalPartie,
+  flushPartieOutbox,
+  getLocalPartie,
+  isClientUuid,
+  loadPartieCatalog,
+  newClientUuid,
+  removeLocalPartie,
+  savePartieCatalog,
+  upsertLocalPartie,
+  type LocalPartieDraft,
+} from '@/lib/partieOffline'
 import { secondaryImageSrc } from '@/lib/secondaryImages'
 import { shufflePick } from '@/lib/shufflePick'
 import { formatPartieMatchup } from '@/lib/tournamentMatchDisplay'
@@ -59,11 +74,15 @@ const route = useRoute()
 const router = useRouter()
 const { player: currentPlayer, isAuthenticated, isAdmin, login } = useAuth()
 const { setCustomSide } = useAppSidePanel()
+const { isOnline } = useNetworkStatus()
 
 const {
   step,
   stepIndex,
   matchId,
+  clientUuid,
+  adversaire,
+  countsForElo,
   player1,
   player2,
   scenario,
@@ -79,6 +98,9 @@ const {
   STEPS,
   activeSteps,
   setMatchId,
+  setClientUuid,
+  setAdversaire,
+  setCountsForElo,
   setJoueurs,
   setSecondaryDrawMode,
   setScenario,
@@ -113,6 +135,74 @@ const tournamentMatchId = computed(() => {
 const isTournamentPartie = computed(
   () => Boolean(tournamentMatchId.value || tournamentMatch.value),
 )
+
+function currentDraft(overrides: Partial<LocalPartieDraft> = {}): LocalPartieDraft | null {
+  if (!clientUuid.value || !player1.value || !player2.value) return null
+  return {
+    client_uuid: clientUuid.value,
+    server_id: matchId.value && matchId.value > 0 ? matchId.value : null,
+    player1: player1.value.name,
+    player2: player2.value.name,
+    adversaire: adversaire.value ?? undefined,
+    player1_army_id: player1.value.armyId,
+    player2_army_id: player2.value.armyId,
+    counts_for_elo: countsForElo.value,
+    secondary_draw_mode: secondaryDrawMode.value,
+    player1_secondary_slugs: secondariesPlayer1.value,
+    player2_secondary_slugs: secondariesPlayer2.value,
+    secondary_pool_slugs: secondaryPool.value,
+    player1_chosen_secondary: chosenSecondaryPlayer1.value,
+    player2_chosen_secondary: chosenSecondaryPlayer2.value,
+    scenario: scenario.value,
+    lieutenant: lieutenant.value,
+    scores: { ...scores.value },
+    partie_step: step.value,
+    updated_at: Date.now(),
+    ...overrides,
+  }
+}
+
+function persistDraft(overrides: Partial<LocalPartieDraft> = {}) {
+  if (isTournamentPartie.value) return
+  const draft = currentDraft(overrides)
+  if (!draft) return
+  upsertLocalPartie(draft)
+}
+
+function hydrateFromLocal(draft: LocalPartieDraft) {
+  setClientUuid(draft.client_uuid)
+  setMatchId(draft.server_id && draft.server_id > 0 ? draft.server_id : null)
+  setJoueurs(
+    draft.player1,
+    draft.player1_army_id,
+    draft.player2,
+    draft.player2_army_id,
+  )
+  setAdversaire(draft.adversaire ?? null)
+  setCountsForElo(draft.counts_for_elo)
+  setSecondaryDrawMode(draft.secondary_draw_mode)
+  if (draft.scenario) setScenario(draft.scenario)
+  setSecondaries(
+    draft.player1_secondary_slugs,
+    draft.player2_secondary_slugs,
+    draft.player1_chosen_secondary,
+    draft.player2_chosen_secondary,
+    draft.secondary_pool_slugs,
+  )
+  if (draft.lieutenant) setLieutenant(draft.lieutenant)
+  scores.value = { ...draft.scores }
+  const resumeStep = draft.complete ? 'resultat' : draft.partie_step
+  if (STEPS.includes(resumeStep)) goTo(resumeStep)
+}
+
+async function syncLocalDraft(): Promise<MatchRecord | null> {
+  const draft = currentDraft()
+  if (!draft || !isOnline.value) return null
+  const record = await flushOneLocalPartie(draft)
+  if (record.id > 0) setMatchId(record.id)
+  persistDraft({ server_id: record.id > 0 ? record.id : draft.server_id })
+  return record
+}
 
 function registrationFor(name: string | null | undefined) {
   if (!name || !tournamentDetail.value) return undefined
@@ -262,6 +352,9 @@ function openMissionSecondaryViewer(slug: string) {
 
 function hydrateFromMatch(record: MatchRecord) {
   setMatchId(record.id)
+  if (record.client_uuid) setClientUuid(record.client_uuid)
+  setAdversaire(record.adversaire ?? null)
+  setCountsForElo(record.counts_for_elo !== false)
   setJoueurs(
     record.player1,
     record.player1_army_id ?? 0,
@@ -329,19 +422,60 @@ async function loadData() {
   loadingSecondaries.value = true
 
   try {
-    const [loadedPlayers, loadedArmies, pack, loadedSecondaries] = await Promise.all([
-      fetchRanking(),
-      fetchArmies(),
-      fetchScenarioPack(DEFAULT_SCENARIO_PACK_SLUG),
-      fetchPackSecondaries(DEFAULT_SCENARIO_PACK_SLUG),
-    ])
-    players.value = loadedPlayers
-    armies.value = loadedArmies
-    scenarios.value = pack.scenarios
-    secondaries.value = loadedSecondaries
-    apiOnline.value = true
+    try {
+      const [loadedPlayers, loadedArmies, pack, loadedSecondaries] = await Promise.all([
+        fetchRanking(),
+        fetchArmies(),
+        fetchScenarioPack(DEFAULT_SCENARIO_PACK_SLUG),
+        fetchPackSecondaries(DEFAULT_SCENARIO_PACK_SLUG),
+      ])
+      players.value = loadedPlayers
+      armies.value = loadedArmies
+      scenarios.value = pack.scenarios
+      secondaries.value = loadedSecondaries
+      savePartieCatalog({
+        players: loadedPlayers,
+        armies: loadedArmies,
+        scenarios: pack.scenarios,
+        secondaries: loadedSecondaries,
+      })
+      apiOnline.value = true
+    } catch (error) {
+      const cached = loadPartieCatalog()
+      if (!cached) throw error
+      players.value = cached.players
+      armies.value = cached.armies
+      scenarios.value = cached.scenarios
+      secondaries.value = cached.secondaries
+      apiOnline.value = false
+    }
 
-    const resumeId = Number(route.params.id)
+    const resumeParam = String(route.params.id ?? '')
+    if (isClientUuid(resumeParam)) {
+      const local = getLocalPartie(resumeParam)
+      if (!local) {
+        toast.error('Partie locale introuvable.')
+        router.replace({ name: 'partie' })
+        return
+      }
+      hydrateFromLocal(local)
+      if (isOnline.value && local.server_id) {
+        try {
+          const record = await fetchMatch(local.server_id)
+          if (record.status !== 'in_progress') {
+            toast.error('Cette partie est déjà terminée.')
+            router.replace(`/matchs/${record.id}`)
+            return
+          }
+          hydrateFromMatch(record)
+        } catch {
+          /* conserver le brouillon local */
+        }
+      }
+      return
+    }
+
+    const resumeId = Number(resumeParam)
     if (Number.isFinite(resumeId) && resumeId > 0) {
       const record = await fetchMatch(resumeId)
       if (record.status !== 'in_progress') {
@@ -351,10 +485,8 @@ async function loadData() {
       }
       hydrateFromMatch(record)
 
-      // Contexte tournoi (query ou match déjà tagué).
       let tmId = tournamentMatchId.value
       if (!tmId && record.tournament_id) {
-        // Chercher le match tournoi lié via détail tournoi.
         try {
           const detail = await fetchTournament(record.tournament_id)
           tournamentDetail.value = detail
@@ -427,15 +559,40 @@ async function onJoueursNext(payload: {
     return
   }
 
+  if (isTournamentPartie.value && !isOnline.value) {
+    toast.error(COUPE_REQUIRES_NETWORK)
+    return
+  }
+
   const player1Name = currentPlayer.value.name
   saving.value = true
   try {
     setSecondaryDrawMode(payload.secondary_draw_mode)
+    setAdversaire(payload.adversaire ?? null)
+    setCountsForElo(payload.counts_for_elo)
+    if (!clientUuid.value) setClientUuid(newClientUuid())
     if (!matchId.value) {
       const drawn =
         payload.secondary_draw_mode === 'draw'
           ? drawSecondarySlugs()
           : { player1: [] as string[], player2: [] as string[] }
+      setJoueurs(player1Name, payload.army1, payload.player2, payload.army2)
+      setSecondaries(drawn.player1, drawn.player2)
+      persistDraft({
+        partie_step: 'scenario',
+        player1_secondary_slugs: drawn.player1,
+        player2_secondary_slugs: drawn.player2,
+      })
+
+      if (!isOnline.value) {
+        await router.replace({
+          name: 'partie-resume',
+          params: { id: clientUuid.value! },
+        })
+        nextStep()
+        return
+      }
+
       const record = await startMatch({
         player1: player1Name,
         player2: payload.player2,
@@ -445,73 +602,106 @@ async function onJoueursNext(payload: {
         player2_secondary_slugs: drawn.player2,
         counts_for_elo: payload.counts_for_elo,
         adversaire: payload.adversaire,
+        client_uuid: clientUuid.value!,
       })
       setMatchId(record.id)
-      setJoueurs(player1Name, payload.army1, payload.player2, payload.army2)
+      if (record.client_uuid) setClientUuid(record.client_uuid)
       setSecondaries(
         record.player1_secondary_slugs ?? drawn.player1,
         record.player2_secondary_slugs ?? drawn.player2,
       )
+      persistDraft({ server_id: record.id, partie_step: 'scenario' })
       await router.replace({ name: 'partie-resume', params: { id: String(record.id) } })
     } else {
       setJoueurs(player1Name, payload.army1, payload.player2, payload.army2)
     }
     nextStep()
   } catch (error) {
+    const networkFailure = error instanceof TypeError || !isOnline.value
+    if (networkFailure && clientUuid.value && player1.value) {
+      await router.replace({
+        name: 'partie-resume',
+        params: { id: clientUuid.value },
+      })
+      nextStep()
+      return
+    }
     toast.error(error instanceof Error ? error.message : 'Impossible de créer la partie')
   } finally {
     saving.value = false
   }
 }
 
-async function onScenarioNext(value: Parameters<typeof setScenario>[0]) {
-  if (!matchId.value) return
+async function saveProgress(
+  body: Parameters<typeof updateMatchProgress>[1],
+  after: () => void,
+  errorLabel: string,
+) {
+  if (isTournamentPartie.value && !isOnline.value) {
+    toast.error(COUPE_REQUIRES_NETWORK)
+    return
+  }
+  if (!matchId.value && !clientUuid.value) return
+  persistDraft({ partie_step: (body.partie_step as PartieStep | undefined) ?? step.value })
   saving.value = true
   try {
-    const isCustomScenario = value.mode === 'other'
-    const isCombatEsprit = !isCustomScenario && value.slug === COMBAT_ESPRIT_SLUG
-    const nextPartieStep = isCustomScenario ? 'lieutenant' : 'secondaires'
-    const body: Parameters<typeof updateMatchProgress>[1] = {
-      ...(isCustomScenario
-        ? {
-            scenario_other: value.other,
-            scenario_url: value.url?.trim() || '',
-          }
-        : { scenario_id: value.id }),
-      partie_step: nextPartieStep,
+    if (isOnline.value && matchId.value) {
+      await updateMatchProgress(matchId.value, body)
+    } else if (isOnline.value && clientUuid.value) {
+      await syncLocalDraft()
     }
-
-    if (isCustomScenario) {
-      // Pas de secondaires pour un scénario saisi librement.
-      setSecondaries([], [])
-    } else if (
-      secondaryDrawMode.value === 'draw' &&
-      !isCombatEsprit &&
-      (secondariesPlayer1.value.length === 0 || secondariesPlayer2.value.length === 0)
-    ) {
-      // Si on revient d’un Combat de l’Esprit (tirage effacé) vers un scénario normal,
-      // on retirer 3+3 et on les fige immédiatement.
-      const drawn = drawSecondarySlugs()
-      body.player1_secondary_slugs = drawn.player1
-      body.player2_secondary_slugs = drawn.player2
-      setSecondaries(drawn.player1, drawn.player2)
-    }
-
-    if (isCombatEsprit) {
-      // Le tirage initial 3+3 est annulé côté serveur ; le draft le remplacera.
-      if (secondariesPlayer1.value.length === 3 && secondariesPlayer2.value.length === 3) {
-        setSecondaries([], [])
-      }
-    }
-
-    await updateMatchProgress(matchId.value, body)
-    setScenario(value)
-    goTo(nextPartieStep)
+    after()
   } catch (error) {
-    toast.error(error instanceof Error ? error.message : 'Impossible d’enregistrer le scénario')
+    if (error instanceof TypeError || !isOnline.value) {
+      after()
+      return
+    }
+    toast.error(error instanceof Error ? error.message : errorLabel)
   } finally {
     saving.value = false
   }
+}
+
+async function onScenarioNext(value: Parameters<typeof setScenario>[0]) {
+  if (!matchId.value && !clientUuid.value) return
+  const isCustomScenario = value.mode === 'other'
+  const isCombatEsprit = !isCustomScenario && value.slug === COMBAT_ESPRIT_SLUG
+  const nextPartieStep = isCustomScenario ? 'lieutenant' : 'secondaires'
+  const body: Parameters<typeof updateMatchProgress>[1] = {
+    ...(isCustomScenario
+      ? {
+          scenario_other: value.other,
+          scenario_url: value.url?.trim() || '',
+        }
+      : { scenario_id: value.id }),
+    partie_step: nextPartieStep,
+  }
+
+  if (isCustomScenario) {
+    setSecondaries([], [])
+  } else if (
+    secondaryDrawMode.value === 'draw' &&
+    !isCombatEsprit &&
+    (secondariesPlayer1.value.length === 0 || secondariesPlayer2.value.length === 0)
+  ) {
+    const drawn = drawSecondarySlugs()
+    body.player1_secondary_slugs = drawn.player1
+    body.player2_secondary_slugs = drawn.player2
+    setSecondaries(drawn.player1, drawn.player2)
+  }
+
+  if (isCombatEsprit) {
+    if (secondariesPlayer1.value.length === 3 && secondariesPlayer2.value.length === 3) {
+      setSecondaries([], [])
+    }
+  }
+
+  setScenario(value)
+  await saveProgress(
+    body,
+    () => goTo(nextPartieStep),
+    'Impossible d’enregistrer le scénario',
+  )
 }
 
 async function onSecondairesNext(payload: {
@@ -521,63 +711,100 @@ async function onSecondairesNext(payload: {
   chosenPlayer2: string | null
   pool: string[] | null
 }) {
-  if (!matchId.value) return
-  saving.value = true
-  try {
-    const body: Parameters<typeof updateMatchProgress>[1] = {
-      player1_chosen_secondary: payload.chosenPlayer1,
-      player2_chosen_secondary: payload.chosenPlayer2,
-      partie_step: 'lieutenant',
-    }
-    // Combat de l’Esprit (ou parties anciennes) : figer le tirage s’il n’est pas encore en BDD.
-    if (secondariesPlayer1.value.length === 0 || secondariesPlayer2.value.length === 0) {
-      body.player1_secondary_slugs = payload.player1
-      body.player2_secondary_slugs = payload.player2
-    }
-    if (payload.pool?.length && secondaryPool.value.length === 0) {
-      body.secondary_pool_slugs = payload.pool
-    }
-    await updateMatchProgress(matchId.value, body)
-    setSecondaries(
-      payload.player1,
-      payload.player2,
-      payload.chosenPlayer1,
-      payload.chosenPlayer2,
-      payload.pool ?? [],
-    )
-    nextStep()
-  } catch (error) {
-    toast.error(
-      error instanceof Error ? error.message : 'Impossible d’enregistrer les secondaires',
-    )
-  } finally {
-    saving.value = false
+  if (!matchId.value && !clientUuid.value) return
+  const body: Parameters<typeof updateMatchProgress>[1] = {
+    player1_chosen_secondary: payload.chosenPlayer1,
+    player2_chosen_secondary: payload.chosenPlayer2,
+    partie_step: 'lieutenant',
   }
+  if (secondariesPlayer1.value.length === 0 || secondariesPlayer2.value.length === 0) {
+    body.player1_secondary_slugs = payload.player1
+    body.player2_secondary_slugs = payload.player2
+  }
+  if (payload.pool?.length && secondaryPool.value.length === 0) {
+    body.secondary_pool_slugs = payload.pool
+  }
+  setSecondaries(
+    payload.player1,
+    payload.player2,
+    payload.chosenPlayer1,
+    payload.chosenPlayer2,
+    payload.pool ?? [],
+  )
+  await saveProgress(
+    body,
+    () => nextStep(),
+    'Impossible d’enregistrer les secondaires',
+  )
 }
 
 async function onLieutenantNext(value: Parameters<typeof setLieutenant>[0]) {
-  if (!matchId.value) return
-  saving.value = true
-  try {
-    await updateMatchProgress(matchId.value, {
+  if (!matchId.value && !clientUuid.value) return
+  setLieutenant(value)
+  await saveProgress(
+    {
       lieutenant_winner: value.winner,
       lieutenant_winner_choice: value.winnerChoice,
       lieutenant_other_choice: value.otherChoice,
       partie_step: 'resultat',
-    })
-    setLieutenant(value)
-    nextStep()
-  } catch (error) {
-    toast.error(
-      error instanceof Error ? error.message : 'Impossible d’enregistrer le jet de lieutenant',
-    )
-  } finally {
-    saving.value = false
-  }
+    },
+    () => nextStep(),
+    'Impossible d’enregistrer le jet de lieutenant',
+  )
 }
 
 function updateScores(value: typeof scores.value) {
   scores.value = value
+  persistDraft()
+}
+
+function onRecorded() {
+  if (clientUuid.value) removeLocalPartie(clientUuid.value)
+  reset()
+}
+
+async function onCompleteLocal(complete: {
+  outcome: MatchOutcome
+  player1_objectives: number
+  player1_survivors: number
+  player2_objectives: number
+  player2_survivors: number
+}) {
+  persistDraft({ complete, partie_step: 'resultat' })
+  saving.value = true
+  try {
+    if (isOnline.value) {
+      const record = await syncLocalDraft()
+      if (record && record.status === 'completed' && record.id > 0) {
+        toast.success(
+          record.counts_for_elo === false
+            ? 'Résultat enregistré'
+            : `${record.player1} ${Math.round(record.player1_old)} → ${Math.round(record.player1_new)} | ${record.player2} ${Math.round(record.player2_old)} → ${Math.round(record.player2_new)}`,
+        )
+        if (clientUuid.value) removeLocalPartie(clientUuid.value)
+        reset()
+        await router.push(`/matchs/${record.id}`)
+        return
+      }
+    }
+    toast.success(
+      'Résultat enregistré localement. L’ELO sera calculé par le serveur à la synchro.',
+    )
+    reset()
+    await router.push('/matchs')
+  } catch (error) {
+    if (error instanceof TypeError || !isOnline.value) {
+      toast.success(
+        'Résultat enregistré localement. L’ELO sera calculé par le serveur à la synchro.',
+      )
+      reset()
+      await router.push('/matchs')
+      return
+    }
+    toast.error(error instanceof Error ? error.message : 'Impossible d’enregistrer le résultat')
+  } finally {
+    saving.value = false
+  }
 }
 
 function abandonPartie() {
@@ -615,6 +842,25 @@ async function deletePartie() {
 }
 
 onMounted(loadData)
+
+watch(
+  () => String(route.params.id ?? ''),
+  (next, prev) => {
+    if (next !== prev) void loadData()
+  },
+)
+
+watch(isOnline, async (online) => {
+  if (!online || isTournamentPartie.value) return
+  try {
+    const { synced } = await flushPartieOutbox()
+    if (synced.some((record) => record.status === 'completed')) {
+      toast.success('Parties hors ligne synchronisées. ELO calculé par le serveur.')
+    }
+  } catch {
+    /* ignore */
+  }
+})
 </script>
 
 <template>
@@ -627,6 +873,7 @@ onMounted(loadData)
               <template v-if="isTournamentPartie">Partie de tournoi</template>
               <template v-else>Partie</template>
               <span v-if="matchId"> #{{ matchId }}</span>
+              <span v-else-if="clientUuid" class="text-muted-foreground"> hors ligne</span>
             </h1>
             <Button
               v-if="canShowMission"
@@ -660,12 +907,32 @@ onMounted(loadData)
       </div>
     </section>
 
-    <Alert v-if="!apiOnline" variant="destructive" class="neon-panel-accent">
-      <AlertTitle>API indisponible</AlertTitle>
+    <Alert
+      v-if="isTournamentPartie && !isOnline"
+      variant="destructive"
+      class="neon-panel-accent"
+    >
+      <AlertTitle>Connexion requise</AlertTitle>
       <AlertDescription>
-        Lancez le serveur Rust avec
-        <code class="rounded bg-muted px-1 py-0.5">cargo run --bin poissonnerie-server</code>
-        puis rechargez la page.
+        {{ COUPE_REQUIRES_NETWORK }}
+      </AlertDescription>
+    </Alert>
+
+    <Alert
+      v-else-if="!isOnline || !apiOnline"
+      class="neon-panel-accent"
+    >
+      <AlertTitle>{{ isOnline ? 'Serveur injoignable' : 'Mode hors ligne' }}</AlertTitle>
+      <AlertDescription>
+        <template v-if="players.length">
+          Vous pouvez consulter le cache et saisir une partie amicale ou classée.
+          L’ELO sera calculé par le serveur à la synchro.
+        </template>
+        <template v-else>
+          Lancez le serveur Rust avec
+          <code class="rounded bg-muted px-1 py-0.5">cargo run --bin poissonnerie-server</code>
+          puis rechargez la page.
+        </template>
       </AlertDescription>
     </Alert>
 
@@ -839,8 +1106,10 @@ onMounted(loadData)
             />
 
             <PartieStepResultat
-              v-else-if="step === 'resultat' && player1 && player2 && scenario && matchId"
+              v-else-if="step === 'resultat' && player1 && player2 && scenario && (matchId || clientUuid)"
               :match-id="matchId"
+              :require-online="isTournamentPartie"
+              :is-online="isOnline"
               :player1="player1"
               :player2="player2"
               :scenario="scenario"
@@ -853,7 +1122,8 @@ onMounted(loadData)
               :list-label="tournamentListLabel"
               @back="prevStep"
               @update:scores="updateScores"
-              @recorded="reset"
+              @recorded="onRecorded"
+              @submit-local="onCompleteLocal"
             />
           </CardContent>
         </Card>

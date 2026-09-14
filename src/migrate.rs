@@ -435,6 +435,17 @@ pub fn migrate(conn: &Connection) -> Result<()> {
         conn.execute("ALTER TABLE matches ADD COLUMN adversaire TEXT", [])?;
     }
 
+    if !column_exists(conn, "matches", "client_uuid")? {
+        conn.execute("ALTER TABLE matches ADD COLUMN client_uuid TEXT", [])?;
+    }
+    conn.execute_batch(
+        "
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_matches_client_uuid
+        ON matches(client_uuid)
+        WHERE client_uuid IS NOT NULL;
+        ",
+    )?;
+
     if !column_exists(conn, "tournaments", "description")? {
         conn.execute(
             "ALTER TABLE tournaments ADD COLUMN description TEXT NOT NULL DEFAULT ''",

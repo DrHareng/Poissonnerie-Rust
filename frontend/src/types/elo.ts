@@ -193,6 +193,9 @@ export interface MatchRecord extends RatingUpdate, MatchScores {
   counts_for_elo?: boolean
   /** Pseudo libre si l’adversaire n’est pas un joueur inscrit. */
   adversaire?: string | null
+  client_uuid?: string | null
+  /** Présent uniquement sur les brouillons locaux en attente de synchro. */
+  sync_pending?: boolean
   recorded_at: number
 }
 

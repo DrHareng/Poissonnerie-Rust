@@ -2,6 +2,11 @@ import { computed, ref, watch } from 'vue'
 import { fetchMyInProgressMatches } from '@/lib/api'
 import type { MatchRecord } from '@/types/elo'
 import { useAuth } from '@/composables/useAuth'
+import {
+  listLocalParties,
+  localPartieToMatchRecord,
+  partieResumeParam,
+} from '@/lib/partieOffline'
 
 const allMatches = ref<MatchRecord[]>([])
 const loading = ref(false)
@@ -24,6 +29,23 @@ function matchesForPlayer(
   )
 }
 
+function mergeLocalDrafts(server: MatchRecord[]): MatchRecord[] {
+  const serverUuids = new Set(
+    server
+      .map((match) => match.client_uuid?.toLowerCase())
+      .filter((uuid): uuid is string => Boolean(uuid)),
+  )
+  const locals = listLocalParties()
+    .filter((draft) => {
+      if (draft.server_id && server.some((match) => match.id === draft.server_id)) {
+        return false
+      }
+      return !serverUuids.has(draft.client_uuid.toLowerCase())
+    })
+    .map(localPartieToMatchRecord)
+  return [...locals, ...server]
+}
+
 export function inProgressMenuLabel(count: number): string {
   if (count <= 1) return `${count} partie en cours`
   return `${count} parties en cours`
@@ -35,9 +57,10 @@ export async function refreshMyInProgressMatches(): Promise<void> {
   fetchPromise = (async () => {
     loading.value = true
     try {
-      allMatches.value = await fetchMyInProgressMatches()
+      const server = await fetchMyInProgressMatches()
+      allMatches.value = mergeLocalDrafts(server)
     } catch {
-      allMatches.value = []
+      allMatches.value = mergeLocalDrafts([])
     } finally {
       loading.value = false
       fetchPromise = null
@@ -61,9 +84,10 @@ export function useMyInProgressMatches() {
   const menuRoute = computed(() => {
     if (!isAuthenticated.value) return null
     if (count.value === 1) {
+      const match = myMatches.value[0]!
       return {
         name: 'partie-resume' as const,
-        params: { id: String(myMatches.value[0]!.id) },
+        params: { id: partieResumeParam(match) },
       }
     }
     return { path: '/matchs', hash: '#parties-en-cours' }

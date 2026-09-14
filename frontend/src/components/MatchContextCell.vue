@@ -13,6 +13,7 @@ const props = defineProps<{
     | 'tournament_phase'
     | 'scenario_name'
     | 'counts_for_elo'
+    | 'sync_pending'
   >
 }>()
 
@@ -33,6 +34,10 @@ const contextLine = computed(() => {
 
   if (props.match.scenario_name) {
     parts.push(props.match.scenario_name)
+  }
+
+  if (props.match.sync_pending) {
+    parts.push('En attente de synchro')
   }
 
   return parts.join(' · ')

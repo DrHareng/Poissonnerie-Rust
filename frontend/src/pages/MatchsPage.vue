@@ -27,6 +27,7 @@ import { PARTIE_STEP_LABELS, type PartieStep } from '@/composables/usePartieFlow
 import { matchsTabs } from '@/lib/pageTitleTabs'
 import { isListableArmy } from '@/lib/army'
 import { formatMatchRecordedDate } from '@/lib/tournamentMatchDisplay'
+import { partieResumeParam } from '@/lib/partieOffline'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -359,8 +360,8 @@ function onReportsPageChange(nextPage: number) {
   setReportsPage(nextPage)
 }
 
-function resumePartie(id: number) {
-  router.push({ name: 'partie-resume', params: { id: String(id) } })
+function resumePartie(match: MatchRecord) {
+  router.push({ name: 'partie-resume', params: { id: partieResumeParam(match) } })
 }
 
 async function onDeleteInProgress(id: number) {
@@ -555,11 +556,15 @@ onMounted(async () => {
             </TableRow>
           </TableHeader>
           <TableBody>
-            <TableRow v-for="item in inProgress" :key="item.id">
+            <TableRow v-for="item in inProgress" :key="item.client_uuid ?? item.id">
               <TableCell class="tabular-nums">
-                #{{ item.id }}
+                <template v-if="item.id > 0">#{{ item.id }}</template>
+                <template v-else>Local</template>
                 <div class="text-xs text-muted-foreground">
                   {{ formatMatchRecordedDate(item.recorded_at) ?? '—' }}
+                </div>
+                <div v-if="item.sync_pending" class="text-xs text-amber-600 dark:text-amber-400">
+                  En attente de synchro
                 </div>
               </TableCell>
               <TableCell>
@@ -595,17 +600,18 @@ onMounted(async () => {
                     size="icon"
                     variant="outline"
                     title="Reprendre"
-                    @click="resumePartie(item.id)"
+                    @click="resumePartie(item)"
                   >
                     <Play class="size-4" />
                   </Button>
                   <MatchOpenButton
+                    v-if="item.id > 0"
                     :match-id="item.id"
                     size="icon"
                     title="Voir le match"
                   />
                   <Button
-                    v-if="isAdmin"
+                    v-if="isAdmin && item.id > 0"
                     type="button"
                     size="icon"
                     variant="destructive"

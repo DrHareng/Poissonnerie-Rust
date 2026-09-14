@@ -5,6 +5,7 @@ import { toast } from 'vue-sonner'
 import { Swords } from '@lucide/vue'
 import { COMBAT_ESPRIT_SLUG } from '@/lib/combatEspritDraft'
 import { completeMatch, submitTournamentFromPartie } from '@/lib/api'
+import { COUPE_REQUIRES_NETWORK } from '@/lib/partieOffline'
 import type { PartiePlayerSlot, PartieScenario, PartieScores } from '@/composables/usePartieFlow'
 import type { MatchOutcome } from '@/types/elo'
 import { useAuth } from '@/composables/useAuth'
@@ -13,25 +14,42 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 
-const props = defineProps<{
-  matchId: number
-  player1: PartiePlayerSlot
-  player2: PartiePlayerSlot
-  scenario: PartieScenario
-  scores: PartieScores
-  resolvedOutcome: MatchOutcome
-  /** Mode tournoi : listes obligatoires + soumission tournoi. */
-  tournamentMatchId?: number | null
-  player1HasList2?: boolean
-  player2HasList2?: boolean
-  listLabel?: string
-  tournamentId?: number | null
-}>()
+const props = withDefaults(
+  defineProps<{
+    matchId: number | null
+    player1: PartiePlayerSlot
+    player2: PartiePlayerSlot
+    scenario: PartieScenario
+    scores: PartieScores
+    resolvedOutcome: MatchOutcome
+    requireOnline?: boolean
+    isOnline?: boolean
+    /** Mode tournoi : listes obligatoires + soumission tournoi. */
+    tournamentMatchId?: number | null
+    player1HasList2?: boolean
+    player2HasList2?: boolean
+    listLabel?: string
+    tournamentId?: number | null
+  }>(),
+  {
+    requireOnline: false,
+    isOnline: true,
+  },
+)
 
 const emit = defineEmits<{
   back: []
   'update:scores': [scores: PartieScores]
   recorded: []
+  'submit-local': [
+    complete: {
+      outcome: MatchOutcome
+      player1_objectives: number
+      player1_survivors: number
+      player2_objectives: number
+      player2_survivors: number
+    },
+  ]
 }>()
 
 const router = useRouter()
@@ -105,6 +123,11 @@ async function submit() {
     return
   }
 
+  if (props.requireOnline && !props.isOnline) {
+    toast.error(COUPE_REQUIRES_NETWORK)
+    return
+  }
+
   if (!canSubmit.value) {
     toast.error('Choisissez la liste de chaque joueur.')
     return
@@ -131,13 +154,20 @@ async function submit() {
       return
     }
 
-    const record = await completeMatch(props.matchId, {
+    const completePayload = {
       outcome: props.resolvedOutcome,
       player1_objectives: clampObjectives(props.scores.player1Objectives),
       player1_survivors: clampSurvivors(props.scores.player1Survivors),
       player2_objectives: clampObjectives(props.scores.player2Objectives),
       player2_survivors: clampSurvivors(props.scores.player2Survivors),
-    })
+    }
+
+    if (!props.isOnline || !props.matchId) {
+      emit('submit-local', completePayload)
+      return
+    }
+
+    const record = await completeMatch(props.matchId, completePayload)
     if (record.counts_for_elo === false) {
       toast.success('Résultat enregistré')
     } else {
@@ -300,7 +330,12 @@ async function submit() {
       <Button type="button" variant="outline" :disabled="submitting" @click="emit('back')">
         Précédent
       </Button>
-      <Button type="button" :disabled="submitting || !canSubmit" @click="submit">
+      <Button
+        type="button"
+        :disabled="submitting || !canSubmit || (requireOnline && !isOnline)"
+        :title="requireOnline && !isOnline ? COUPE_REQUIRES_NETWORK : undefined"
+        @click="submit"
+      >
         <Swords class="size-4" />
         {{ submitting ? 'Enregistrement…' : submitLabel }}
       </Button>

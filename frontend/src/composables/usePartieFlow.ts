@@ -54,6 +54,9 @@ export const PARTIE_STEP_LABELS: Record<PartieStep, string> = {
 export function usePartieFlow() {
   const step = ref<PartieStep>('joueurs')
   const matchId = ref<number | null>(null)
+  const clientUuid = ref<string | null>(null)
+  const adversaire = ref<string | null>(null)
+  const countsForElo = ref(false)
   const player1 = ref<PartiePlayerSlot | null>(null)
   const player2 = ref<PartiePlayerSlot | null>(null)
   const scenario = ref<PartieScenario | null>(null)
@@ -115,6 +118,19 @@ export function usePartieFlow() {
 
   function setMatchId(id: number | null) {
     matchId.value = id
+  }
+
+  function setClientUuid(uuid: string | null) {
+    clientUuid.value = uuid
+  }
+
+  function setAdversaire(name: string | null) {
+    const trimmed = name?.trim() || null
+    adversaire.value = trimmed
+  }
+
+  function setCountsForElo(value: boolean) {
+    countsForElo.value = value
   }
 
   function setJoueurs(
@@ -190,6 +206,9 @@ export function usePartieFlow() {
   function reset() {
     step.value = 'joueurs'
     matchId.value = null
+    clientUuid.value = null
+    adversaire.value = null
+    countsForElo.value = false
     player1.value = null
     player2.value = null
     scenario.value = null
@@ -230,6 +249,9 @@ export function usePartieFlow() {
     step,
     stepIndex,
     matchId,
+    clientUuid,
+    adversaire,
+    countsForElo,
     player1,
     player2,
     scenario,
@@ -249,6 +271,9 @@ export function usePartieFlow() {
     clampSurvivors,
     canAdvanceFromJoueurs,
     setMatchId,
+    setClientUuid,
+    setAdversaire,
+    setCountsForElo,
     setJoueurs,
     setSecondaryDrawMode,
     setScenario,

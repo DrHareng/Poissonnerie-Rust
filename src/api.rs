@@ -4,9 +4,10 @@ use std::sync::{Arc, Mutex};
 
 use anyhow::Result;
 use axum::{
-    extract::{Path, Query, State},
-    http::{HeaderValue, Method, StatusCode},
-    response::{IntoResponse, Redirect, Response},
+    extract::{Path, Query, Request, State},
+    http::{header, HeaderValue, Method, StatusCode},
+    middleware::{self, Next},
+    response::{Html, IntoResponse, Redirect, Response},
     routing::{delete, get, patch, post},
     Json, Router,
 };
@@ -129,6 +130,8 @@ struct StartMatchRequest {
     /// `true` = match classé (impact ELO). Défaut : amical.
     #[serde(default)]
     counts_for_elo: bool,
+    #[serde(default)]
+    client_uuid: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -170,6 +173,47 @@ struct CompleteMatchRequest {
     player2_objectives: u8,
     #[serde(default)]
     player2_survivors: u16,
+}
+
+#[derive(Debug, Deserialize)]
+struct SyncPartieRequest {
+    client_uuid: String,
+    player1: String,
+    #[serde(default)]
+    player2: String,
+    #[serde(default)]
+    adversaire: Option<String>,
+    player1_army_id: u32,
+    player2_army_id: u32,
+    #[serde(default)]
+    player1_secondary_slugs: Vec<String>,
+    #[serde(default)]
+    player2_secondary_slugs: Vec<String>,
+    /// `true` = match classé (impact ELO). Défaut : amical.
+    #[serde(default)]
+    counts_for_elo: bool,
+    #[serde(default)]
+    scenario_id: Option<i64>,
+    #[serde(default)]
+    scenario_other: Option<String>,
+    #[serde(default)]
+    scenario_url: Option<String>,
+    #[serde(default)]
+    secondary_pool_slugs: Option<Vec<String>>,
+    #[serde(default)]
+    player1_chosen_secondary: Option<String>,
+    #[serde(default)]
+    player2_chosen_secondary: Option<String>,
+    #[serde(default)]
+    lieutenant_winner: Option<String>,
+    #[serde(default)]
+    lieutenant_winner_choice: Option<String>,
+    #[serde(default)]
+    lieutenant_other_choice: Option<String>,
+    #[serde(default)]
+    partie_step: Option<String>,
+    #[serde(default)]
+    complete: Option<CompleteMatchRequest>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -280,19 +324,65 @@ impl IntoResponse for ApiError {
 }
 
 fn cors_layer() -> CorsLayer {
-    let origin = std::env::var("FRONTEND_URL").unwrap_or_else(|_| "http://127.0.0.1:5173".into());
+    let frontend = std::env::var("FRONTEND_URL").unwrap_or_else(|_| "http://127.0.0.1:5173".into());
+    let extra = std::env::var("CORS_ORIGINS").unwrap_or_default();
+    let mut origins = Vec::new();
+    for raw in extra
+        .split(',')
+        .chain(std::iter::once(frontend.as_str()))
+        .chain([
+            "https://localhost",
+            "http://localhost",
+            "capacitor://localhost",
+        ])
+    {
+        let trimmed = raw.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        if let Ok(value) = trimmed.parse::<HeaderValue>() {
+            origins.push(value);
+        }
+    }
     CorsLayer::new()
-        .allow_origin(AllowOrigin::exact(
-            origin.parse::<HeaderValue>().expect("FRONTEND_URL invalide"),
-        ))
+        .allow_origin(AllowOrigin::list(origins))
         .allow_credentials(true)
         .allow_methods(AllowMethods::list([
             Method::GET,
             Method::POST,
             Method::PATCH,
             Method::DELETE,
+            Method::OPTIONS,
         ]))
         .allow_headers(AllowHeaders::mirror_request())
+}
+
+const NATIVE_SESSION_HEADER: &str = "x-poissonnerie-session";
+const SESSION_COOKIE_NAME: &str = "id";
+
+async fn inject_session_from_header(mut request: Request, next: Next) -> Response {
+    let has_cookie = request.headers().get(header::COOKIE).is_some();
+    if !has_cookie {
+        if let Some(session_id) = request
+            .headers()
+            .get(NATIVE_SESSION_HEADER)
+            .and_then(|value| value.to_str().ok())
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+        {
+            if session_id
+                .chars()
+                .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_' | '='))
+            {
+                if let Ok(cookie) =
+                    HeaderValue::from_str(&format!("{SESSION_COOKIE_NAME}={session_id}"))
+                {
+                    request.headers_mut().insert(header::COOKIE, cookie);
+                }
+            }
+        }
+    }
+    next.run(request).await
 }
 
 pub fn router(state: AppState) -> Result<Router> {
@@ -328,6 +418,7 @@ pub fn router(state: AppState) -> Result<Router> {
         .route("/api/players/{name}/matches", get(get_player_matches))
         .route("/api/matches", get(list_matches).post(record_match))
         .route("/api/matches/start", post(start_match))
+        .route("/api/matches/sync", post(sync_partie))
         .route("/api/matches/mine/in-progress", get(list_my_in_progress_matches))
         .route(
             "/api/matches/{id}",
@@ -352,6 +443,7 @@ pub fn router(state: AppState) -> Result<Router> {
         .merge(dauphine_api::dauphine_routes())
         .layer(cors_layer())
         .layer(session_layer)
+        .layer(middleware::from_fn(inject_session_from_header))
         .with_state(state))
 }
 
@@ -399,19 +491,35 @@ async fn update_ressources(
     }))
 }
 
-async fn discord_login(State(state): State<AppState>) -> Result<Redirect, ApiError> {
+#[derive(Debug, Deserialize)]
+struct DiscordLoginQuery {
+    #[serde(default)]
+    mobile: String,
+}
+
+async fn discord_login(
+    State(state): State<AppState>,
+    session: Session,
+    Query(query): Query<DiscordLoginQuery>,
+) -> Result<Redirect, ApiError> {
     let auth = state
         .auth
         .as_ref()
         .ok_or_else(|| ApiError::bad_request("authentification Discord non configurée"))?;
-    Ok(Redirect::to(&auth.authorize_url()))
+    let mobile = matches!(query.mobile.to_ascii_lowercase().as_str(), "1" | "true" | "yes");
+    session
+        .insert(auth::SESSION_OAUTH_MOBILE, mobile)
+        .await
+        .map_err(|error| ApiError::bad_request(error.to_string()))?;
+    let oauth_state = mobile.then_some("mobile");
+    Ok(Redirect::to(&auth.authorize_url_with_state(oauth_state)))
 }
 
 async fn discord_callback(
     State(state): State<AppState>,
     session: Session,
     Query(query): Query<CallbackQuery>,
-) -> Result<Redirect, ApiError> {
+) -> Result<Response, ApiError> {
     let auth = state
         .auth
         .as_ref()
@@ -421,7 +529,71 @@ async fn discord_callback(
         .await
         .map_err(|error| ApiError::bad_request(error.to_string()))?;
 
-    Ok(Redirect::to(&auth.frontend_url))
+    let mobile_from_state = query.state.eq_ignore_ascii_case("mobile");
+    let mobile_from_session = session
+        .get::<bool>(auth::SESSION_OAUTH_MOBILE)
+        .await
+        .unwrap_or(None)
+        .unwrap_or(false);
+    let _ = session.remove::<bool>(auth::SESSION_OAUTH_MOBILE).await;
+    if mobile_from_state || mobile_from_session {
+        let session_id = session
+            .id()
+            .ok_or_else(|| ApiError::bad_request("session mobile introuvable"))?
+            .to_string();
+        let encoded = urlencoding::encode(&session_id);
+        let deep_link = format!("poissonnerie://auth?session={encoded}");
+        let intent_link = format!(
+            "intent://auth?session={encoded}#Intent;scheme=poissonnerie;package=fr.poissonnerie.app;end"
+        );
+        let html = format!(
+            r#"<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta http-equiv="refresh" content="0;url={deep_link}" />
+  <title>Retour à l'application</title>
+  <style>
+    body {{
+      margin: 0;
+      min-height: 100vh;
+      display: grid;
+      place-items: center;
+      font-family: system-ui, sans-serif;
+      background: #050505;
+      color: #f5f5f5;
+      text-align: center;
+      padding: 1.5rem;
+    }}
+    a {{
+      color: #7dd3fc;
+    }}
+  </style>
+  <script>
+    (function () {{
+      var deep = {deep_json};
+      var intent = {intent_json};
+      window.location.replace(deep);
+      setTimeout(function () {{ window.location.replace(intent); }}, 350);
+    }})();
+  </script>
+</head>
+<body>
+  <div>
+    <p>Connexion réussie.</p>
+    <p><a href="{deep_link}">Ouvrir La Poissonnerie</a></p>
+  </div>
+</body>
+</html>"#,
+            deep_link = deep_link,
+            deep_json = serde_json::to_string(&deep_link).unwrap_or_else(|_| "\"\"".into()),
+            intent_json = serde_json::to_string(&intent_link).unwrap_or_else(|_| "\"\"".into()),
+        );
+        return Ok(Html(html).into_response());
+    }
+
+    Ok(Redirect::to(&auth.frontend_url).into_response())
 }
 
 async fn auth_me(
@@ -1457,6 +1629,24 @@ async fn start_match(
             .clone()
     };
 
+    let client_uuid = match payload.client_uuid.as_deref().map(str::trim).filter(|value| !value.is_empty())
+    {
+        Some(value) => Some(
+            crate::match_record::normalize_client_uuid(value)
+                .map_err(|error| ApiError::bad_request(error.to_string()))?,
+        ),
+        None => None,
+    };
+    if let Some(uuid) = client_uuid.as_deref() {
+        if let Some(existing) = load_client_partie(&state, uuid)? {
+            ensure_match_participant(&state, &user, existing.id)?;
+            let board = state.board.lock().unwrap();
+            let resolver =
+                crate::display_name::PlayerDisplayResolver::new(&board, state.users.as_ref());
+            return Ok((StatusCode::OK, Json(resolver.enrich_match(existing))));
+        }
+    }
+
     state
         .armies
         .validate_selectable_id(payload.player1_army_id)
@@ -1518,7 +1708,7 @@ async fn start_match(
         ));
     }
     let record = board
-        .start_match_with_adversaire(
+        .start_match_with_tournament(
             &payload.player1,
             &opponent_name,
             payload.player1_army_id,
@@ -1527,7 +1717,12 @@ async fn start_match(
             payload.player1_secondary_slugs,
             payload.player2_secondary_slugs,
             payload.counts_for_elo,
+            None,
+            None,
+            None,
+            None,
             guest_adversaire.as_deref(),
+            client_uuid,
         )
         .map_err(|error| ApiError::bad_request(error.to_string()))?;
     board
@@ -1536,6 +1731,231 @@ async fn start_match(
 
     let resolver = crate::display_name::PlayerDisplayResolver::new(&board, state.users.as_ref());
     Ok((StatusCode::CREATED, Json(resolver.enrich_match(record))))
+}
+
+fn load_client_partie(state: &AppState, uuid: &str) -> Result<Option<MatchRecord>, ApiError> {
+    let board = state.board.lock().unwrap();
+    let Some(record) = board.get_match_by_client_uuid(uuid).cloned() else {
+        return Ok(None);
+    };
+    if record.tournament_id.is_some() {
+        return Err(ApiError::bad_request(
+            "les parties de coupe se saisissent uniquement en ligne",
+        ));
+    }
+    Ok(Some(record))
+}
+
+fn sync_progress_update(
+    state: &AppState,
+    payload: &SyncPartieRequest,
+) -> Result<crate::store::InProgressMatchUpdate, ApiError> {
+    let scenario_name = if let Some(scenario_id) = payload.scenario_id {
+        Some(
+            state
+                .scenarios
+                .get(scenario_id)
+                .map_err(|error| ApiError::bad_request(error.to_string()))?
+                .map(|scenario| scenario.name),
+        )
+    } else if let Some(other) = payload.scenario_other.as_ref() {
+        let trimmed = other.trim();
+        if trimmed.is_empty() {
+            None
+        } else {
+            Some(Some(trimmed.to_string()))
+        }
+    } else {
+        None
+    };
+
+    let clear_secondary_draws = payload
+        .scenario_id
+        .and_then(|id| state.scenarios.get(id).ok().flatten())
+        .and_then(|scenario| scenario.slug)
+        .as_deref()
+        == Some("le-combat-de-lesprit");
+
+    Ok(crate::store::InProgressMatchUpdate {
+        scenario_id: payload.scenario_id,
+        scenario_other: payload.scenario_other.clone(),
+        scenario_name,
+        scenario_url: payload.scenario_url.clone(),
+        player1_secondary_slugs: if payload.player1_secondary_slugs.is_empty() {
+            None
+        } else {
+            Some(payload.player1_secondary_slugs.clone())
+        },
+        player2_secondary_slugs: if payload.player2_secondary_slugs.is_empty() {
+            None
+        } else {
+            Some(payload.player2_secondary_slugs.clone())
+        },
+        secondary_pool_slugs: payload.secondary_pool_slugs.clone(),
+        player1_chosen_secondary: payload.player1_chosen_secondary.clone().map(Some),
+        player2_chosen_secondary: payload.player2_chosen_secondary.clone().map(Some),
+        lieutenant_winner: payload.lieutenant_winner.clone(),
+        lieutenant_winner_choice: payload.lieutenant_winner_choice.clone(),
+        lieutenant_other_choice: payload.lieutenant_other_choice.clone(),
+        partie_step: payload.partie_step.clone(),
+        clear_secondary_draws,
+    })
+}
+
+fn complete_scores(payload: &CompleteMatchRequest) -> MatchScores {
+    MatchScores {
+        player1_objectives: payload.player1_objectives,
+        player1_survivors: payload.player1_survivors,
+        player2_objectives: payload.player2_objectives,
+        player2_survivors: payload.player2_survivors,
+    }
+}
+
+async fn sync_partie(
+    State(state): State<AppState>,
+    session: Session,
+    Json(payload): Json<SyncPartieRequest>,
+) -> Result<(StatusCode, Json<crate::display_name::EnrichedMatchRecord>), ApiError> {
+    let user = require_user(&state, &session).await?;
+    let created_by = {
+        let board = state.board.lock().unwrap();
+        board
+            .get_player_by_discord_username(&user.username)
+            .ok_or_else(|| {
+                ApiError::unauthorized(
+                    "un profil joueur Poissonnerie est requis pour synchroniser une partie",
+                )
+            })?
+            .name
+            .clone()
+    };
+
+    let client_uuid = crate::match_record::normalize_client_uuid(&payload.client_uuid)
+        .map_err(|error| ApiError::bad_request(error.to_string()))?;
+
+    if crate::normalize_name(&payload.player1) != crate::normalize_name(&created_by) {
+        return Err(ApiError::bad_request(
+            "le joueur 1 doit être votre profil connecté",
+        ));
+    }
+
+    if let Some(existing) = load_client_partie(&state, &client_uuid)? {
+        ensure_match_participant(&state, &user, existing.id)?;
+        if existing.status == crate::match_record::MatchStatus::Completed {
+            if let Some(complete) = payload.complete.as_ref() {
+                let same_outcome = existing.outcome == Some(complete.outcome);
+                let same_scores = existing.player1_objectives == complete.player1_objectives
+                    && existing.player1_survivors == complete.player1_survivors
+                    && existing.player2_objectives == complete.player2_objectives
+                    && existing.player2_survivors == complete.player2_survivors;
+                if !same_outcome || !same_scores {
+                    return Err(ApiError::bad_request("cette partie est déjà terminée"));
+                }
+            }
+            let board = state.board.lock().unwrap();
+            let resolver =
+                crate::display_name::PlayerDisplayResolver::new(&board, state.users.as_ref());
+            return Ok((StatusCode::OK, Json(resolver.enrich_match(existing))));
+        }
+
+        state
+            .armies
+            .validate_selectable_id(payload.player1_army_id)
+            .map_err(|error| ApiError::bad_request(error.to_string()))?;
+        state
+            .armies
+            .validate_selectable_id(payload.player2_army_id)
+            .map_err(|error| ApiError::bad_request(error.to_string()))?;
+
+        let update = sync_progress_update(&state, &payload)?;
+        let mut board = state.board.lock().unwrap();
+        let mut synced = board
+            .apply_offline_partie_snapshot(existing.id, update)
+            .map_err(|error| ApiError::bad_request(error.to_string()))?;
+        if let Some(complete) = payload.complete.as_ref() {
+            synced = board
+                .complete_match(existing.id, complete.outcome, state.k_factor, complete_scores(complete))
+                .map_err(|error| ApiError::bad_request(error.to_string()))?;
+        }
+        board
+            .save(&state.db_path)
+            .map_err(|error| ApiError::bad_request(error.to_string()))?;
+        let resolver =
+            crate::display_name::PlayerDisplayResolver::new(&board, state.users.as_ref());
+        return Ok((StatusCode::OK, Json(resolver.enrich_match(synced))));
+    }
+
+    state
+        .armies
+        .validate_selectable_id(payload.player1_army_id)
+        .map_err(|error| ApiError::bad_request(error.to_string()))?;
+    state
+        .armies
+        .validate_selectable_id(payload.player2_army_id)
+        .map_err(|error| ApiError::bad_request(error.to_string()))?;
+
+    let player2_raw = payload.player2.trim();
+    let adversaire_raw = payload
+        .adversaire
+        .as_deref()
+        .map(str::trim)
+        .filter(|name| !name.is_empty());
+    let (opponent_name, guest_adversaire) = {
+        let board = state.board.lock().unwrap();
+        let registered = !player2_raw.is_empty() && board.get_player(player2_raw).is_ok();
+        if registered {
+            (player2_raw.to_string(), None)
+        } else {
+            let label = if !player2_raw.is_empty() {
+                player2_raw
+            } else {
+                adversaire_raw.unwrap_or("")
+            };
+            if label.is_empty() {
+                return Err(ApiError::bad_request("indiquez un adversaire"));
+            }
+            if payload.counts_for_elo {
+                return Err(ApiError::bad_request(
+                    "un match classé requiert un adversaire inscrit",
+                ));
+            }
+            (label.to_string(), Some(label.to_string()))
+        }
+    };
+
+    let update = sync_progress_update(&state, &payload)?;
+    let mut board = state.board.lock().unwrap();
+    let created = board
+        .start_match_with_tournament(
+            &payload.player1,
+            &opponent_name,
+            payload.player1_army_id,
+            payload.player2_army_id,
+            &created_by,
+            payload.player1_secondary_slugs.clone(),
+            payload.player2_secondary_slugs.clone(),
+            payload.counts_for_elo,
+            None,
+            None,
+            None,
+            None,
+            guest_adversaire.as_deref(),
+            Some(client_uuid),
+        )
+        .map_err(|error| ApiError::bad_request(error.to_string()))?;
+    let mut synced = board
+        .apply_offline_partie_snapshot(created.id, update)
+        .map_err(|error| ApiError::bad_request(error.to_string()))?;
+    if let Some(complete) = payload.complete.as_ref() {
+        synced = board
+            .complete_match(created.id, complete.outcome, state.k_factor, complete_scores(complete))
+            .map_err(|error| ApiError::bad_request(error.to_string()))?;
+    }
+    board
+        .save(&state.db_path)
+        .map_err(|error| ApiError::bad_request(error.to_string()))?;
+    let resolver = crate::display_name::PlayerDisplayResolver::new(&board, state.users.as_ref());
+    Ok((StatusCode::CREATED, Json(resolver.enrich_match(synced))))
 }
 
 async fn update_match_progress(

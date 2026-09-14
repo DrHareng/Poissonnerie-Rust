@@ -3,6 +3,7 @@ import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { Check, Trash2, X } from '@lucide/vue'
 import { toast } from 'vue-sonner'
+import { COUPE_REQUIRES_NETWORK } from '@/lib/partieOffline'
 import {
   adminRegisterForTournament,
   claimPlayerProfile,
@@ -49,6 +50,7 @@ import type {
 } from '@/types/elo'
 import { useAuth } from '@/composables/useAuth'
 import { useAppSidePanel } from '@/composables/useAppSidePanel'
+import { useNetworkStatus } from '@/composables/useNetworkStatus'
 import ArmyLogo from '@/components/ArmyLogo.vue'
 import ArmyListQuickActions from '@/components/ArmyListQuickActions.vue'
 import BracketTree from '@/components/BracketTree.vue'
@@ -89,6 +91,7 @@ const route = useRoute()
 const router = useRouter()
 const { isAdmin, hasPlayer, player, isAuthenticated, user, refresh: refreshAuth } = useAuth()
 const { setCustomSide } = useAppSidePanel()
+const { isOnline } = useNetworkStatus()
 
 const detail = ref<TournamentDetail | null>(null)
 const rankedPlayers = ref<RankedPlayer[]>([])
@@ -1330,6 +1333,10 @@ function matchHasList2(match: TournamentMatch, slot: 'player1' | 'player2') {
 }
 
 async function startPartie(match: TournamentMatch) {
+  if (!isOnline.value) {
+    toast.error(COUPE_REQUIRES_NETWORK)
+    return
+  }
   try {
     const record = await startTournamentPartie(match.id)
     await refresh()
@@ -1344,6 +1351,10 @@ async function startPartie(match: TournamentMatch) {
 }
 
 async function resumePartie(match: TournamentMatch) {
+  if (!isOnline.value) {
+    toast.error(COUPE_REQUIRES_NETWORK)
+    return
+  }
   if (!match.elo_match_id) {
     await startPartie(match)
     return
@@ -1616,6 +1627,7 @@ onMounted(refresh)
                 :phase-label="phaseLabels[match.phase] ?? match.phase"
                 :lists-ready="matchListsReady(match)"
                 :lists-ready-message="matchListsReadyMessage(match)"
+                :is-online="isOnline"
                 @start="startPartie(match)"
                 @resume="resumePartie(match)"
                 @confirm="confirmMatch(match)"
@@ -1759,6 +1771,7 @@ onMounted(refresh)
               :phase-label="phaseLabels[match.phase] ?? match.phase"
               :lists-ready="matchListsReady(match)"
               :lists-ready-message="matchListsReadyMessage(match)"
+              :is-online="isOnline"
               @start="startPartie(match)"
               @resume="resumePartie(match)"
               @confirm="confirmMatch(match)"
@@ -1869,6 +1882,7 @@ onMounted(refresh)
                   :allow-unplayed="false"
                   :lists-ready="matchListsReady"
                   :lists-ready-message="matchListsReadyMessage"
+                  :is-online="isOnline"
                   @start="startPartie"
                   @resume="resumePartie"
                   @confirm="confirmMatch"
@@ -2092,6 +2106,7 @@ onMounted(refresh)
                   :status-label="matchStatusLabel"
                   :lists-ready="matchListsReady"
                   :lists-ready-message="matchListsReadyMessage"
+                  :is-online="isOnline"
                   @start="startPartie"
                   @resume="resumePartie"
                   @confirm="confirmMatch"

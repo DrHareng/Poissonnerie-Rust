@@ -13,6 +13,7 @@ const DISCORD_OAUTH_SCOPES: &str = "identify guilds";
 const DISCORD_GUILDS_PAGE_SIZE: usize = 200;
 const DEFAULT_DISCORD_GUILD_ID: &str = "299262973241720832";
 
+pub const SESSION_OAUTH_MOBILE: &str = "oauth_mobile";
 pub const SESSION_USER_ID: &str = "user_id";
 pub const SESSION_SECONDARY_VIEW_MODE: &str = "secondary_view_mode";
 pub const SESSION_SCENARIO_SLUG: &str = "scenario_slug";
@@ -92,12 +93,21 @@ impl AuthConfig {
     }
 
     pub fn authorize_url(&self) -> String {
-        format!(
+        self.authorize_url_with_state(None)
+    }
+
+    pub fn authorize_url_with_state(&self, state: Option<&str>) -> String {
+        let mut url = format!(
             "{DISCORD_AUTHORIZE_URL}?client_id={}&redirect_uri={}&response_type=code&scope={}",
             urlencoding::encode(&self.client_id),
             urlencoding::encode(&self.redirect_uri),
             urlencoding::encode(DISCORD_OAUTH_SCOPES),
-        )
+        );
+        if let Some(state) = state.filter(|value| !value.is_empty()) {
+            url.push_str("&state=");
+            url.push_str(&urlencoding::encode(state));
+        }
+        url
     }
 }
 
@@ -259,6 +269,8 @@ pub async fn logout(session: &Session) -> Result<()> {
 #[derive(Debug, Deserialize)]
 pub struct CallbackQuery {
     pub code: String,
+    #[serde(default)]
+    pub state: String,
 }
 
 #[derive(Debug, Deserialize)]

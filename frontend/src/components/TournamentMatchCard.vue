@@ -3,6 +3,7 @@ import { computed, ref, watch } from 'vue'
 import TournamentMatchScoreboard from '@/components/TournamentMatchScoreboard.vue'
 import { Button } from '@/components/ui/button'
 import { formatMatchRecordedDate } from '@/lib/tournamentMatchDisplay'
+import { COUPE_REQUIRES_NETWORK } from '@/lib/partieOffline'
 import type { TournamentMatch } from '@/types/elo'
 
 export interface TournamentMatchForm {
@@ -31,6 +32,7 @@ const props = withDefaults(
     compact?: boolean
     listsReady?: boolean
     listsReadyMessage?: string
+    isOnline?: boolean
   }>(),
   {
     compact: false,
@@ -39,6 +41,7 @@ const props = withDefaults(
     player1HasList2: false,
     player2HasList2: false,
     currentPlayerName: null,
+    isOnline: true,
   },
 )
 
@@ -232,6 +235,8 @@ function matchPlayerLabel(slot: 'player1' | 'player2') {
           <Button
             v-if="canStart"
             size="sm"
+            :disabled="!isOnline"
+            :title="!isOnline ? COUPE_REQUIRES_NETWORK : undefined"
             @click="emit('start')"
           >
             Démarrer la partie
@@ -239,6 +244,8 @@ function matchPlayerLabel(slot: 'player1' | 'player2') {
           <Button
             v-if="canResume"
             size="sm"
+            :disabled="!isOnline"
+            :title="!isOnline ? COUPE_REQUIRES_NETWORK : undefined"
             @click="emit('resume')"
           >
             Reprendre la partie

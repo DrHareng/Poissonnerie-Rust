@@ -203,6 +203,9 @@ pub struct MatchRecord {
     /// Pseudo libre si l’adversaire n’est pas un joueur inscrit.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub adversaire: Option<String>,
+    /// Identifiant client pour la synchro hors ligne (idempotence).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub client_uuid: Option<String>,
     pub recorded_at: u64,
 }
 
@@ -269,6 +272,7 @@ impl MatchRecord {
             created_by: None,
             counts_for_elo: true,
             adversaire: None,
+            client_uuid: None,
             recorded_at,
         }
     }
@@ -279,6 +283,20 @@ impl MatchRecord {
             .as_deref()
             .is_some_and(|name| !name.trim().is_empty())
     }
+}
+
+/// UUID canonique (minuscules) pour les parties saisies hors ligne.
+pub fn normalize_client_uuid(value: &str) -> anyhow::Result<String> {
+    let trimmed = value.trim().to_ascii_lowercase();
+    let valid = trimmed.len() == 36
+        && trimmed.as_bytes().iter().enumerate().all(|(index, byte)| match index {
+            8 | 13 | 18 | 23 => *byte == b'-',
+            _ => byte.is_ascii_hexdigit(),
+        });
+    if !valid {
+        anyhow::bail!("identifiant de partie hors ligne invalide");
+    }
+    Ok(trimmed)
 }
 
 pub fn now_unix() -> u64 {
@@ -322,6 +340,15 @@ mod tests {
         }
         .validate()
         .is_err());
+    }
+
+    #[test]
+    fn client_uuid_is_normalized_and_rejected_when_invalid() {
+        assert_eq!(
+            normalize_client_uuid("11111111-1111-4111-8111-111111111111").unwrap(),
+            "11111111-1111-4111-8111-111111111111"
+        );
+        assert!(normalize_client_uuid("not-a-uuid").is_err());
     }
 
     #[test]
