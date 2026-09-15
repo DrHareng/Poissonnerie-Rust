@@ -1695,89 +1695,128 @@ onMounted(refresh)
               </Button>
             </CardContent>
           </Card>
-          <Card
+          <div
             v-else-if="showMyMatchesSide"
-            class="neon-panel flex h-full min-h-0 flex-col"
+            class="flex h-full min-h-0 flex-col gap-3"
           >
-            <CardHeader class="shrink-0">
-              <CardTitle>Mes matchs</CardTitle>
-              <CardDescription>
-                Vos parties dans ce tournoi.
-              </CardDescription>
-            </CardHeader>
-            <CardContent class="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto">
-              <p
-                v-if="myTournamentMatches.length === 0"
-                class="text-sm text-muted-foreground"
-              >
-                Aucun match pour le moment.
-              </p>
-              <template v-else>
-                <div v-if="myUpcomingMatches.length > 0" class="grid gap-2">
-                  <h3 class="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                    À venir
-                  </h3>
-                  <TournamentMatchCard
-                    v-for="match in myUpcomingMatches"
-                    :key="match.id"
-                    compact
-                    :match="match"
-                    :form="getForm(match)"
-                    :can-interact="canInteractWithMatch(match)"
-                    :is-admin="isAdmin"
-                    :current-player-name="player?.name"
-                    :player1-army-id="matchPlayerArmyId(match, 'player1')"
-                    :player2-army-id="matchPlayerArmyId(match, 'player2')"
-                    :player1-has-list2="matchHasList2(match, 'player1')"
-                    :player2-has-list2="matchHasList2(match, 'player2')"
-                    :status-label="matchStatusLabel(match)"
-                    :phase-label="phaseLabels[match.phase] ?? match.phase"
-                    :lists-ready="matchListsReady(match)"
-                    :lists-ready-message="matchListsReadyMessage(match)"
-                    :is-online="isOnline"
-                    @start="startPartie(match)"
-                    @resume="resumePartie(match)"
-                    @confirm="confirmMatch(match)"
-                    @correct="correctMatch(match, $event)"
-                    @forfeit="forfeitMatch(match, $event)"
-                    @cancel-forfeit="cancelForfeit(match)"
-                    @unplayed="markMatchUnplayed(match)"
+            <Card class="neon-panel shrink-0">
+              <CardHeader class="shrink-0 pb-3">
+                <CardTitle>Mes listes</CardTitle>
+                <CardDescription>
+                  Vos listes validées pour ce tournoi.
+                </CardDescription>
+              </CardHeader>
+              <CardContent class="grid gap-2">
+                <div class="flex flex-wrap items-center gap-2">
+                  <span class="w-14 shrink-0 text-xs text-muted-foreground">Liste 1</span>
+                  <Input
+                    :model-value="myRegistration?.army_list_1 ?? ''"
+                    readonly
+                    class="min-w-0 flex-1 text-xs"
                   />
+                  <ArmyListQuickActions :code="myRegistration?.army_list_1" />
                 </div>
-                <div v-if="myPlayedMatches.length > 0" class="grid gap-2">
-                  <h3 class="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                    Joués
-                  </h3>
-                  <TournamentMatchCard
-                    v-for="match in myPlayedMatches"
-                    :key="match.id"
-                    compact
-                    :match="match"
-                    :form="getForm(match)"
-                    :can-interact="canInteractWithMatch(match)"
-                    :is-admin="isAdmin"
-                    :current-player-name="player?.name"
-                    :player1-army-id="matchPlayerArmyId(match, 'player1')"
-                    :player2-army-id="matchPlayerArmyId(match, 'player2')"
-                    :player1-has-list2="matchHasList2(match, 'player1')"
-                    :player2-has-list2="matchHasList2(match, 'player2')"
-                    :status-label="matchStatusLabel(match)"
-                    :phase-label="phaseLabels[match.phase] ?? match.phase"
-                    :lists-ready="matchListsReady(match)"
-                    :lists-ready-message="matchListsReadyMessage(match)"
-                    :is-online="isOnline"
-                    @start="startPartie(match)"
-                    @resume="resumePartie(match)"
-                    @confirm="confirmMatch(match)"
-                    @correct="correctMatch(match, $event)"
-                    @forfeit="forfeitMatch(match, $event)"
-                    @cancel-forfeit="cancelForfeit(match)"
-                    @unplayed="markMatchUnplayed(match)"
+                <div
+                  v-if="myRegistration?.army_list_2"
+                  class="flex flex-wrap items-center gap-2"
+                >
+                  <span class="w-14 shrink-0 text-xs text-muted-foreground">Liste 2</span>
+                  <Input
+                    :model-value="myRegistration.army_list_2"
+                    readonly
+                    class="min-w-0 flex-1 text-xs"
                   />
+                  <ArmyListQuickActions :code="myRegistration.army_list_2" />
                 </div>
-              </template>
-            </CardContent>
-          </Card>
+                <p
+                  v-else
+                  class="text-xs text-muted-foreground italic"
+                >
+                  pas de liste 2
+                </p>
+              </CardContent>
+            </Card>
+            <Card class="neon-panel flex min-h-0 flex-1 flex-col">
+              <CardHeader class="shrink-0">
+                <CardTitle>Mes matchs</CardTitle>
+                <CardDescription>
+                  Vos parties dans ce tournoi.
+                </CardDescription>
+              </CardHeader>
+              <CardContent class="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto">
+                <p
+                  v-if="myTournamentMatches.length === 0"
+                  class="text-sm text-muted-foreground"
+                >
+                  Aucun match pour le moment.
+                </p>
+                <template v-else>
+                  <div v-if="myUpcomingMatches.length > 0" class="grid gap-2">
+                    <h3 class="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                      À venir
+                    </h3>
+                    <TournamentMatchCard
+                      v-for="match in myUpcomingMatches"
+                      :key="match.id"
+                      compact
+                      :match="match"
+                      :form="getForm(match)"
+                      :can-interact="canInteractWithMatch(match)"
+                      :is-admin="isAdmin"
+                      :current-player-name="player?.name"
+                      :player1-army-id="matchPlayerArmyId(match, 'player1')"
+                      :player2-army-id="matchPlayerArmyId(match, 'player2')"
+                      :player1-has-list2="matchHasList2(match, 'player1')"
+                      :player2-has-list2="matchHasList2(match, 'player2')"
+                      :status-label="matchStatusLabel(match)"
+                      :phase-label="phaseLabels[match.phase] ?? match.phase"
+                      :lists-ready="matchListsReady(match)"
+                      :lists-ready-message="matchListsReadyMessage(match)"
+                      :is-online="isOnline"
+                      @start="startPartie(match)"
+                      @resume="resumePartie(match)"
+                      @confirm="confirmMatch(match)"
+                      @correct="correctMatch(match, $event)"
+                      @forfeit="forfeitMatch(match, $event)"
+                      @cancel-forfeit="cancelForfeit(match)"
+                      @unplayed="markMatchUnplayed(match)"
+                    />
+                  </div>
+                  <div v-if="myPlayedMatches.length > 0" class="grid gap-2">
+                    <h3 class="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                      Joués
+                    </h3>
+                    <TournamentMatchCard
+                      v-for="match in myPlayedMatches"
+                      :key="match.id"
+                      compact
+                      :match="match"
+                      :form="getForm(match)"
+                      :can-interact="canInteractWithMatch(match)"
+                      :is-admin="isAdmin"
+                      :current-player-name="player?.name"
+                      :player1-army-id="matchPlayerArmyId(match, 'player1')"
+                      :player2-army-id="matchPlayerArmyId(match, 'player2')"
+                      :player1-has-list2="matchHasList2(match, 'player1')"
+                      :player2-has-list2="matchHasList2(match, 'player2')"
+                      :status-label="matchStatusLabel(match)"
+                      :phase-label="phaseLabels[match.phase] ?? match.phase"
+                      :lists-ready="matchListsReady(match)"
+                      :lists-ready-message="matchListsReadyMessage(match)"
+                      :is-online="isOnline"
+                      @start="startPartie(match)"
+                      @resume="resumePartie(match)"
+                      @confirm="confirmMatch(match)"
+                      @correct="correctMatch(match, $event)"
+                      @forfeit="forfeitMatch(match, $event)"
+                      @cancel-forfeit="cancelForfeit(match)"
+                      @unplayed="markMatchUnplayed(match)"
+                    />
+                  </div>
+                </template>
+              </CardContent>
+            </Card>
+          </div>
         </Teleport>
 
         <Card
@@ -1883,89 +1922,125 @@ onMounted(refresh)
           </CardContent>
         </Card>
 
-        <Card
-          v-else-if="showMyMatchesSide"
-          class="neon-panel mb-4 lg:hidden"
-        >
-          <CardHeader>
-            <CardTitle>Mes matchs</CardTitle>
-            <CardDescription>
-              Vos parties dans ce tournoi.
-            </CardDescription>
-          </CardHeader>
-          <CardContent class="flex flex-col gap-3">
-            <p
-              v-if="myTournamentMatches.length === 0"
-              class="text-sm text-muted-foreground"
-            >
-              Aucun match pour le moment.
-            </p>
-            <template v-else>
-              <div v-if="myUpcomingMatches.length > 0" class="grid gap-2">
-                <h3 class="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                  À venir
-                </h3>
-                <TournamentMatchCard
-                  v-for="match in myUpcomingMatches"
-                  :key="`mobile-${match.id}`"
-                  compact
-                  :match="match"
-                  :form="getForm(match)"
-                  :can-interact="canInteractWithMatch(match)"
-                  :is-admin="isAdmin"
-                  :current-player-name="player?.name"
-                  :player1-army-id="matchPlayerArmyId(match, 'player1')"
-                  :player2-army-id="matchPlayerArmyId(match, 'player2')"
-                  :player1-has-list2="matchHasList2(match, 'player1')"
-                  :player2-has-list2="matchHasList2(match, 'player2')"
-                  :status-label="matchStatusLabel(match)"
-                  :phase-label="phaseLabels[match.phase] ?? match.phase"
-                  :lists-ready="matchListsReady(match)"
-                  :lists-ready-message="matchListsReadyMessage(match)"
-                  :is-online="isOnline"
-                  @start="startPartie(match)"
-                  @resume="resumePartie(match)"
-                  @confirm="confirmMatch(match)"
-                  @correct="correctMatch(match, $event)"
-                  @forfeit="forfeitMatch(match, $event)"
-                  @cancel-forfeit="cancelForfeit(match)"
-                  @unplayed="markMatchUnplayed(match)"
+        <template v-else-if="showMyMatchesSide">
+          <Card class="neon-panel mb-4 lg:hidden">
+            <CardHeader>
+              <CardTitle>Mes listes</CardTitle>
+              <CardDescription>
+                Vos listes validées pour ce tournoi.
+              </CardDescription>
+            </CardHeader>
+            <CardContent class="grid gap-2">
+              <div class="flex flex-wrap items-center gap-2">
+                <span class="w-14 shrink-0 text-xs text-muted-foreground">Liste 1</span>
+                <Input
+                  :model-value="myRegistration?.army_list_1 ?? ''"
+                  readonly
+                  class="min-w-0 flex-1 text-xs"
                 />
+                <ArmyListQuickActions :code="myRegistration?.army_list_1" />
               </div>
-              <div v-if="myPlayedMatches.length > 0" class="grid gap-2">
-                <h3 class="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                  Joués
-                </h3>
-                <TournamentMatchCard
-                  v-for="match in myPlayedMatches"
-                  :key="`mobile-played-${match.id}`"
-                  compact
-                  :match="match"
-                  :form="getForm(match)"
-                  :can-interact="canInteractWithMatch(match)"
-                  :is-admin="isAdmin"
-                  :current-player-name="player?.name"
-                  :player1-army-id="matchPlayerArmyId(match, 'player1')"
-                  :player2-army-id="matchPlayerArmyId(match, 'player2')"
-                  :player1-has-list2="matchHasList2(match, 'player1')"
-                  :player2-has-list2="matchHasList2(match, 'player2')"
-                  :status-label="matchStatusLabel(match)"
-                  :phase-label="phaseLabels[match.phase] ?? match.phase"
-                  :lists-ready="matchListsReady(match)"
-                  :lists-ready-message="matchListsReadyMessage(match)"
-                  :is-online="isOnline"
-                  @start="startPartie(match)"
-                  @resume="resumePartie(match)"
-                  @confirm="confirmMatch(match)"
-                  @correct="correctMatch(match, $event)"
-                  @forfeit="forfeitMatch(match, $event)"
-                  @cancel-forfeit="cancelForfeit(match)"
-                  @unplayed="markMatchUnplayed(match)"
+              <div
+                v-if="myRegistration?.army_list_2"
+                class="flex flex-wrap items-center gap-2"
+              >
+                <span class="w-14 shrink-0 text-xs text-muted-foreground">Liste 2</span>
+                <Input
+                  :model-value="myRegistration.army_list_2"
+                  readonly
+                  class="min-w-0 flex-1 text-xs"
                 />
+                <ArmyListQuickActions :code="myRegistration.army_list_2" />
               </div>
-            </template>
-          </CardContent>
-        </Card>
+              <p
+                v-else
+                class="text-xs text-muted-foreground italic"
+              >
+                pas de liste 2
+              </p>
+            </CardContent>
+          </Card>
+          <Card class="neon-panel mb-4 lg:hidden">
+            <CardHeader>
+              <CardTitle>Mes matchs</CardTitle>
+              <CardDescription>
+                Vos parties dans ce tournoi.
+              </CardDescription>
+            </CardHeader>
+            <CardContent class="flex flex-col gap-3">
+              <p
+                v-if="myTournamentMatches.length === 0"
+                class="text-sm text-muted-foreground"
+              >
+                Aucun match pour le moment.
+              </p>
+              <template v-else>
+                <div v-if="myUpcomingMatches.length > 0" class="grid gap-2">
+                  <h3 class="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                    À venir
+                  </h3>
+                  <TournamentMatchCard
+                    v-for="match in myUpcomingMatches"
+                    :key="`mobile-${match.id}`"
+                    compact
+                    :match="match"
+                    :form="getForm(match)"
+                    :can-interact="canInteractWithMatch(match)"
+                    :is-admin="isAdmin"
+                    :current-player-name="player?.name"
+                    :player1-army-id="matchPlayerArmyId(match, 'player1')"
+                    :player2-army-id="matchPlayerArmyId(match, 'player2')"
+                    :player1-has-list2="matchHasList2(match, 'player1')"
+                    :player2-has-list2="matchHasList2(match, 'player2')"
+                    :status-label="matchStatusLabel(match)"
+                    :phase-label="phaseLabels[match.phase] ?? match.phase"
+                    :lists-ready="matchListsReady(match)"
+                    :lists-ready-message="matchListsReadyMessage(match)"
+                    :is-online="isOnline"
+                    @start="startPartie(match)"
+                    @resume="resumePartie(match)"
+                    @confirm="confirmMatch(match)"
+                    @correct="correctMatch(match, $event)"
+                    @forfeit="forfeitMatch(match, $event)"
+                    @cancel-forfeit="cancelForfeit(match)"
+                    @unplayed="markMatchUnplayed(match)"
+                  />
+                </div>
+                <div v-if="myPlayedMatches.length > 0" class="grid gap-2">
+                  <h3 class="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                    Joués
+                  </h3>
+                  <TournamentMatchCard
+                    v-for="match in myPlayedMatches"
+                    :key="`mobile-played-${match.id}`"
+                    compact
+                    :match="match"
+                    :form="getForm(match)"
+                    :can-interact="canInteractWithMatch(match)"
+                    :is-admin="isAdmin"
+                    :current-player-name="player?.name"
+                    :player1-army-id="matchPlayerArmyId(match, 'player1')"
+                    :player2-army-id="matchPlayerArmyId(match, 'player2')"
+                    :player1-has-list2="matchHasList2(match, 'player1')"
+                    :player2-has-list2="matchHasList2(match, 'player2')"
+                    :status-label="matchStatusLabel(match)"
+                    :phase-label="phaseLabels[match.phase] ?? match.phase"
+                    :lists-ready="matchListsReady(match)"
+                    :lists-ready-message="matchListsReadyMessage(match)"
+                    :is-online="isOnline"
+                    @start="startPartie(match)"
+                    @resume="resumePartie(match)"
+                    @confirm="confirmMatch(match)"
+                    @correct="correctMatch(match, $event)"
+                    @forfeit="forfeitMatch(match, $event)"
+                    @cancel-forfeit="cancelForfeit(match)"
+                    @unplayed="markMatchUnplayed(match)"
+                  />
+                </div>
+              </template>
+            </CardContent>
+          </Card>
+        </template>
 
         <template v-if="activeTab === 'arbre'">
           <Card v-if="canEditBracket" class="neon-panel">
