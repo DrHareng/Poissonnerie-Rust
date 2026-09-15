@@ -218,6 +218,44 @@ impl Leaderboard {
             .transaction()
             .context("impossible de démarrer la transaction")?;
 
+        // `tournament_matches.elo_match_id` référence `matches(id)`.
+        // Le save réécrit toute la table matches : il faut détacher puis rattacher.
+        let elo_links: Vec<(i64, i64)> = {
+            let exists: bool = tx
+                .query_row(
+                    "
+                    SELECT 1 FROM sqlite_master
+                    WHERE type = 'table' AND name = 'tournament_matches'
+                    ",
+                    [],
+                    |_| Ok(true),
+                )
+                .unwrap_or(false);
+            if !exists {
+                Vec::new()
+            } else {
+                let mut stmt = tx.prepare(
+                    "
+                    SELECT id, elo_match_id FROM tournament_matches
+                    WHERE elo_match_id IS NOT NULL
+                    ",
+                )?;
+                let rows = stmt.query_map([], |row| {
+                    Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)?))
+                })?;
+                let mut links = Vec::new();
+                for row in rows {
+                    links.push(row?);
+                }
+                drop(stmt);
+                tx.execute(
+                    "UPDATE tournament_matches SET elo_match_id = NULL WHERE elo_match_id IS NOT NULL",
+                    [],
+                )?;
+                links
+            }
+        };
+
         tx.execute("DELETE FROM match_reports", [])?;
         tx.execute("DELETE FROM matches", [])?;
         tx.execute("DELETE FROM players", [])?;
@@ -312,6 +350,22 @@ impl Leaderboard {
             }
             if let Some(report) = &record.player2_report {
                 insert_match_report(&tx, record.id, &record.player2, report)?;
+            }
+        }
+
+        for (tournament_match_id, elo_match_id) in elo_links {
+            let still_exists: bool = tx
+                .query_row(
+                    "SELECT 1 FROM matches WHERE id = ?1",
+                    params![elo_match_id],
+                    |_| Ok(true),
+                )
+                .unwrap_or(false);
+            if still_exists {
+                tx.execute(
+                    "UPDATE tournament_matches SET elo_match_id = ?1 WHERE id = ?2",
+                    params![elo_match_id, tournament_match_id],
+                )?;
             }
         }
 
