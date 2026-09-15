@@ -410,6 +410,10 @@ export interface TournamentRegistrationPreview {
   player_display_name?: string | null
   status: RegistrationStatus
   has_army_lists?: boolean
+  has_army_list_2?: boolean
+  army_list_1_validated?: boolean
+  army_list_2_validated?: boolean
+  army_id?: number | null
 }
 
 export interface TournamentListEntry extends Tournament {

@@ -13,7 +13,7 @@ use crate::migrate::migrate;
 use crate::player::MatchOutcome;
 use crate::store::normalize_name;
 use crate::tournament::{
-    bracket_format_for_pools, bracket_match_winner, bracket_scenario_phases, compute_elo_deltas,
+    army_visible_player_keys, bracket_format_for_pools, bracket_match_winner, bracket_scenario_phases, compute_elo_deltas,
     compute_bracket_placements, draw_seeded_pools, enrich_top_four_armies,
     expected_pool_scenario_count, placement_label, pool_round_robin_pairs, pool_scenario_letter,
     pool_scenario_slot_letters, round_of_16_barrage_pairings, sort_pool_standings,
@@ -304,10 +304,36 @@ impl TournamentStore {
                     .filter(|m| m.phase != TournamentPhase::Pool)
                     .collect();
                 let pool_scenarios = self.list_scenarios_in_conn(&conn, tournament.id, "pool")?;
+                let in_pools_phase = tournament.status == TournamentStatus::Started
+                    && tournament.pools_finalized_at.is_none()
+                    && tournament.structure.uses_pools();
+
+                let mut pools = if in_pools_phase {
+                    self.list_pools_in_conn(&conn, tournament.id)?
+                } else {
+                    Vec::new()
+                };
+
+                let army_visible = if in_pools_phase {
+                    army_visible_player_keys(&tournament, &registrations, &pools)
+                } else {
+                    HashSet::new()
+                };
+
+                for pool in &mut pools {
+                    for player in &mut pool.players {
+                        let key = normalize_name(&player.player_name);
+                        if !army_visible.contains(&key) {
+                            player.army_id = None;
+                        }
+                    }
+                }
+
                 let registration_previews = if matches!(
                     tournament.status,
                     TournamentStatus::RegistrationOpen | TournamentStatus::RegistrationClosed
-                ) {
+                ) || in_pools_phase
+                {
                     registrations
                         .iter()
                         .filter(|registration| {
@@ -318,29 +344,24 @@ impl TournamentStore {
                                     | RegistrationStatus::Waitlisted
                             )
                         })
-                        .map(|registration| TournamentRegistrationPreview {
-                            player_name: registration.player_name.clone(),
-                            player_display_name: registration.player_display_name.clone(),
-                            status: registration.status,
-                            has_army_lists: registration.has_army_lists,
+                        .map(|registration| {
+                            let key = normalize_name(&registration.player_name);
+                            TournamentRegistrationPreview {
+                                player_name: registration.player_name.clone(),
+                                player_display_name: registration.player_display_name.clone(),
+                                status: registration.status,
+                                has_army_lists: registration.has_army_lists,
+                                has_army_list_2: registration.has_army_list_2,
+                                army_list_1_validated: registration.army_list_1_validated,
+                                army_list_2_validated: registration.army_list_2_validated,
+                                army_id: if army_visible.contains(&key) {
+                                    registration.army_id
+                                } else {
+                                    None
+                                },
+                            }
                         })
                         .collect()
-                } else {
-                    Vec::new()
-                };
-
-                let pools = if tournament.status == TournamentStatus::Started
-                    && tournament.pools_finalized_at.is_none()
-                    && tournament.structure.uses_pools()
-                {
-                    let mut pools = self.list_pools_in_conn(&conn, tournament.id)?;
-                    // Aperçu liste : pas de sectorielles (révélation gérée sur la fiche détail).
-                    for pool in &mut pools {
-                        for player in &mut pool.players {
-                            player.army_id = None;
-                        }
-                    }
-                    pools
                 } else {
                     Vec::new()
                 };

@@ -1,7 +1,10 @@
+use std::collections::{HashMap, HashSet};
+
 use serde::{Deserialize, Serialize};
 
 use crate::elo;
 use crate::player::MatchOutcome;
+use crate::store::normalize_name;
 
 pub const MAX_POOL_SIZE: usize = 6;
 pub const POOLS_FOUR_CAPACITY: usize = 24;
@@ -342,6 +345,67 @@ impl TournamentRegistration {
     }
 }
 
+/// Joueurs dont la sectorielle peut être affichée (clés normalisées).
+/// Règle : personne tant que la poule n'est pas entièrement validée.
+pub fn army_visible_player_keys(
+    tournament: &Tournament,
+    registrations: &[TournamentRegistration],
+    pools: &[Pool],
+) -> HashSet<String> {
+    if tournament.status == TournamentStatus::Completed {
+        return registrations
+            .iter()
+            .map(|r| normalize_name(&r.player_name))
+            .collect();
+    }
+
+    if tournament.status != TournamentStatus::Started {
+        return HashSet::new();
+    }
+
+    let by_key: HashMap<String, &TournamentRegistration> = registrations
+        .iter()
+        .map(|r| (normalize_name(&r.player_name), r))
+        .collect();
+
+    let mut visible = HashSet::new();
+
+    if tournament.structure.uses_pools() {
+        for pool in pools {
+            if pool.players.is_empty() {
+                continue;
+            }
+            let all_validated = pool.players.iter().all(|player| {
+                by_key
+                    .get(&normalize_name(&player.player_name))
+                    .is_some_and(|reg| reg.lists_fully_validated())
+            });
+            if all_validated {
+                for player in &pool.players {
+                    visible.insert(normalize_name(&player.player_name));
+                }
+            }
+        }
+    } else {
+        let starters: Vec<_> = registrations
+            .iter()
+            .filter(|r| {
+                matches!(
+                    r.status,
+                    RegistrationStatus::Approved | RegistrationStatus::Pending
+                )
+            })
+            .collect();
+        if !starters.is_empty() && starters.iter().all(|r| r.lists_fully_validated()) {
+            for reg in starters {
+                visible.insert(normalize_name(&reg.player_name));
+            }
+        }
+    }
+
+    visible
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct TournamentScenarioSlot {
     /// `pool`, `bracket_pool` (4 scénarios choisis) ou `bracket` (assignés aux tours).
@@ -529,6 +593,14 @@ pub struct TournamentRegistrationPreview {
     pub status: RegistrationStatus,
     #[serde(default)]
     pub has_army_lists: bool,
+    #[serde(default)]
+    pub has_army_list_2: bool,
+    #[serde(default)]
+    pub army_list_1_validated: bool,
+    #[serde(default)]
+    pub army_list_2_validated: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub army_id: Option<u32>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

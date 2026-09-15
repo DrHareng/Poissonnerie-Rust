@@ -58,6 +58,7 @@ import BracketTree from '@/components/BracketTree.vue'
 import PlayerLink from '@/components/PlayerLink.vue'
 import PlayerPicker from '@/components/PlayerPicker.vue'
 import PoolMatchesTable from '@/components/PoolMatchesTable.vue'
+import TournamentPoolsPreview from '@/components/TournamentPoolsPreview.vue'
 import TournamentMatchCard from '@/components/TournamentMatchCard.vue'
 import TournamentScenarioPicker from '@/components/TournamentScenarioPicker.vue'
 import AdminContentEditor from '@/components/AdminContentEditor.vue'
@@ -1151,19 +1152,6 @@ function matchPlayerArmyId(match: TournamentMatch, slot: 'player1' | 'player2') 
   return armyIdForPlayer(match[slot])
 }
 
-function poolPlayerArmyId(pp: PoolPlayer) {
-  return pp.army_id ?? armyIdForPlayer(pp.player_name)
-}
-
-/** Statut visible tant que les sectorielles de la poule sont masquées. */
-function poolPlayerPendingStatus(pp: PoolPlayer): string | null {
-  if (poolPlayerArmyId(pp)) return null
-  const reg = registrationForPlayer(pp.player_name)
-  if (!reg) return null
-  if (registrationListsFullyValidated(reg) || reg.status === 'approved') return null
-  return registrationStatusLabel(reg)
-}
-
 function addPlayerToPool(poolIndex: number) {
   const playerName = poolPickerValues.value[poolIndex]
   if (!playerName) {
@@ -2235,63 +2223,13 @@ onMounted(refresh)
               </CardDescription>
             </CardHeader>
             <CardContent class="grid gap-3">
-              <div v-if="!selectedPoolId" class="grid gap-3 md:grid-cols-2">
-                <div
-                  v-for="pool in sortedPools"
-                  :key="pool.id"
-                  class="pool-summary"
-                >
-                  <button
-                    type="button"
-                    class="pool-summary-header"
-                    @click="selectPool(pool.id)"
-                  >
-                    <h3 class="font-semibold">{{ pool.name }}</h3>
-                  </button>
-                  <table class="pool-standings-table">
-                    <thead>
-                      <tr>
-                        <th class="pool-col-rank">#</th>
-                        <th class="pool-col-player">Joueur</th>
-                        <th class="pool-col-stat">PT</th>
-                        <th class="pool-col-stat">PO</th>
-                        <th class="pool-col-stat">PS</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      <tr
-                        v-for="(pp, idx) in sortedPoolPlayers(pool)"
-                        :key="pp.player_name"
-                      >
-                        <td class="pool-col-rank text-muted-foreground">{{ idx + 1 }}</td>
-                        <td class="pool-col-player">
-                          <span class="flex min-w-0 items-center gap-2">
-                            <PlayerLink
-                              :name="pp.player_name"
-                              :display-name="pp.player_display_name"
-                            />
-                            <ArmyLogo
-                              v-if="poolPlayerArmyId(pp)"
-                              :army-id="poolPlayerArmyId(pp)!"
-                              class="shrink-0"
-                            />
-                            <Badge
-                              v-else-if="poolPlayerPendingStatus(pp)"
-                              variant="outline"
-                              class="shrink-0 text-xs font-normal"
-                            >
-                              {{ poolPlayerPendingStatus(pp) }}
-                            </Badge>
-                          </span>
-                        </td>
-                        <td class="pool-col-stat">{{ pp.points }}</td>
-                        <td class="pool-col-stat">{{ pp.objectives }}</td>
-                        <td class="pool-col-stat">{{ pp.survivors }}</td>
-                      </tr>
-                    </tbody>
-                  </table>
-                </div>
-              </div>
+              <TournamentPoolsPreview
+                v-if="!selectedPoolId"
+                :pools="sortedPools"
+                :registrations="detail.registrations"
+                selectable
+                @select-pool="selectPool"
+              />
 
               <section
                 v-else-if="selectedPool()"

@@ -233,7 +233,7 @@ onMounted(async () => {
               <TournamentPoolsPreview
                 v-if="isTournamentPoolsPhase(tournament)"
                 :pools="tournament.pools ?? []"
-                compact
+                :registrations="tournament.registrations ?? []"
                 @click.stop
               />
               <TournamentDescriptionWithRegistrants

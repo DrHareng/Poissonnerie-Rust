@@ -154,62 +154,7 @@ fn army_visible_player_keys(
     registrations: &[crate::tournament::TournamentRegistration],
     pools: &[crate::tournament::Pool],
 ) -> HashSet<String> {
-    use crate::store::normalize_name;
-
-    if tournament.status == TournamentStatus::Completed {
-        return registrations
-            .iter()
-            .map(|r| normalize_name(&r.player_name))
-            .collect();
-    }
-
-    if tournament.status != TournamentStatus::Started {
-        return HashSet::new();
-    }
-
-    let by_key: HashMap<String, &crate::tournament::TournamentRegistration> = registrations
-        .iter()
-        .map(|r| (normalize_name(&r.player_name), r))
-        .collect();
-
-    let mut visible = HashSet::new();
-
-    if tournament.structure.uses_pools() {
-        for pool in pools {
-            if pool.players.is_empty() {
-                continue;
-            }
-            let all_validated = pool.players.iter().all(|player| {
-                by_key
-                    .get(&normalize_name(&player.player_name))
-                    .is_some_and(|reg| reg.lists_fully_validated())
-            });
-            if all_validated {
-                for player in &pool.players {
-                    visible.insert(normalize_name(&player.player_name));
-                }
-            }
-        }
-    } else {
-        // Swiss : révélation globale quand tous les inscrits démarrés sont validés.
-        let starters: Vec<_> = registrations
-            .iter()
-            .filter(|r| {
-                matches!(
-                    r.status,
-                    crate::tournament::RegistrationStatus::Approved
-                        | crate::tournament::RegistrationStatus::Pending
-                )
-            })
-            .collect();
-        if !starters.is_empty() && starters.iter().all(|r| r.lists_fully_validated()) {
-            for reg in starters {
-                visible.insert(normalize_name(&reg.player_name));
-            }
-        }
-    }
-
-    visible
+    crate::tournament::army_visible_player_keys(tournament, registrations, pools)
 }
 
 fn mask_registrations(
