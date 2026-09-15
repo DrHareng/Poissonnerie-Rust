@@ -329,6 +329,22 @@ impl TournamentStore {
                     Vec::new()
                 };
 
+                let pools = if tournament.status == TournamentStatus::Started
+                    && tournament.pools_finalized_at.is_none()
+                    && tournament.structure.uses_pools()
+                {
+                    let mut pools = self.list_pools_in_conn(&conn, tournament.id)?;
+                    // Aperçu liste : pas de sectorielles (révélation gérée sur la fiche détail).
+                    for pool in &mut pools {
+                        for player in &mut pool.players {
+                            player.army_id = None;
+                        }
+                    }
+                    pools
+                } else {
+                    Vec::new()
+                };
+
                 Ok(TournamentListEntry {
                     tournament,
                     registered_count,
@@ -337,6 +353,7 @@ impl TournamentStore {
                     top_four,
                     bracket_matches,
                     pool_scenarios,
+                    pools,
                     registrations: registration_previews,
                 })
             })

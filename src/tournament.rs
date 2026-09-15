@@ -547,6 +547,9 @@ pub struct TournamentListEntry {
     /// Scénarios de poules (pour affichage sous la description).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub pool_scenarios: Vec<TournamentScenarioSlot>,
+    /// Poules (phase de poules, pour aperçu sur la fiche liste).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub pools: Vec<Pool>,
     /// Inscrits actifs (phase d'inscription uniquement).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub registrations: Vec<TournamentRegistrationPreview>,

@@ -659,6 +659,12 @@ async fn list_tournaments(
                     registration.player_display_name =
                         Some(resolver.resolve(&registration.player_name));
                 }
+                for pool in &mut entry.pools {
+                    for player in &mut pool.players {
+                        player.player_display_name =
+                            Some(resolver.resolve(&player.player_name));
+                    }
+                }
                 entry
             })
             .collect(),

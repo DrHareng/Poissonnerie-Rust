@@ -14,10 +14,12 @@ import TournamentCompletedPodium from '@/components/TournamentCompletedPodium.vu
 import {
   formatRegistrationSummary,
   isTournamentCompleted,
+  isTournamentPoolsPhase,
   isTournamentRegistrationPhase,
   tournamentRegistrationCapacity,
 } from '@/lib/tournamentDisplay'
 import TournamentDescriptionWithRegistrants from '@/components/TournamentDescriptionWithRegistrants.vue'
+import TournamentPoolsPreview from '@/components/TournamentPoolsPreview.vue'
 import type { TournamentListEntry } from '@/types/elo'
 import { useAuth } from '@/composables/useAuth'
 import BracketTree from '@/components/BracketTree.vue'
@@ -265,8 +267,14 @@ onMounted(() => {
             />
 
             <template v-else>
+              <TournamentPoolsPreview
+                v-if="isTournamentPoolsPhase(tournament)"
+                :pools="tournament.pools ?? []"
+                compact
+                @click.stop
+              />
               <TournamentDescriptionWithRegistrants
-                v-if="
+                v-else-if="
                   isTournamentRegistrationPhase(tournament.status)
                   && (tournament.description?.trim()
                     || (tournament.registrations?.length ?? 0) > 0
@@ -287,6 +295,7 @@ onMounted(() => {
                 v-if="
                   (tournament.pool_scenarios?.length ?? 0) > 0
                   && !isTournamentRegistrationPhase(tournament.status)
+                  && !isTournamentPoolsPhase(tournament)
                 "
                 class="space-y-1"
               >

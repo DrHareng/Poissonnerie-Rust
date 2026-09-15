@@ -419,6 +419,7 @@ export interface TournamentListEntry extends Tournament {
   top_four?: TournamentTopFourEntry[]
   bracket_matches?: TournamentMatch[]
   pool_scenarios?: TournamentScenarioSlot[]
+  pools?: Pool[]
   registrations?: TournamentRegistrationPreview[]
 }
 

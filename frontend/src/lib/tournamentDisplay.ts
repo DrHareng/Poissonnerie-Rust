@@ -105,6 +105,19 @@ export function isTournamentRegistrationPhase(status: string): boolean {
   return status === 'registration_open' || status === 'registration_closed'
 }
 
+/** Phase de poules : démarré, poules présentes, pas encore clôturées. */
+export function isTournamentPoolsPhase(tournament: {
+  status: string
+  structure?: string
+  pools_finalized_at?: number | null
+  pools?: unknown[] | null
+}): boolean {
+  if (tournament.status !== 'started') return false
+  if (tournament.structure === 'swiss') return false
+  if (tournament.pools_finalized_at) return false
+  return (tournament.pools?.length ?? 0) > 0
+}
+
 export function isTournamentCompleted(status: string): boolean {
   return status === 'completed'
 }
