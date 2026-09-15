@@ -299,6 +299,11 @@ impl TournamentStore {
                     Vec::new()
                 };
                 enrich_top_four_armies(&mut top_four, &registrations);
+                let pool_matches: Vec<_> = matches
+                    .iter()
+                    .filter(|m| m.phase == TournamentPhase::Pool)
+                    .cloned()
+                    .collect();
                 let bracket_matches: Vec<_> = matches
                     .into_iter()
                     .filter(|m| m.phase != TournamentPhase::Pool)
@@ -373,6 +378,11 @@ impl TournamentStore {
                     display_status,
                     top_four,
                     bracket_matches,
+                    pool_matches: if in_pools_phase {
+                        pool_matches
+                    } else {
+                        Vec::new()
+                    },
                     pool_scenarios,
                     pools,
                     registrations: registration_previews,

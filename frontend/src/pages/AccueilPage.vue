@@ -234,6 +234,7 @@ onMounted(async () => {
                 v-if="isTournamentPoolsPhase(tournament)"
                 :pools="tournament.pools ?? []"
                 :registrations="tournament.registrations ?? []"
+                :matches="tournament.pool_matches ?? []"
                 @click.stop
               />
               <TournamentDescriptionWithRegistrants

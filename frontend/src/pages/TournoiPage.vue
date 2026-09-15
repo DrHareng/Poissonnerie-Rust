@@ -2227,6 +2227,7 @@ onMounted(refresh)
                 v-if="!selectedPoolId"
                 :pools="sortedPools"
                 :registrations="detail.registrations"
+                :matches="poolMatches"
                 selectable
                 @select-pool="selectPool"
               />

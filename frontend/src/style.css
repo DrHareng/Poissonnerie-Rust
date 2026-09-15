@@ -714,12 +714,17 @@
     @apply min-w-0 text-left;
   }
 
+  .pool-col-played {
+    @apply w-12 text-right tabular-nums text-muted-foreground;
+  }
+
   .pool-col-stat {
     @apply w-10 text-right tabular-nums text-muted-foreground;
   }
 
   .pool-standings-table th.pool-col-stat,
-  .pool-standings-table th.pool-col-rank {
+  .pool-standings-table th.pool-col-rank,
+  .pool-standings-table th.pool-col-played {
     @apply text-right;
   }
 

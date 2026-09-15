@@ -4,7 +4,7 @@ import ArmyLogo from '@/components/ArmyLogo.vue'
 import PlayerLink from '@/components/PlayerLink.vue'
 import { Badge } from '@/components/ui/badge'
 import { registrationStatusLabel } from '@/lib/tournamentDisplay'
-import type { Pool, PoolPlayer, RegistrationStatus } from '@/types/elo'
+import type { Pool, PoolPlayer, RegistrationStatus, TournamentMatch } from '@/types/elo'
 
 export type PoolStandingRegistration = {
   player_name: string
@@ -21,11 +21,14 @@ const props = withDefaults(
     pools: Pool[]
     /** Inscriptions pour badges « en attente… » quand la sectorielle est masquée. */
     registrations?: PoolStandingRegistration[]
+    /** Matchs de poule pour le compteur jouée/total. */
+    matches?: TournamentMatch[]
     /** Si true, l'en-tête de poule est cliquable. */
     selectable?: boolean
   }>(),
   {
     registrations: () => [],
+    matches: () => [],
     selectable: false,
   },
 )
@@ -78,6 +81,37 @@ function playerPendingStatus(pp: PoolPlayer): string | null {
   if (listsFullyValidated(reg) || reg.status === 'approved') return null
   return registrationStatusLabel(reg)
 }
+
+function isPoolMatchFinished(match: TournamentMatch) {
+  if (match.is_unplayed) return true
+  if (match.status === 'confirmed') return true
+  // Forfait déclaré : la partie ne sera pas jouée.
+  if (match.is_forfeit && match.status !== 'scheduled') return true
+  return false
+}
+
+function matchInvolvesPlayer(match: TournamentMatch, playerName: string) {
+  const key = playerName.toLowerCase()
+  return (
+    match.player1?.toLowerCase() === key
+    || match.player2?.toLowerCase() === key
+  )
+}
+
+function playerGamesLabel(pool: Pool, playerName: string) {
+  const poolMatches = props.matches.filter(
+    (match) =>
+      match.phase === 'pool'
+      && match.pool_id === pool.id
+      && matchInvolvesPlayer(match, playerName),
+  )
+  const total =
+    poolMatches.length > 0
+      ? poolMatches.length
+      : Math.max(0, pool.players.length - 1)
+  const played = poolMatches.filter(isPoolMatchFinished).length
+  return `${played}/${total}`
+}
 </script>
 
 <template>
@@ -103,6 +137,7 @@ function playerPendingStatus(pp: PoolPlayer): string | null {
           <tr>
             <th class="pool-col-rank">#</th>
             <th class="pool-col-player">Joueur</th>
+            <th class="pool-col-played">jouée</th>
             <th class="pool-col-stat">PT</th>
             <th class="pool-col-stat">PO</th>
             <th class="pool-col-stat">PS</th>
@@ -133,6 +168,9 @@ function playerPendingStatus(pp: PoolPlayer): string | null {
                   {{ playerPendingStatus(pp) }}
                 </Badge>
               </span>
+            </td>
+            <td class="pool-col-played">
+              {{ playerGamesLabel(pool, pp.player_name) }}
             </td>
             <td class="pool-col-stat">{{ pp.points }}</td>
             <td class="pool-col-stat">{{ pp.objectives }}</td>

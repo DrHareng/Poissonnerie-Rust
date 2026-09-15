@@ -616,6 +616,9 @@ pub struct TournamentListEntry {
     /// Matchs d'arbre (hors poules), pour le mini-rendu dans la liste.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub bracket_matches: Vec<TournamentMatch>,
+    /// Matchs de poule (phase de poules, pour compteur jouée/total).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub pool_matches: Vec<TournamentMatch>,
     /// Scénarios de poules (pour affichage sous la description).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub pool_scenarios: Vec<TournamentScenarioSlot>,
