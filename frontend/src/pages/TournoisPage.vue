@@ -33,7 +33,6 @@ import { Button } from '@/components/ui/button'
 import {
   Card,
   CardContent,
-  CardDescription,
   CardHeader,
   CardTitle,
 } from '@/components/ui/card'
@@ -180,14 +179,6 @@ onMounted(() => {
         v-if="showMyTournamentsSide"
         class="flex h-full min-h-0 flex-col gap-3 overflow-y-auto"
       >
-        <Card class="neon-panel shrink-0">
-          <CardHeader class="pb-2">
-            <CardTitle>Mes tournois</CardTitle>
-            <CardDescription>
-              Inscriptions en cours ou à venir.
-            </CardDescription>
-          </CardHeader>
-        </Card>
         <MyTournamentSideCard
           v-for="tournament in myTournaments"
           :key="tournament.id"
@@ -201,9 +192,6 @@ onMounted(() => {
       v-if="showMyTournamentsSide"
       class="mb-4 grid gap-3 lg:hidden"
     >
-      <h2 class="text-sm font-medium uppercase tracking-wide text-muted-foreground">
-        Mes tournois
-      </h2>
       <MyTournamentSideCard
         v-for="tournament in myTournaments"
         :key="`mobile-${tournament.id}`"
