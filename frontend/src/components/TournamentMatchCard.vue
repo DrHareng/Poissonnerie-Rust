@@ -90,7 +90,6 @@ const showScoresView = computed(
 )
 
 const scoreboardMode = computed(() => {
-  if (correcting.value) return 'form' as const
   if (showScoresView.value) return 'scores' as const
   return 'players' as const
 })
@@ -417,7 +416,10 @@ function matchPlayerLabel(slot: 'player1' | 'player2') {
         </div>
       </div>
 
-      <div class="tournament-match-layout">
+      <div
+        v-if="!correcting"
+        class="tournament-match-layout"
+      >
         <TournamentMatchScoreboard
           :match="match"
           :mode="scoreboardMode"

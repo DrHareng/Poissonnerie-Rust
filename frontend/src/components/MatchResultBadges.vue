@@ -28,15 +28,21 @@ const badgeStyle = computed(() =>
     : undefined,
 )
 
+const badgePairGapRem = 0.5
+
 const pairStyle = computed(() =>
   props.badgeMinCh != null
-    ? { width: `calc(${props.badgeMinCh * 2}ch + 0.25rem)` }
+    ? {
+        width: `calc(${props.badgeMinCh * 2}ch + ${badgePairGapRem}rem)`,
+      }
     : undefined,
 )
 
 const inProgressStyle = computed(() =>
   props.badgeMinCh != null
-    ? { minWidth: `calc(${props.badgeMinCh * 2}ch + 0.25rem)` }
+    ? {
+        minWidth: `calc(${props.badgeMinCh * 2}ch + ${badgePairGapRem}rem)`,
+      }
     : undefined,
 )
 
@@ -95,8 +101,8 @@ function scoreLabel(objectives: number, survivors: number) {
   </div>
   <div
     v-else
-    class="mx-auto grid grid-cols-2 gap-1"
-    :class="badgeMinCh == null ? 'w-36 gap-2' : undefined"
+    class="mx-auto grid grid-cols-2 gap-2"
+    :class="badgeMinCh == null ? 'w-36' : undefined"
     :style="pairStyle"
   >
     <Badge

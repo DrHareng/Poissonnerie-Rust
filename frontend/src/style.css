@@ -752,6 +752,18 @@
     @apply border-b-0;
   }
 
+  .pool-standings-table tbody tr.pool-standings-row--qualified td {
+    @apply bg-muted/35;
+  }
+
+  .pool-standings-table
+    tbody
+    tr.pool-standings-row--qualified
+    + tr:not(.pool-standings-row--qualified)
+    td {
+    @apply border-t border-border/60;
+  }
+
   .pool-col-rank {
     @apply w-8 text-right tabular-nums;
   }

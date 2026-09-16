@@ -2347,6 +2347,7 @@ onMounted(refresh)
                 :pools="sortedPools"
                 :registrations="detail.registrations"
                 :matches="poolMatches"
+                :qualified-per-pool="detail.qualified_per_pool ?? 0"
                 selectable
                 @select-pool="selectPool"
               />

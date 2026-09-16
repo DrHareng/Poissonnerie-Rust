@@ -25,11 +25,14 @@ const props = withDefaults(
     matches?: TournamentMatch[]
     /** Si true, la carte poule est cliquable. */
     selectable?: boolean
+    /** Nombre de premiers du classement qualifiés (surbrillance discrète). */
+    qualifiedPerPool?: number
   }>(),
   {
     registrations: () => [],
     matches: () => [],
     selectable: false,
+    qualifiedPerPool: 0,
   },
 )
 
@@ -117,6 +120,11 @@ function onSelectPool(poolId: number) {
   if (!props.selectable) return
   emit('selectPool', poolId)
 }
+
+function isQualifiedRank(rankIndex: number) {
+  const n = props.qualifiedPerPool
+  return n > 0 && rankIndex < n
+}
 </script>
 
 <template>
@@ -150,6 +158,7 @@ function onSelectPool(poolId: number) {
           <tr
             v-for="(pp, idx) in sortedPoolPlayers(pool)"
             :key="pp.player_name"
+            :class="{ 'pool-standings-row--qualified': isQualifiedRank(idx) }"
           >
             <td class="pool-col-rank text-muted-foreground">{{ idx + 1 }}</td>
             <td class="pool-col-player">

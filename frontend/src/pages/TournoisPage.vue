@@ -329,6 +329,7 @@ onMounted(() => {
                 :pools="tournament.pools ?? []"
                 :registrations="tournament.registrations ?? []"
                 :matches="tournament.pool_matches ?? []"
+                :qualified-per-pool="tournament.qualified_per_pool ?? 0"
                 selectable
                 @click.stop
                 @select-pool="openTournamentPool(tournament.id, $event)"
