@@ -426,6 +426,8 @@ export interface TournamentListEntry extends Tournament {
   pool_scenarios?: TournamentScenarioSlot[]
   pools?: Pool[]
   registrations?: TournamentRegistrationPreview[]
+  my_registration?: TournamentRegistration | null
+  my_upcoming_matches?: TournamentMatch[]
 }
 
 export interface ArmyListStatsEntry {

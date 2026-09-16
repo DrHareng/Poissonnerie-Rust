@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { Plus, Trophy } from '@lucide/vue'
 import { toast } from 'vue-sonner'
@@ -11,6 +11,7 @@ import {
   type TournamentCompletedViewMode,
 } from '@/lib/api'
 import TournamentCompletedPodium from '@/components/TournamentCompletedPodium.vue'
+import MyTournamentSideCard from '@/components/MyTournamentSideCard.vue'
 import {
   formatRegistrationSummary,
   isTournamentCompleted,
@@ -22,6 +23,7 @@ import TournamentDescriptionWithRegistrants from '@/components/TournamentDescrip
 import TournamentPoolsPreview from '@/components/TournamentPoolsPreview.vue'
 import type { TournamentListEntry } from '@/types/elo'
 import { useAuth } from '@/composables/useAuth'
+import { useAppSidePanel } from '@/composables/useAppSidePanel'
 import BracketTree from '@/components/BracketTree.vue'
 import MarkdownContent from '@/components/MarkdownContent.vue'
 import TournamentPoolScenarioLinks from '@/components/TournamentPoolScenarioLinks.vue'
@@ -31,6 +33,7 @@ import { Button } from '@/components/ui/button'
 import {
   Card,
   CardContent,
+  CardDescription,
   CardHeader,
   CardTitle,
 } from '@/components/ui/card'
@@ -40,7 +43,8 @@ import { tournoisTabs } from '@/lib/pageTitleTabs'
 
 const router = useRouter()
 const route = useRoute()
-const { isAdmin } = useAuth()
+const { isAdmin, hasPlayer, isAuthenticated } = useAuth()
+const { setCustomSide } = useAppSidePanel()
 
 const tournaments = ref<TournamentListEntry[]>([])
 const loading = ref(true)
@@ -60,6 +64,19 @@ const filteredTournaments = computed(() =>
       ? isTournamentCompleted(tournament.status)
       : !isTournamentCompleted(tournament.status),
   ),
+)
+
+const myTournaments = computed(() =>
+  tournaments.value.filter(
+    (tournament) =>
+      !isTournamentCompleted(tournament.status)
+      && tournament.status !== 'draft'
+      && !!tournament.my_registration,
+  ),
+)
+
+const showMyTournamentsSide = computed(
+  () => isAuthenticated.value && hasPlayer.value && myTournaments.value.length > 0,
 )
 
 const listTitle = computed(() =>
@@ -119,6 +136,21 @@ async function create() {
   }
 }
 
+function openTournamentPool(tournamentId: number, poolId: number) {
+  void router.push({
+    name: 'tournoi',
+    params: { id: tournamentId },
+    query: { tab: 'poules', poolId: String(poolId) },
+  })
+}
+
+watch(
+  showMyTournamentsSide,
+  (active) => setCustomSide(active),
+  { immediate: true },
+)
+onBeforeUnmount(() => setCustomSide(false))
+
 onMounted(() => {
   void refresh()
   void fetchPrefs()
@@ -142,6 +174,43 @@ onMounted(() => {
       :tabs="tournoisTabs"
       ariaLabel="Sections des tournois"
     />
+
+    <Teleport defer to="#app-side-panel">
+      <div
+        v-if="showMyTournamentsSide"
+        class="flex h-full min-h-0 flex-col gap-3 overflow-y-auto"
+      >
+        <Card class="neon-panel shrink-0">
+          <CardHeader class="pb-2">
+            <CardTitle>Mes tournois</CardTitle>
+            <CardDescription>
+              Inscriptions en cours ou à venir.
+            </CardDescription>
+          </CardHeader>
+        </Card>
+        <MyTournamentSideCard
+          v-for="tournament in myTournaments"
+          :key="tournament.id"
+          :tournament="tournament"
+          @refreshed="refresh"
+        />
+      </div>
+    </Teleport>
+
+    <div
+      v-if="showMyTournamentsSide"
+      class="mb-4 grid gap-3 lg:hidden"
+    >
+      <h2 class="text-sm font-medium uppercase tracking-wide text-muted-foreground">
+        Mes tournois
+      </h2>
+      <MyTournamentSideCard
+        v-for="tournament in myTournaments"
+        :key="`mobile-${tournament.id}`"
+        :tournament="tournament"
+        @refreshed="refresh"
+      />
+    </div>
 
     <Card v-if="isAdmin && showCreate && !isCompletedTab" class="neon-panel">
       <CardHeader>
@@ -272,7 +341,9 @@ onMounted(() => {
                 :pools="tournament.pools ?? []"
                 :registrations="tournament.registrations ?? []"
                 :matches="tournament.pool_matches ?? []"
+                selectable
                 @click.stop
+                @select-pool="openTournamentPool(tournament.id, $event)"
               />
               <TournamentDescriptionWithRegistrants
                 v-else-if="

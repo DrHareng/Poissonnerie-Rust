@@ -1,14 +1,25 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import type { MatchRecord } from '@/types/elo'
 import { Badge } from '@/components/ui/badge'
 
+/** Champs minimaux pour les pastilles (match Elo ou tournoi). */
+export type MatchResultBadgeSource = {
+  player1_objectives: number
+  player2_objectives: number
+  player1_survivors: number
+  player2_survivors: number
+  outcome?: string | null
+  status?: string
+}
+
 const props = defineProps<{
-  match: MatchRecord
+  match: MatchResultBadgeSource
   /** Largeur mini commune des badges score (en `ch`), partagée sur une colonne. */
   badgeMinCh?: number
   /** Met en évidence la défaite (badge adversaire rouge). */
   emphasizeDefeat?: boolean
+  /** Libellé si pas encore de résultat (défaut : En cours). */
+  pendingLabel?: string
 }>()
 
 const badgeStyle = computed(() =>
@@ -29,8 +40,12 @@ const inProgressStyle = computed(() =>
     : undefined,
 )
 
+const showPending = computed(
+  () => props.match.status === 'in_progress' || !props.match.outcome,
+)
+
 function badgeVariant(
-  match: MatchRecord,
+  match: MatchResultBadgeSource,
   player: 'player1' | 'player2',
 ): 'default' | 'secondary' | 'outline' | 'destructive' {
   if (!match.outcome || match.status === 'in_progress') {
@@ -48,7 +63,7 @@ function badgeVariant(
   return 'outline'
 }
 
-function badgeClass(match: MatchRecord, player: 'player1' | 'player2') {
+function badgeClass(match: MatchResultBadgeSource, player: 'player1' | 'player2') {
   if (
     props.emphasizeDefeat
     && match.outcome === 'player2_win'
@@ -66,7 +81,7 @@ function scoreLabel(objectives: number, survivors: number) {
 
 <template>
   <div
-    v-if="match.status === 'in_progress' || !match.outcome"
+    v-if="showPending"
     class="mx-auto flex justify-center text-center"
     :style="pairStyle"
   >
@@ -75,7 +90,7 @@ function scoreLabel(objectives: number, survivors: number) {
       class="justify-center tabular-nums"
       :style="inProgressStyle"
     >
-      En cours
+      {{ pendingLabel ?? 'En cours' }}
     </Badge>
   </div>
   <div

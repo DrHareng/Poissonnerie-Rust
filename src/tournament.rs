@@ -628,6 +628,12 @@ pub struct TournamentListEntry {
     /// Inscrits actifs (phase d'inscription uniquement).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub registrations: Vec<TournamentRegistrationPreview>,
+    /// Inscription du viewer (codes de listes inclus pour soi).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub my_registration: Option<TournamentRegistration>,
+    /// Matchs à venir du viewer (non joués / non confirmés).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub my_upcoming_matches: Vec<TournamentMatch>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

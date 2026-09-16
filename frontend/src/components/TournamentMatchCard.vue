@@ -79,7 +79,9 @@ const isPoolMatch = computed(() => props.match.phase === 'pool')
 
 const showScoresView = computed(
   () =>
-    (props.match.status === 'confirmed' || props.match.status === 'submitted')
+    (props.match.status === 'confirmed'
+      || props.match.status === 'submitted'
+      || props.match.is_unplayed)
     && !correcting.value,
 )
 

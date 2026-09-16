@@ -123,6 +123,15 @@ function openTournament() {
   router.push({ name: 'tournoi', params: { id: tournament.value.id } })
 }
 
+function openTournamentPool(poolId: number) {
+  if (!tournament.value) return
+  void router.push({
+    name: 'tournoi',
+    params: { id: tournament.value.id },
+    query: { tab: 'poules', poolId: String(poolId) },
+  })
+}
+
 function matchContextLabel(match: MatchRecord) {
   const parts: string[] = []
   if (match.tournament_id != null && match.tournament_phase) {
@@ -235,7 +244,9 @@ onMounted(async () => {
                 :pools="tournament.pools ?? []"
                 :registrations="tournament.registrations ?? []"
                 :matches="tournament.pool_matches ?? []"
+                selectable
                 @click.stop
+                @select-pool="openTournamentPool"
               />
               <TournamentDescriptionWithRegistrants
                 v-else-if="

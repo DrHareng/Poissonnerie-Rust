@@ -386,6 +386,8 @@ impl TournamentStore {
                     pool_scenarios,
                     pools,
                     registrations: registration_previews,
+                    my_registration: None,
+                    my_upcoming_matches: Vec::new(),
                 })
             })
             .collect()
@@ -1912,6 +1914,24 @@ impl TournamentStore {
     pub fn get_match(&self, match_id: i64) -> Result<Option<TournamentMatch>> {
         let conn = self.conn.lock().unwrap();
         self.get_match_in_conn(&conn, match_id)
+    }
+
+    pub fn list_matches(&self, tournament_id: i64) -> Result<Vec<TournamentMatch>> {
+        let conn = self.conn.lock().unwrap();
+        self.list_matches_in_conn(&conn, tournament_id)
+    }
+
+    pub fn list_pools(&self, tournament_id: i64) -> Result<Vec<Pool>> {
+        let conn = self.conn.lock().unwrap();
+        self.list_pools_in_conn(&conn, tournament_id)
+    }
+
+    pub fn list_registrations(
+        &self,
+        tournament_id: i64,
+    ) -> Result<Vec<TournamentRegistration>> {
+        let conn = self.conn.lock().unwrap();
+        self.list_registrations_in_conn(&conn, tournament_id)
     }
 
     pub fn get_registration_for_player(

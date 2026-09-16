@@ -23,7 +23,7 @@ const props = withDefaults(
     registrations?: PoolStandingRegistration[]
     /** Matchs de poule pour le compteur jouée/total. */
     matches?: TournamentMatch[]
-    /** Si true, l'en-tête de poule est cliquable. */
+    /** Si true, la carte poule est cliquable. */
     selectable?: boolean
   }>(),
   {
@@ -112,6 +112,11 @@ function playerGamesLabel(pool: Pool, playerName: string) {
   const played = poolMatches.filter(isPoolMatchFinished).length
   return `${played}/${total}`
 }
+
+function onSelectPool(poolId: number) {
+  if (!props.selectable) return
+  emit('selectPool', poolId)
+}
 </script>
 
 <template>
@@ -120,16 +125,14 @@ function playerGamesLabel(pool: Pool, playerName: string) {
       v-for="pool in sortedPools"
       :key="pool.id"
       class="pool-summary"
+      :class="{ 'pool-summary--selectable': selectable }"
+      :role="selectable ? 'button' : undefined"
+      :tabindex="selectable ? 0 : undefined"
+      @click="onSelectPool(pool.id)"
+      @keydown.enter.prevent="onSelectPool(pool.id)"
+      @keydown.space.prevent="onSelectPool(pool.id)"
     >
-      <button
-        v-if="selectable"
-        type="button"
-        class="pool-summary-header"
-        @click.stop="emit('selectPool', pool.id)"
-      >
-        <h3 class="font-semibold">{{ pool.name }}</h3>
-      </button>
-      <div v-else class="pool-summary-header">
+      <div class="pool-summary-header">
         <h3 class="font-semibold">{{ pool.name }}</h3>
       </div>
       <table class="pool-standings-table">
@@ -154,6 +157,7 @@ function playerGamesLabel(pool: Pool, playerName: string) {
                 <PlayerLink
                   :name="pp.player_name"
                   :display-name="pp.player_display_name"
+                  @click.stop
                 />
                 <ArmyLogo
                   v-if="playerArmyId(pp)"

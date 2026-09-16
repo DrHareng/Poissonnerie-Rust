@@ -1098,7 +1098,7 @@ async fn viewer_player_name(state: &AppState, session: &Session) -> Option<Strin
 fn mask_tournament_elo_lists(
     state: &AppState,
     record: &mut MatchRecord,
-    viewer_player: Option<&str>,
+    _viewer_player: Option<&str>,
 ) {
     let Some(tournament_id) = record.tournament_id else {
         return;
@@ -1112,15 +1112,11 @@ fn mask_tournament_elo_lists(
     if status == Some(TournamentStatus::Completed) {
         return;
     }
-    // Match Elo = résultat déjà validé ; visible seulement aux 2 joueurs tant que le tournoi n'est pas fini.
-    let is_participant = viewer_player.is_some_and(|name| {
-        crate::store::normalize_name(name) == crate::store::normalize_name(&record.player1)
-            || crate::store::normalize_name(name) == crate::store::normalize_name(&record.player2)
-    });
-    if !is_participant {
-        record.player1_army_list_code = None;
-        record.player2_army_list_code = None;
-    }
+    // Listes masquées pour tout le monde tant que le tournoi n'est pas terminé.
+    record.player1_army_list_code = None;
+    record.player2_army_list_code = None;
+    record.player1_army_list_id = None;
+    record.player2_army_list_id = None;
 }
 
 fn mask_draft_reports(record: &mut MatchRecord, viewer_player: Option<&str>) {

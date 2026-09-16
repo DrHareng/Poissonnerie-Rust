@@ -10,10 +10,10 @@ import {
   DropdownMenuTrigger,
 } from 'reka-ui'
 import ArmyLogo from '@/components/ArmyLogo.vue'
+import MatchResultBadges from '@/components/MatchResultBadges.vue'
 import PlayerLink from '@/components/PlayerLink.vue'
 import TournamentMatchScoreboard from '@/components/TournamentMatchScoreboard.vue'
 import { Button } from '@/components/ui/button'
-import { matchPlayerScores } from '@/lib/tournamentMatchDisplay'
 import { COUPE_REQUIRES_NETWORK } from '@/lib/partieOffline'
 import type { TournamentMatchForm } from '@/components/TournamentMatchCard.vue'
 import type { TournamentMatch } from '@/types/elo'
@@ -125,6 +125,10 @@ function showPrimaryAction(match: TournamentMatch) {
   )
 }
 
+function showStatusInActions(match: TournamentMatch) {
+  return !showPrimaryAction(match) && !showMatchOptionsMenu(match)
+}
+
 function matchPlayerLabel(match: TournamentMatch, slot: 'player1' | 'player2') {
   const displayName =
     slot === 'player1' ? match.player1_display_name : match.player2_display_name
@@ -141,13 +145,10 @@ function hasScores(match: TournamentMatch) {
   )
 }
 
-function formatScoreLine(match: TournamentMatch, slot: 'player1' | 'player2') {
-  if (!hasScores(match)) return '—'
-  const { pt, po, ps } = matchPlayerScores(match, slot)
-  if (match.status === 'confirmed') {
-    return `${pt} PT · ${po} PO · ${ps} PS`
-  }
-  return `${po} PO · ${ps} PS`
+function scoreColumnPendingLabel(match: TournamentMatch) {
+  if (match.is_unplayed) return 'Non joué'
+  if (match.is_forfeit) return 'Forfait'
+  return '—'
 }
 
 function startCorrection(match: TournamentMatch) {
@@ -198,7 +199,6 @@ watch(
         <th class="pool-col-player">Joueur 2</th>
         <th class="pool-col-scenario">Scénario</th>
         <th class="pool-col-admin" />
-        <th class="pool-col-status">Statut</th>
       </tr>
     </thead>
     <tbody>
@@ -220,11 +220,29 @@ watch(
             </span>
           </td>
           <td class="pool-col-score">
-            <span class="pool-match-score-line tabular-nums">
-              <span>{{ formatScoreLine(match, 'player1') }}</span>
-              <span class="pool-match-score-sep" aria-hidden="true">—</span>
-              <span>{{ formatScoreLine(match, 'player2') }}</span>
-            </span>
+            <div
+              v-if="hasScores(match)"
+              class="pool-match-result-badges"
+            >
+              <MatchResultBadges
+                v-if="match.is_unplayed || (match.is_forfeit && !match.outcome)"
+                :match="{
+                  player1_objectives: 0,
+                  player2_objectives: 0,
+                  player1_survivors: 0,
+                  player2_survivors: 0,
+                  outcome: null,
+                }"
+                :pending-label="scoreColumnPendingLabel(match)"
+                :badge-min-ch="5"
+              />
+              <MatchResultBadges
+                v-else
+                :match="match"
+                :badge-min-ch="5"
+              />
+            </div>
+            <span v-else class="text-muted-foreground">—</span>
           </td>
           <td class="pool-col-player">
             <span class="flex min-w-0 items-center gap-2">
@@ -249,113 +267,116 @@ watch(
           </td>
           <td class="pool-col-admin">
             <div class="pool-match-admin-actions">
-              <Button
-                v-if="canStart(match)"
-                size="sm"
-                :disabled="!isOnline"
-                :title="!isOnline ? COUPE_REQUIRES_NETWORK : undefined"
-                @click="emit('start', match)"
-              >
-                Démarrer
-              </Button>
-              <Button
-                v-else-if="canResume(match)"
-                size="sm"
-                :disabled="!isOnline"
-                :title="!isOnline ? COUPE_REQUIRES_NETWORK : undefined"
-                @click="emit('resume', match)"
-              >
-                Reprendre
-              </Button>
-              <Button
-                v-else-if="canConfirm(match)"
-                size="sm"
-                variant="outline"
-                @click="emit('confirm', match)"
-              >
-                {{ match.is_forfeit ? 'Confirmer FF' : 'Confirmer' }}
-              </Button>
-              <Button
-                v-else-if="canCorrect(match)"
-                size="sm"
-                variant="outline"
-                @click="startCorrection(match)"
-              >
-                Corriger
-              </Button>
-              <Button
-                v-else-if="isAdmin && match.is_forfeit"
-                size="sm"
-                variant="outline"
-                @click="emit('cancelForfeit', match)"
-              >
-                Annuler FF
-              </Button>
-              <DropdownMenuRoot v-if="showMatchOptionsMenu(match)">
-                <DropdownMenuTrigger as-child>
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    title="Options du match"
-                    aria-label="Options du match"
-                  >
-                    <Settings2 class="size-3.5" />
-                  </Button>
-                </DropdownMenuTrigger>
-                <DropdownMenuPortal>
-                  <DropdownMenuContent
-                    align="end"
-                    :side-offset="6"
-                    class="z-50 min-w-48 rounded-md border bg-popover p-1 text-popover-foreground shadow-md"
-                  >
-                    <DropdownMenuItem
-                      v-if="selfForfeitName(match)"
-                      :class="menuItemDangerClass"
-                      @select="emit('forfeit', match, selfForfeitName(match)!)"
+              <template v-if="showStatusInActions(match)">
+                <span class="pool-match-status-label">
+                  {{ statusLabel(match) }}
+                </span>
+              </template>
+              <template v-else>
+                <Button
+                  v-if="canStart(match)"
+                  size="sm"
+                  :disabled="!isOnline"
+                  :title="!isOnline ? COUPE_REQUIRES_NETWORK : undefined"
+                  @click="emit('start', match)"
+                >
+                  Démarrer
+                </Button>
+                <Button
+                  v-else-if="canResume(match)"
+                  size="sm"
+                  :disabled="!isOnline"
+                  :title="!isOnline ? COUPE_REQUIRES_NETWORK : undefined"
+                  @click="emit('resume', match)"
+                >
+                  Reprendre
+                </Button>
+                <Button
+                  v-else-if="canConfirm(match)"
+                  size="sm"
+                  variant="outline"
+                  @click="emit('confirm', match)"
+                >
+                  {{ match.is_forfeit ? 'Confirmer FF' : 'Confirmer' }}
+                </Button>
+                <Button
+                  v-else-if="canCorrect(match)"
+                  size="sm"
+                  variant="outline"
+                  @click="startCorrection(match)"
+                >
+                  Corriger
+                </Button>
+                <Button
+                  v-else-if="isAdmin && match.is_forfeit"
+                  size="sm"
+                  variant="outline"
+                  @click="emit('cancelForfeit', match)"
+                >
+                  Annuler FF
+                </Button>
+                <DropdownMenuRoot v-if="showMatchOptionsMenu(match)">
+                  <DropdownMenuTrigger as-child>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      class="pool-match-options-trigger"
+                      title="Options du match"
+                      aria-label="Options du match"
                     >
-                      Je déclare forfait
-                    </DropdownMenuItem>
-                    <DropdownMenuSeparator
-                      v-if="selfForfeitName(match) && isAdmin"
-                      class="my-1 h-px bg-border"
-                    />
-                    <template v-if="isAdmin">
+                      <Settings2 class="size-3.5" />
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuPortal>
+                    <DropdownMenuContent
+                      align="end"
+                      :side-offset="6"
+                      class="z-50 min-w-48 rounded-md border bg-popover p-1 text-popover-foreground shadow-md"
+                    >
                       <DropdownMenuItem
-                        v-if="allowUnplayed && match.phase === 'pool'"
-                        :class="menuItemClass"
-                        @select="emit('unplayed', match)"
-                      >
-                        Match non joué
-                      </DropdownMenuItem>
-                      <DropdownMenuItem
+                        v-if="selfForfeitName(match)"
                         :class="menuItemDangerClass"
-                        @select="emit('forfeit', match, match.player1!)"
+                        @select="emit('forfeit', match, selfForfeitName(match)!)"
                       >
-                        FF {{ matchPlayerLabel(match, 'player1') }}
+                        Je déclare forfait
                       </DropdownMenuItem>
-                      <DropdownMenuItem
-                        :class="menuItemDangerClass"
-                        @select="emit('forfeit', match, match.player2!)"
-                      >
-                        FF {{ matchPlayerLabel(match, 'player2') }}
-                      </DropdownMenuItem>
-                    </template>
-                  </DropdownMenuContent>
-                </DropdownMenuPortal>
-              </DropdownMenuRoot>
+                      <DropdownMenuSeparator
+                        v-if="selfForfeitName(match) && isAdmin"
+                        class="my-1 h-px bg-border"
+                      />
+                      <template v-if="isAdmin">
+                        <DropdownMenuItem
+                          v-if="allowUnplayed && match.phase === 'pool'"
+                          :class="menuItemClass"
+                          @select="emit('unplayed', match)"
+                        >
+                          Match non joué
+                        </DropdownMenuItem>
+                        <DropdownMenuItem
+                          :class="menuItemDangerClass"
+                          @select="emit('forfeit', match, match.player1!)"
+                        >
+                          FF {{ matchPlayerLabel(match, 'player1') }}
+                        </DropdownMenuItem>
+                        <DropdownMenuItem
+                          :class="menuItemDangerClass"
+                          @select="emit('forfeit', match, match.player2!)"
+                        >
+                          FF {{ matchPlayerLabel(match, 'player2') }}
+                        </DropdownMenuItem>
+                      </template>
+                    </DropdownMenuContent>
+                  </DropdownMenuPortal>
+                </DropdownMenuRoot>
+              </template>
             </div>
-          </td>
-          <td class="pool-col-status">
-            <span v-if="!showPrimaryAction(match)">
-              {{ statusLabel(match) }}
-            </span>
           </td>
         </tr>
         <tr
           v-if="showEditRow(match)"
           class="pool-match-edit-row"
         >
-          <td colspan="6">
+          <td colspan="5">
             <div class="pool-match-edit-panel">
               <template v-if="isCorrecting(match)">
                 <TournamentMatchScoreboard

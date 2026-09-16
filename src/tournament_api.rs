@@ -247,25 +247,15 @@ fn mask_match_armies(
 fn mask_tournament_match_lists(
     tournament: &crate::tournament::Tournament,
     matches: &mut [crate::tournament::TournamentMatch],
-    viewer: &ViewerContext,
+    _viewer: &ViewerContext,
 ) {
     if tournament.status == TournamentStatus::Completed {
         return;
     }
+    // Listes masquées pour tout le monde tant que le tournoi n'est pas terminé.
     for tm in matches {
-        let is_participant = viewer.player_name.as_ref().is_some_and(|name| {
-            tm.player1.as_ref().is_some_and(|p| {
-                crate::store::normalize_name(name) == crate::store::normalize_name(p)
-            }) || tm.player2.as_ref().is_some_and(|p| {
-                crate::store::normalize_name(name) == crate::store::normalize_name(p)
-            })
-        });
-        let revealed_to_participants =
-            tm.status == crate::tournament::TournamentMatchStatus::Confirmed;
-        if !revealed_to_participants || !is_participant {
-            tm.player1_army_list_code = None;
-            tm.player2_army_list_code = None;
-        }
+        tm.player1_army_list_code = None;
+        tm.player2_army_list_code = None;
     }
 }
 
@@ -610,10 +600,115 @@ async fn list_tournaments(
                             Some(resolver.resolve(&player.player_name));
                     }
                 }
+                enrich_my_tournament_summary(&state, &viewer, &resolver, &mut entry);
                 entry
             })
             .collect(),
     ))
+}
+
+fn enrich_my_tournament_summary(
+    state: &AppState,
+    viewer: &ViewerContext,
+    resolver: &crate::display_name::PlayerDisplayResolver<'_>,
+    entry: &mut crate::tournament::TournamentListEntry,
+) {
+    let Some(player_name) = viewer.player_name.as_deref() else {
+        return;
+    };
+    if entry.tournament.status == TournamentStatus::Completed
+        || entry.tournament.status == TournamentStatus::Draft
+    {
+        return;
+    }
+
+    let Ok(Some(mut registration)) = state
+        .tournaments
+        .get_registration_for_player(entry.tournament.id, player_name)
+    else {
+        return;
+    };
+
+    use crate::tournament::RegistrationStatus;
+    if !matches!(
+        registration.status,
+        RegistrationStatus::Pending
+            | RegistrationStatus::Approved
+            | RegistrationStatus::Waitlisted
+    ) {
+        return;
+    }
+
+    registration.has_army_lists = registration
+        .army_list_1
+        .as_ref()
+        .is_some_and(|s| !s.trim().is_empty());
+    registration.has_army_list_2 = registration
+        .army_list_2
+        .as_ref()
+        .is_some_and(|s| !s.trim().is_empty());
+    registration.has_bracket_lists = registration
+        .bracket_list_1
+        .as_ref()
+        .is_some_and(|s| !s.trim().is_empty());
+    registration.has_bracket_list_2 = registration
+        .bracket_list_2
+        .as_ref()
+        .is_some_and(|s| !s.trim().is_empty());
+    registration.player_display_name = Some(resolver.resolve(&registration.player_name));
+
+    let pools = state
+        .tournaments
+        .list_pools(entry.tournament.id)
+        .unwrap_or_default();
+    let registrations = state
+        .tournaments
+        .list_registrations(entry.tournament.id)
+        .unwrap_or_default();
+    let army_visible =
+        army_visible_player_keys(&entry.tournament, &registrations, &pools);
+    let key = crate::store::normalize_name(&registration.player_name);
+    if !army_visible.contains(&key) {
+        registration.army_id = None;
+    }
+
+    let player_key = crate::store::normalize_name(player_name);
+    let upcoming = state
+        .tournaments
+        .list_matches(entry.tournament.id)
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|tm| {
+            let plays = tm.player1.as_ref().is_some_and(|p| {
+                crate::store::normalize_name(p) == player_key
+            }) || tm.player2.as_ref().is_some_and(|p| {
+                crate::store::normalize_name(p) == player_key
+            });
+            plays
+                && tm.status != TournamentMatchStatus::Confirmed
+                && !tm.is_unplayed
+        })
+        .map(|mut tm| {
+            if let Some(ref name) = tm.player1 {
+                tm.player1_display_name = Some(resolver.resolve(name));
+                if !army_visible.contains(&crate::store::normalize_name(name)) {
+                    tm.player1_army_id = None;
+                }
+            }
+            if let Some(ref name) = tm.player2 {
+                tm.player2_display_name = Some(resolver.resolve(name));
+                if !army_visible.contains(&crate::store::normalize_name(name)) {
+                    tm.player2_army_id = None;
+                }
+            }
+            tm.player1_army_list_code = None;
+            tm.player2_army_list_code = None;
+            tm
+        })
+        .collect();
+
+    entry.my_registration = Some(registration);
+    entry.my_upcoming_matches = upcoming;
 }
 
 async fn create_tournament(

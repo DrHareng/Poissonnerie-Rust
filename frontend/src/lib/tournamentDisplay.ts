@@ -29,6 +29,21 @@ export function registrationStatusLabel(reg: {
   return registrationStatusLabels[reg.status] ?? reg.status
 }
 
+/** Liste 1 présente et validée ; liste 2 validée si renseignée. */
+export function registrationListsFullyValidated(reg?: {
+  has_army_lists?: boolean
+  army_list_1?: string | null
+  army_list_2?: string | null
+  army_list_1_validated?: boolean
+  army_list_2_validated?: boolean
+} | null): boolean {
+  if (!reg) return false
+  if (!reg.has_army_lists && !reg.army_list_1?.trim()) return false
+  if (!reg.army_list_1_validated) return false
+  if (reg.army_list_2?.trim() && !reg.army_list_2_validated) return false
+  return true
+}
+
 export function registrationWaitingForLists(reg: {
   status: RegistrationStatus
   has_army_lists?: boolean

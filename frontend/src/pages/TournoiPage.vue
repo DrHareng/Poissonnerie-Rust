@@ -334,14 +334,47 @@ function poolMatchesForPool(poolId: number) {
 
 function selectPool(poolId: number) {
   selectedPoolId.value = poolId
+  userPickedTab.value = true
+  activeTab.value = 'poules'
+  void router.replace({
+    query: {
+      ...route.query,
+      tab: 'poules',
+      poolId: String(poolId),
+    },
+  })
 }
 
 function clearPoolSelection() {
   selectedPoolId.value = null
+  if (route.query.poolId != null || route.query.tab === 'poules') {
+    const query = { ...route.query }
+    delete query.poolId
+    delete query.tab
+    void router.replace({ query })
+  }
 }
 
 function selectedPool() {
   return sortedPools.value.find((pool) => pool.id === selectedPoolId.value) ?? null
+}
+
+function applyPoolDeepLink() {
+  if (!detail.value) return
+  const poolId = Number(route.query.poolId)
+  const wantsPoules =
+    route.query.tab === 'poules'
+    || (Number.isFinite(poolId) && poolId > 0)
+  if (!wantsPoules) return
+  if (!tournamentTabs.value.some((tab) => tab.id === 'poules')) return
+
+  userPickedTab.value = true
+  activeTab.value = 'poules'
+  if (Number.isFinite(poolId) && poolId > 0) {
+    if (detail.value.pools.some((pool) => pool.id === poolId)) {
+      selectedPoolId.value = poolId
+    }
+  }
 }
 
 const bracketMatches = computed(() =>
@@ -1548,13 +1581,21 @@ function matchStatusLabel(match: TournamentMatch) {
 
 watch(() => tournamentId.value, () => {
   userPickedTab.value = false
+  selectedPoolId.value = null
   void refresh()
 }, { immediate: true })
 watch(tournamentTabs, (tabs) => {
   if (!tabs.some((tab) => tab.id === activeTab.value) || !userPickedTab.value) {
     activeTab.value = defaultTournamentTab(tabs)
   }
+  applyPoolDeepLink()
 }, { immediate: true })
+watch(
+  () => [route.query.tab, route.query.poolId, detail.value?.id] as const,
+  () => {
+    applyPoolDeepLink()
+  },
+)
 watch(
   showCustomSide,
   (active) => setCustomSide(active),
@@ -1569,6 +1610,7 @@ watch(detail, () => {
   ) {
     selectedPoolId.value = null
   }
+  applyPoolDeepLink()
 }, { deep: true })
 onMounted(refresh)
 </script>
@@ -1745,9 +1787,6 @@ onMounted(refresh)
             <Card class="neon-panel flex min-h-0 flex-1 flex-col">
               <CardHeader class="shrink-0">
                 <CardTitle>Mes matchs</CardTitle>
-                <CardDescription>
-                  Vos parties dans ce tournoi.
-                </CardDescription>
               </CardHeader>
               <CardContent class="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto">
                 <p
@@ -1970,9 +2009,6 @@ onMounted(refresh)
           <Card class="neon-panel mb-4 lg:hidden">
             <CardHeader>
               <CardTitle>Mes matchs</CardTitle>
-              <CardDescription>
-                Vos parties dans ce tournoi.
-              </CardDescription>
             </CardHeader>
             <CardContent class="flex flex-col gap-3">
               <p
