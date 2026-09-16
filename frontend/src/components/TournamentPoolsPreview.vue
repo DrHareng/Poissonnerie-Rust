@@ -163,11 +163,6 @@ function isQualifiedRank(rankIndex: number) {
             <td class="pool-col-rank text-muted-foreground">{{ idx + 1 }}</td>
             <td class="pool-col-player">
               <span class="flex min-w-0 items-center gap-2">
-                <PlayerLink
-                  :name="pp.player_name"
-                  :display-name="pp.player_display_name"
-                  @click.stop
-                />
                 <ArmyLogo
                   v-if="playerArmyId(pp)"
                   :army-id="playerArmyId(pp)!"
@@ -180,6 +175,11 @@ function isQualifiedRank(rankIndex: number) {
                 >
                   {{ playerPendingStatus(pp) }}
                 </Badge>
+                <PlayerLink
+                  :name="pp.player_name"
+                  :display-name="pp.player_display_name"
+                  @click.stop
+                />
               </span>
             </td>
             <td class="pool-col-played">

@@ -191,7 +191,6 @@ const showActionsRow = computed(
     hasBothPlayers.value
     && (correcting.value
       || canConfirm.value
-      || showMatchOptionsMenu.value
       || (!props.listsReady && props.match.status === 'scheduled' && props.canInteract)),
 )
 
@@ -254,6 +253,11 @@ function matchPlayerLabel(slot: 'player1' | 'player2') {
       <div class="tournament-match-opponent-focus">
         <div class="tournament-match-opponent-row">
           <span class="tournament-match-vs">VS</span>
+          <ArmyLogo
+            v-if="opponentArmyId"
+            :army-id="opponentArmyId"
+            class="shrink-0"
+          />
           <PlayerLink
             v-if="opponentName"
             :name="opponentName"
@@ -261,11 +265,6 @@ function matchPlayerLabel(slot: 'player1' | 'player2') {
             class="min-w-0 font-medium"
           />
           <span v-else class="font-medium text-muted-foreground">?</span>
-          <ArmyLogo
-            v-if="opponentArmyId"
-            :army-id="opponentArmyId"
-            class="shrink-0"
-          />
           <div class="tournament-match-meta-status-group ml-auto">
             <Button
               v-if="canStart"
@@ -306,11 +305,64 @@ function matchPlayerLabel(slot: 'player1' | 'player2') {
               Annuler forfait
             </Button>
             <span
-              v-else
+              v-else-if="!showMatchOptionsMenu"
               class="tournament-match-meta-status"
             >
               {{ statusLabel }}
             </span>
+            <DropdownMenuRoot v-if="showMatchOptionsMenu">
+              <DropdownMenuTrigger as-child>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  class="tournament-match-options-trigger"
+                  title="Options du match"
+                  aria-label="Options du match"
+                >
+                  <Settings2 class="size-3.5" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuPortal>
+                <DropdownMenuContent
+                  align="end"
+                  :side-offset="6"
+                  class="tournament-match-options-menu z-50 min-w-48 rounded-md border bg-popover p-1 text-popover-foreground shadow-md"
+                >
+                  <DropdownMenuItem
+                    v-if="selfForfeitName"
+                    :class="menuItemDangerClass"
+                    @select="emit('forfeit', selfForfeitName)"
+                  >
+                    Je déclare forfait
+                  </DropdownMenuItem>
+                  <DropdownMenuSeparator
+                    v-if="selfForfeitName && isAdmin"
+                    class="my-1 h-px bg-border"
+                  />
+                  <template v-if="isAdmin">
+                    <DropdownMenuItem
+                      v-if="isPoolMatch"
+                      :class="menuItemClass"
+                      @select="emit('unplayed')"
+                    >
+                      Match non joué
+                    </DropdownMenuItem>
+                    <DropdownMenuItem
+                      :class="menuItemDangerClass"
+                      @select="emit('forfeit', match.player1!)"
+                    >
+                      FF {{ matchPlayerLabel('player1') }}
+                    </DropdownMenuItem>
+                    <DropdownMenuItem
+                      :class="menuItemDangerClass"
+                      @select="emit('forfeit', match.player2!)"
+                    >
+                      FF {{ matchPlayerLabel('player2') }}
+                    </DropdownMenuItem>
+                  </template>
+                </DropdownMenuContent>
+              </DropdownMenuPortal>
+            </DropdownMenuRoot>
           </div>
         </div>
         <div class="tournament-match-meta">
@@ -408,11 +460,64 @@ function matchPlayerLabel(slot: 'player1' | 'player2') {
             Annuler forfait
           </Button>
           <span
-            v-else
+            v-else-if="!showMatchOptionsMenu"
             class="tournament-match-meta-status"
           >
             {{ statusLabel }}
           </span>
+          <DropdownMenuRoot v-if="showMatchOptionsMenu">
+            <DropdownMenuTrigger as-child>
+              <Button
+                size="sm"
+                variant="outline"
+                class="tournament-match-options-trigger"
+                title="Options du match"
+                aria-label="Options du match"
+              >
+                <Settings2 class="size-3.5" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuPortal>
+              <DropdownMenuContent
+                align="end"
+                :side-offset="6"
+                class="tournament-match-options-menu z-50 min-w-48 rounded-md border bg-popover p-1 text-popover-foreground shadow-md"
+              >
+                <DropdownMenuItem
+                  v-if="selfForfeitName"
+                  :class="menuItemDangerClass"
+                  @select="emit('forfeit', selfForfeitName)"
+                >
+                  Je déclare forfait
+                </DropdownMenuItem>
+                <DropdownMenuSeparator
+                  v-if="selfForfeitName && isAdmin"
+                  class="my-1 h-px bg-border"
+                />
+                <template v-if="isAdmin">
+                  <DropdownMenuItem
+                    v-if="isPoolMatch"
+                    :class="menuItemClass"
+                    @select="emit('unplayed')"
+                  >
+                    Match non joué
+                  </DropdownMenuItem>
+                  <DropdownMenuItem
+                    :class="menuItemDangerClass"
+                    @select="emit('forfeit', match.player1!)"
+                  >
+                    FF {{ matchPlayerLabel('player1') }}
+                  </DropdownMenuItem>
+                  <DropdownMenuItem
+                    :class="menuItemDangerClass"
+                    @select="emit('forfeit', match.player2!)"
+                  >
+                    FF {{ matchPlayerLabel('player2') }}
+                  </DropdownMenuItem>
+                </template>
+              </DropdownMenuContent>
+            </DropdownMenuPortal>
+          </DropdownMenuRoot>
         </div>
       </div>
 
@@ -469,60 +574,6 @@ function matchPlayerLabel(slot: 'player1' | 'player2') {
         >
           {{ match.is_forfeit ? 'Confirmer le forfait' : 'Confirmer' }}
         </Button>
-
-        <DropdownMenuRoot v-if="showMatchOptionsMenu">
-          <DropdownMenuTrigger as-child>
-            <Button
-              size="sm"
-              variant="outline"
-              class="tournament-match-options-trigger"
-              title="Options du match"
-              aria-label="Options du match"
-            >
-              <Settings2 class="size-3.5" />
-            </Button>
-          </DropdownMenuTrigger>
-          <DropdownMenuPortal>
-            <DropdownMenuContent
-              align="end"
-              :side-offset="6"
-              class="tournament-match-options-menu z-50 min-w-48 rounded-md border bg-popover p-1 text-popover-foreground shadow-md"
-            >
-              <DropdownMenuItem
-                v-if="selfForfeitName"
-                :class="menuItemDangerClass"
-                @select="emit('forfeit', selfForfeitName)"
-              >
-                Je déclare forfait
-              </DropdownMenuItem>
-              <DropdownMenuSeparator
-                v-if="selfForfeitName && isAdmin"
-                class="my-1 h-px bg-border"
-              />
-              <template v-if="isAdmin">
-                <DropdownMenuItem
-                  v-if="isPoolMatch"
-                  :class="menuItemClass"
-                  @select="emit('unplayed')"
-                >
-                  Match non joué
-                </DropdownMenuItem>
-                <DropdownMenuItem
-                  :class="menuItemDangerClass"
-                  @select="emit('forfeit', match.player1!)"
-                >
-                  FF {{ matchPlayerLabel('player1') }}
-                </DropdownMenuItem>
-                <DropdownMenuItem
-                  :class="menuItemDangerClass"
-                  @select="emit('forfeit', match.player2!)"
-                >
-                  FF {{ matchPlayerLabel('player2') }}
-                </DropdownMenuItem>
-              </template>
-            </DropdownMenuContent>
-          </DropdownMenuPortal>
-        </DropdownMenuRoot>
       </template>
     </div>
   </div>

@@ -216,17 +216,17 @@ watch(
         <tr>
           <td class="pool-col-player">
             <span class="flex min-w-0 items-center gap-2">
+              <ArmyLogo
+                v-if="playerArmyId(match, 'player1')"
+                :army-id="playerArmyId(match, 'player1')!"
+                class="shrink-0"
+              />
               <PlayerLink
                 v-if="match.player1"
                 :name="match.player1"
                 :display-name="match.player1_display_name"
               />
               <span v-else class="text-muted-foreground">?</span>
-              <ArmyLogo
-                v-if="playerArmyId(match, 'player1')"
-                :army-id="playerArmyId(match, 'player1')!"
-                class="shrink-0"
-              />
             </span>
           </td>
           <td class="pool-col-score">
@@ -256,17 +256,17 @@ watch(
           </td>
           <td class="pool-col-player">
             <span class="flex min-w-0 items-center gap-2">
+              <ArmyLogo
+                v-if="playerArmyId(match, 'player2')"
+                :army-id="playerArmyId(match, 'player2')!"
+                class="shrink-0"
+              />
               <PlayerLink
                 v-if="match.player2"
                 :name="match.player2"
                 :display-name="match.player2_display_name"
               />
               <span v-else class="text-muted-foreground">?</span>
-              <ArmyLogo
-                v-if="playerArmyId(match, 'player2')"
-                :army-id="playerArmyId(match, 'player2')!"
-                class="shrink-0"
-              />
             </span>
           </td>
           <td class="pool-col-scenario">

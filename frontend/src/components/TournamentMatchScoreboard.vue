@@ -24,6 +24,11 @@ defineProps<{
     :class="{ 'tournament-match-result-row--compact': compact }"
   >
     <div class="flex min-w-0 items-center justify-end gap-1">
+      <ArmyLogo
+        v-if="player1ArmyId"
+        :army-id="player1ArmyId"
+        class="shrink-0"
+      />
       <PlayerLink
         v-if="match.player1"
         :name="match.player1"
@@ -31,11 +36,6 @@ defineProps<{
         class="min-w-0 truncate font-medium"
       />
       <span v-else class="font-medium text-muted-foreground">?</span>
-      <ArmyLogo
-        v-if="player1ArmyId"
-        :army-id="player1ArmyId"
-        class="shrink-0"
-      />
     </div>
     <div class="tournament-match-result-badges shrink-0">
       <MatchResultBadges
@@ -95,16 +95,16 @@ defineProps<{
     >
       <template v-if="mode === 'form'">
         <div class="flex items-center gap-2">
+          <ArmyLogo
+            v-if="player1ArmyId"
+            :army-id="player1ArmyId"
+            class="shrink-0"
+          />
           <PlayerLink
             v-if="match.player1"
             :name="match.player1"
             :display-name="match.player1_display_name"
             class="font-medium"
-          />
-          <ArmyLogo
-            v-if="player1ArmyId"
-            :army-id="player1ArmyId"
-            class="shrink-0"
           />
         </div>
         <div class="grid gap-2">
@@ -129,6 +129,11 @@ defineProps<{
         </div>
       </template>
       <template v-else>
+        <ArmyLogo
+          v-if="player1ArmyId"
+          :army-id="player1ArmyId"
+          class="shrink-0"
+        />
         <PlayerLink
           v-if="match.player1"
           :name="match.player1"
@@ -136,11 +141,6 @@ defineProps<{
           class="shrink-0 font-medium"
         />
         <span v-else class="shrink-0 font-medium text-muted-foreground">?</span>
-        <ArmyLogo
-          v-if="player1ArmyId"
-          :army-id="player1ArmyId"
-          class="shrink-0"
-        />
       </template>
     </section>
 
@@ -152,16 +152,16 @@ defineProps<{
     >
       <template v-if="mode === 'form'">
         <div class="flex items-center gap-2">
+          <ArmyLogo
+            v-if="player2ArmyId"
+            :army-id="player2ArmyId"
+            class="shrink-0"
+          />
           <PlayerLink
             v-if="match.player2"
             :name="match.player2"
             :display-name="match.player2_display_name"
             class="font-medium"
-          />
-          <ArmyLogo
-            v-if="player2ArmyId"
-            :army-id="player2ArmyId"
-            class="shrink-0"
           />
         </div>
         <div class="grid gap-2">
@@ -186,6 +186,11 @@ defineProps<{
         </div>
       </template>
       <template v-else>
+        <ArmyLogo
+          v-if="player2ArmyId"
+          :army-id="player2ArmyId"
+          class="shrink-0"
+        />
         <PlayerLink
           v-if="match.player2"
           :name="match.player2"
@@ -193,11 +198,6 @@ defineProps<{
           class="shrink-0 font-medium"
         />
         <span v-else class="shrink-0 font-medium text-muted-foreground">?</span>
-        <ArmyLogo
-          v-if="player2ArmyId"
-          :army-id="player2ArmyId"
-          class="shrink-0"
-        />
       </template>
     </section>
   </div>
