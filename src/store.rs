@@ -1548,6 +1548,30 @@ impl Leaderboard {
         army_list_code: &str,
         army_id: u32,
     ) -> Result<MatchRecord> {
+        self.update_match_army_list_inner(id, player_name, army_list_id, army_list_code, army_id, false)
+    }
+
+    /// Correction admin d'un match de tournoi déjà validé : autorise le changement de liste.
+    pub fn force_update_match_army_list(
+        &mut self,
+        id: u64,
+        player_name: &str,
+        army_list_id: i64,
+        army_list_code: &str,
+        army_id: u32,
+    ) -> Result<MatchRecord> {
+        self.update_match_army_list_inner(id, player_name, army_list_id, army_list_code, army_id, true)
+    }
+
+    fn update_match_army_list_inner(
+        &mut self,
+        id: u64,
+        player_name: &str,
+        army_list_id: i64,
+        army_list_code: &str,
+        army_id: u32,
+        allow_completed_tournament: bool,
+    ) -> Result<MatchRecord> {
         let key = normalize_name(player_name);
         let record = self
             .matches
@@ -1555,7 +1579,10 @@ impl Leaderboard {
             .find(|record| record.id == id)
             .ok_or_else(|| anyhow::anyhow!("match introuvable"))?;
 
-        if record.tournament_id.is_some() && record.status != MatchStatus::InProgress {
+        if record.tournament_id.is_some()
+            && record.status != MatchStatus::InProgress
+            && !allow_completed_tournament
+        {
             bail!("les listes d'un match de tournoi sont figées à la validation du résultat");
         }
 

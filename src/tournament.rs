@@ -561,6 +561,11 @@ pub struct TournamentMatch {
     pub player1_army_list_id: Option<i64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub player2_army_list_id: Option<i64>,
+    /// Slot 1/2 déduit des listes d'inscription (exposé même si le code est masqué).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub player1_list_slot: Option<u8>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub player2_list_slot: Option<u8>,
     pub played_at: Option<u64>,
     /// Partie ELO / wizard liée (en cours ou terminée).
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1270,6 +1275,8 @@ mod tests {
             player2_army_list_code: None,
             player1_army_list_id: None,
             player2_army_list_id: None,
+            player1_list_slot: None,
+            player2_list_slot: None,
             played_at: None,
             elo_match_id: None,
         };
@@ -1442,6 +1449,8 @@ mod tests {
                 player2_army_list_code: None,
             player1_army_list_id: None,
             player2_army_list_id: None,
+            player1_list_slot: None,
+            player2_list_slot: None,
                 played_at: None,
                 elo_match_id: None,
             },
@@ -1495,6 +1504,8 @@ mod tests {
                 player2_army_list_code: None,
             player1_army_list_id: None,
             player2_army_list_id: None,
+            player1_list_slot: None,
+            player2_list_slot: None,
                 played_at: None,
                 elo_match_id: None,
             },
@@ -1539,6 +1550,8 @@ mod tests {
                 player2_army_list_code: None,
             player1_army_list_id: None,
             player2_army_list_id: None,
+            player1_list_slot: None,
+            player2_list_slot: None,
                 played_at: None,
                 elo_match_id: None,
             },
@@ -1606,6 +1619,8 @@ mod tests {
                 player2_army_list_code: None,
             player1_army_list_id: None,
             player2_army_list_id: None,
+            player1_list_slot: None,
+            player2_list_slot: None,
                 played_at: None,
                 elo_match_id: None,
             }
@@ -1653,6 +1668,8 @@ mod tests {
                 player2_army_list_code: None,
             player1_army_list_id: None,
             player2_army_list_id: None,
+            player1_list_slot: None,
+            player2_list_slot: None,
                 played_at: None,
                 elo_match_id: None,
             },

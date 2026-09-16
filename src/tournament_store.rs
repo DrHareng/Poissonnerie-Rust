@@ -209,6 +209,35 @@ fn registration_list_for_slot(
     Ok(code.to_string())
 }
 
+fn infer_registration_list_slot(
+    registration: &TournamentRegistration,
+    phase: TournamentPhase,
+    code: Option<&str>,
+) -> Option<u8> {
+    let code = code?.trim();
+    if code.is_empty() {
+        return None;
+    }
+    let (list1, list2) = if phase == TournamentPhase::Pool {
+        (
+            registration.army_list_1.as_deref(),
+            registration.army_list_2.as_deref(),
+        )
+    } else {
+        (
+            registration.bracket_list_1.as_deref(),
+            registration.bracket_list_2.as_deref(),
+        )
+    };
+    if list1.is_some_and(|c| c.trim() == code) {
+        return Some(1);
+    }
+    if list2.is_some_and(|c| c.trim() == code) {
+        return Some(2);
+    }
+    None
+}
+
 fn registration_has_bracket_lists(registration: &TournamentRegistration) -> bool {
     registration
         .bracket_list_1
@@ -1916,6 +1945,56 @@ impl TournamentStore {
         self.get_match_in_conn(&conn, match_id)
     }
 
+    /// Enregistre les listes choisies pour un match (pendant la partie, avant le résultat).
+    pub fn set_match_list_slots(
+        &self,
+        match_id: i64,
+        player1_list_slot: u8,
+        player2_list_slot: u8,
+    ) -> Result<TournamentMatch> {
+        let conn = self.conn.lock().unwrap();
+        let tm = self
+            .get_match_in_conn(&conn, match_id)?
+            .context("match introuvable")?;
+        let p1 = tm.player1.as_ref().context("joueur 1 manquant")?;
+        let p2 = tm.player2.as_ref().context("joueur 2 manquant")?;
+
+        let reg1 = self
+            .registration_for_player_in_conn(&conn, tm.tournament_id, &normalize_name(p1))?
+            .context("inscription du joueur 1 introuvable")?;
+        let reg2 = self
+            .registration_for_player_in_conn(&conn, tm.tournament_id, &normalize_name(p2))?
+            .context("inscription du joueur 2 introuvable")?;
+
+        if tm.phase != TournamentPhase::Pool {
+            if !registration_has_bracket_lists(&reg1) {
+                bail!("le joueur 1 doit saisir sa liste d'arbre avant de jouer");
+            }
+            if !registration_has_bracket_lists(&reg2) {
+                bail!("le joueur 2 doit saisir sa liste d'arbre avant de jouer");
+            }
+        }
+
+        let code1 = registration_list_for_slot(&reg1, tm.phase, player1_list_slot)?;
+        let code2 = registration_list_for_slot(&reg2, tm.phase, player2_list_slot)?;
+        let id1 = get_or_create_in_conn(&conn, &code1)?.id;
+        let id2 = get_or_create_in_conn(&conn, &code2)?.id;
+
+        conn.execute(
+            "
+            UPDATE tournament_matches SET
+                player1_army_list_code = ?1,
+                player2_army_list_code = ?2,
+                player1_army_list_id = ?3,
+                player2_army_list_id = ?4
+            WHERE id = ?5
+            ",
+            params![code1, code2, id1, id2, match_id],
+        )?;
+        drop(conn);
+        self.get_match(match_id)?.context("match introuvable")
+    }
+
     pub fn list_matches(&self, tournament_id: i64) -> Result<Vec<TournamentMatch>> {
         let conn = self.conn.lock().unwrap();
         self.list_matches_in_conn(&conn, tournament_id)
@@ -2417,6 +2496,32 @@ impl TournamentStore {
         let p1 = old.player1.as_ref().context("joueur 1 manquant")?;
         let p2 = old.player2.as_ref().context("joueur 2 manquant")?;
 
+        let list_update = match (request.player1_list_slot, request.player2_list_slot) {
+            (Some(slot1), Some(slot2)) => {
+                let reg1 = self
+                    .registration_for_player_in_conn(&conn, old.tournament_id, &normalize_name(p1))?
+                    .context("inscription du joueur 1 introuvable")?;
+                let reg2 = self
+                    .registration_for_player_in_conn(&conn, old.tournament_id, &normalize_name(p2))?
+                    .context("inscription du joueur 2 introuvable")?;
+                if old.phase != TournamentPhase::Pool {
+                    if !registration_has_bracket_lists(&reg1) {
+                        bail!("le joueur 1 doit saisir sa liste d'arbre avant de jouer");
+                    }
+                    if !registration_has_bracket_lists(&reg2) {
+                        bail!("le joueur 2 doit saisir sa liste d'arbre avant de jouer");
+                    }
+                }
+                let code1 = registration_list_for_slot(&reg1, old.phase, slot1)?;
+                let code2 = registration_list_for_slot(&reg2, old.phase, slot2)?;
+                let id1 = get_or_create_in_conn(&conn, &code1)?.id;
+                let id2 = get_or_create_in_conn(&conn, &code2)?.id;
+                Some((code1, code2, id1, id2))
+            }
+            (None, None) => None,
+            _ => bail!("choisissez la liste de chaque joueur (1 ou 2)"),
+        };
+
         // Match encore en attente de confirmation : on met à jour le score sans recalculer
         // les classements / l'arbre (appliqués à la confirmation).
         if old.status == TournamentMatchStatus::Submitted {
@@ -2424,24 +2529,51 @@ impl TournamentStore {
                 request.player1_objectives,
                 request.player2_objectives,
             );
-            conn.execute(
-                "
-                UPDATE tournament_matches SET
-                    player1_objectives = ?1, player2_objectives = ?2,
-                    player1_survivors = ?3, player2_survivors = ?4,
-                    outcome = ?5,
-                    is_forfeit = 0, is_unplayed = 0, forfeit_player = NULL
-                WHERE id = ?6
-                ",
-                params![
-                    request.player1_objectives,
-                    request.player2_objectives,
-                    request.player1_survivors,
-                    request.player2_survivors,
-                    outcome_to_str(outcome),
-                    match_id,
-                ],
-            )?;
+            if let Some((code1, code2, id1, id2)) = list_update {
+                conn.execute(
+                    "
+                    UPDATE tournament_matches SET
+                        player1_objectives = ?1, player2_objectives = ?2,
+                        player1_survivors = ?3, player2_survivors = ?4,
+                        outcome = ?5,
+                        is_forfeit = 0, is_unplayed = 0, forfeit_player = NULL,
+                        player1_army_list_code = ?6, player2_army_list_code = ?7,
+                        player1_army_list_id = ?8, player2_army_list_id = ?9
+                    WHERE id = ?10
+                    ",
+                    params![
+                        request.player1_objectives,
+                        request.player2_objectives,
+                        request.player1_survivors,
+                        request.player2_survivors,
+                        outcome_to_str(outcome),
+                        code1,
+                        code2,
+                        id1,
+                        id2,
+                        match_id,
+                    ],
+                )?;
+            } else {
+                conn.execute(
+                    "
+                    UPDATE tournament_matches SET
+                        player1_objectives = ?1, player2_objectives = ?2,
+                        player1_survivors = ?3, player2_survivors = ?4,
+                        outcome = ?5,
+                        is_forfeit = 0, is_unplayed = 0, forfeit_player = NULL
+                    WHERE id = ?6
+                    ",
+                    params![
+                        request.player1_objectives,
+                        request.player2_objectives,
+                        request.player1_survivors,
+                        request.player2_survivors,
+                        outcome_to_str(outcome),
+                        match_id,
+                    ],
+                )?;
+            }
             drop(conn);
             let updated = self
                 .get_match(match_id)?
@@ -2472,22 +2604,47 @@ impl TournamentStore {
             }
         }
 
-        conn.execute(
-            "
-            UPDATE tournament_matches SET
-                player1_objectives = ?1, player2_objectives = ?2,
-                player1_survivors = ?3, player2_survivors = ?4,
-                is_forfeit = 0, is_unplayed = 0, forfeit_player = NULL
-            WHERE id = ?5
-            ",
-            params![
-                request.player1_objectives,
-                request.player2_objectives,
-                request.player1_survivors,
-                request.player2_survivors,
-                match_id,
-            ],
-        )?;
+        if let Some((code1, code2, id1, id2)) = list_update {
+            conn.execute(
+                "
+                UPDATE tournament_matches SET
+                    player1_objectives = ?1, player2_objectives = ?2,
+                    player1_survivors = ?3, player2_survivors = ?4,
+                    is_forfeit = 0, is_unplayed = 0, forfeit_player = NULL,
+                    player1_army_list_code = ?5, player2_army_list_code = ?6,
+                    player1_army_list_id = ?7, player2_army_list_id = ?8
+                WHERE id = ?9
+                ",
+                params![
+                    request.player1_objectives,
+                    request.player2_objectives,
+                    request.player1_survivors,
+                    request.player2_survivors,
+                    code1,
+                    code2,
+                    id1,
+                    id2,
+                    match_id,
+                ],
+            )?;
+        } else {
+            conn.execute(
+                "
+                UPDATE tournament_matches SET
+                    player1_objectives = ?1, player2_objectives = ?2,
+                    player1_survivors = ?3, player2_survivors = ?4,
+                    is_forfeit = 0, is_unplayed = 0, forfeit_player = NULL
+                WHERE id = ?5
+                ",
+                params![
+                    request.player1_objectives,
+                    request.player2_objectives,
+                    request.player1_survivors,
+                    request.player2_survivors,
+                    match_id,
+                ],
+            )?;
+        }
 
         let tournament_id = old.tournament_id;
         if winner_changed {
@@ -4316,9 +4473,45 @@ impl TournamentStore {
         )?;
         let mut rows = stmt.query(params![id])?;
         if let Some(row) = rows.next()? {
-            return Ok(Some(row_to_tournament_match(row)?));
+            let mut tm = row_to_tournament_match(row)?;
+            self.enrich_match_list_slots_in_conn(conn, &mut tm)?;
+            return Ok(Some(tm));
         }
         Ok(None)
+    }
+
+    fn enrich_match_list_slots_in_conn(
+        &self,
+        conn: &Connection,
+        tm: &mut TournamentMatch,
+    ) -> Result<()> {
+        if let Some(name) = tm.player1.as_deref() {
+            if let Some(reg) = self.registration_for_player_in_conn(
+                conn,
+                tm.tournament_id,
+                &normalize_name(name),
+            )? {
+                tm.player1_list_slot = infer_registration_list_slot(
+                    &reg,
+                    tm.phase,
+                    tm.player1_army_list_code.as_deref(),
+                );
+            }
+        }
+        if let Some(name) = tm.player2.as_deref() {
+            if let Some(reg) = self.registration_for_player_in_conn(
+                conn,
+                tm.tournament_id,
+                &normalize_name(name),
+            )? {
+                tm.player2_list_slot = infer_registration_list_slot(
+                    &reg,
+                    tm.phase,
+                    tm.player2_army_list_code.as_deref(),
+                );
+            }
+        }
+        Ok(())
     }
 
     pub fn find_match_by_elo_match_id(&self, elo_match_id: u64) -> Result<Option<TournamentMatch>> {
@@ -4689,6 +4882,8 @@ fn row_to_tournament_match(row: &rusqlite::Row<'_>) -> rusqlite::Result<Tourname
         player2_army_list_code: row.get(35)?,
         player1_army_list_id: row.get(36)?,
         player2_army_list_id: row.get(37)?,
+        player1_list_slot: None,
+        player2_list_slot: None,
         elo_match_id: row
             .get::<_, Option<i64>>(38)?
             .map(|id| id as u64),

@@ -23,6 +23,7 @@ import TournamentDescriptionWithRegistrants from '@/components/TournamentDescrip
 import TournamentPoolsPreview from '@/components/TournamentPoolsPreview.vue'
 import type { TournamentListEntry } from '@/types/elo'
 import { useAuth } from '@/composables/useAuth'
+import { useAdminEditMode } from '@/composables/useAdminEditMode'
 import { useAppSidePanel } from '@/composables/useAppSidePanel'
 import BracketTree from '@/components/BracketTree.vue'
 import MarkdownContent from '@/components/MarkdownContent.vue'
@@ -42,7 +43,8 @@ import { tournoisTabs } from '@/lib/pageTitleTabs'
 
 const router = useRouter()
 const route = useRoute()
-const { isAdmin, hasPlayer, isAuthenticated } = useAuth()
+const { hasPlayer, isAuthenticated } = useAuth()
+const { showAdminUi: isAdmin } = useAdminEditMode()
 const { setCustomSide } = useAppSidePanel()
 
 const tournaments = ref<TournamentListEntry[]>([])

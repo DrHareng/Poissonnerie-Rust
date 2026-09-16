@@ -381,6 +381,8 @@ export interface TournamentMatch {
   player2_army_id?: number | null
   player1_army_list_code?: string | null
   player2_army_list_code?: string | null
+  player1_list_slot?: number | null
+  player2_list_slot?: number | null
   played_at?: number | null
   elo_match_id?: number | null
 }

@@ -30,10 +30,15 @@ const props = withDefaults(
     player2HasList2?: boolean
     listLabel?: string
     tournamentId?: number | null
+    /** Listes déjà choisies à l’étape lieutenant. */
+    player1ListSlot?: number | null
+    player2ListSlot?: number | null
   }>(),
   {
     requireOnline: false,
     isOnline: true,
+    player1ListSlot: null,
+    player2ListSlot: null,
   },
 )
 
@@ -59,10 +64,16 @@ const list1 = ref<number | undefined>(undefined)
 const list2 = ref<number | undefined>(undefined)
 
 watch(
-  () => [props.player1HasList2, props.player2HasList2] as const,
-  ([p1, p2]) => {
-    if (!p1) list1.value = 1
-    if (!p2) list2.value = 1
+  () =>
+    [
+      props.player1HasList2,
+      props.player2HasList2,
+      props.player1ListSlot,
+      props.player2ListSlot,
+    ] as const,
+  ([p1, p2, slot1, slot2]) => {
+    list1.value = p1 ? (slot1 ?? undefined) : 1
+    list2.value = p2 ? (slot2 ?? undefined) : 1
   },
   { immediate: true },
 )
@@ -72,6 +83,13 @@ const isCombatEsprit = computed(
 )
 
 const isTournament = computed(() => Boolean(props.tournamentMatchId))
+
+const listsAlreadyChosen = computed(
+  () =>
+    isTournament.value
+    && (props.player1ListSlot === 1 || props.player1ListSlot === 2)
+    && (props.player2ListSlot === 1 || props.player2ListSlot === 2),
+)
 
 const canSubmit = computed(() => {
   if (!isTournament.value) return true
@@ -221,7 +239,7 @@ async function submit() {
     </div>
 
     <div
-      v-if="isTournament"
+      v-if="isTournament && !listsAlreadyChosen"
       class="grid grid-cols-1 gap-4 sm:grid-cols-2"
     >
       <div class="grid gap-2">

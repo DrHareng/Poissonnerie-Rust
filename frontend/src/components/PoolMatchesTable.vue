@@ -167,18 +167,37 @@ function startCorrection(match: TournamentMatch) {
   form.p2 = match.player2_objectives
   form.s1 = match.player1_survivors
   form.s2 = match.player2_survivors
+  form.list1 = props.playerHasList2?.(match, 'player1')
+    ? (match.player1_list_slot ?? undefined)
+    : 1
+  form.list2 = props.playerHasList2?.(match, 'player2')
+    ? (match.player2_list_slot ?? undefined)
+    : 1
   correctingMatchId.value = match.id
 }
 
 function saveCorrection(match: TournamentMatch) {
   const form = props.getForm(match)
+  const list1 = props.playerHasList2?.(match, 'player1') ? form.list1 : 1
+  const list2 = props.playerHasList2?.(match, 'player2') ? form.list2 : 1
+  if (list1 !== 1 && list1 !== 2) return
+  if (list2 !== 1 && list2 !== 2) return
   emit('correct', match, {
     p1: Number(form.p1) || 0,
     p2: Number(form.p2) || 0,
     s1: Number(form.s1) || 0,
     s2: Number(form.s2) || 0,
+    list1,
+    list2,
   })
   correctingMatchId.value = null
+}
+
+function canSaveCorrection(match: TournamentMatch) {
+  const form = props.getForm(match)
+  const list1 = props.playerHasList2?.(match, 'player1') ? form.list1 : 1
+  const list2 = props.playerHasList2?.(match, 'player2') ? form.list2 : 1
+  return (list1 === 1 || list1 === 2) && (list2 === 1 || list2 === 2)
 }
 
 function showEditRow(match: TournamentMatch) {
@@ -406,9 +425,15 @@ watch(
                   :form="getForm(match)"
                   :player1-army-id="playerArmyId(match, 'player1')"
                   :player2-army-id="playerArmyId(match, 'player2')"
+                  :player1-has-list2="playerHasList2?.(match, 'player1')"
+                  :player2-has-list2="playerHasList2?.(match, 'player2')"
                 />
                 <div class="pool-match-edit-actions">
-                  <Button size="sm" @click="saveCorrection(match)">
+                  <Button
+                    size="sm"
+                    :disabled="!canSaveCorrection(match)"
+                    @click="saveCorrection(match)"
+                  >
                     Enregistrer
                   </Button>
                   <Button size="sm" variant="outline" @click="correctingMatchId = null">

@@ -14,6 +14,7 @@ import {
   registrationStatusLabel,
 } from '@/lib/tournamentDisplay'
 import { useAuth } from '@/composables/useAuth'
+import { useAdminEditMode } from '@/composables/useAdminEditMode'
 import { useNetworkStatus } from '@/composables/useNetworkStatus'
 import ArmyListQuickActions from '@/components/ArmyListQuickActions.vue'
 import TournamentMatchCard from '@/components/TournamentMatchCard.vue'
@@ -40,7 +41,8 @@ const emit = defineEmits<{
 }>()
 
 const router = useRouter()
-const { player, isAdmin } = useAuth()
+const { player } = useAuth()
+const { showAdminUi: isAdmin } = useAdminEditMode()
 const { isOnline } = useNetworkStatus()
 
 const registration = computed(() => props.tournament.my_registration ?? null)

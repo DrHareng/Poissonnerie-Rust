@@ -218,6 +218,12 @@ function startCorrection() {
   props.form.p2 = props.match.player2_objectives
   props.form.s1 = props.match.player1_survivors
   props.form.s2 = props.match.player2_survivors
+  props.form.list1 = props.player1HasList2
+    ? (props.match.player1_list_slot ?? undefined)
+    : 1
+  props.form.list2 = props.player2HasList2
+    ? (props.match.player2_list_slot ?? undefined)
+    : 1
   correcting.value = true
 }
 
@@ -225,12 +231,26 @@ function cancelCorrection() {
   correcting.value = false
 }
 
+const canSaveCorrection = computed(() => {
+  const list1 = props.player1HasList2 ? props.form.list1 : 1
+  const list2 = props.player2HasList2 ? props.form.list2 : 1
+  return (
+    (list1 === 1 || list1 === 2)
+    && (list2 === 1 || list2 === 2)
+    && (list1 !== 2 || props.player1HasList2)
+    && (list2 !== 2 || props.player2HasList2)
+  )
+})
+
 function saveCorrection() {
+  if (!canSaveCorrection.value) return
   emit('correct', {
     p1: Number(props.form.p1) || 0,
     p2: Number(props.form.p2) || 0,
     s1: Number(props.form.s1) || 0,
     s2: Number(props.form.s2) || 0,
+    list1: props.player1HasList2 ? props.form.list1 : 1,
+    list2: props.player2HasList2 ? props.form.list2 : 1,
   })
 }
 
@@ -532,6 +552,8 @@ function matchPlayerLabel(slot: 'player1' | 'player2') {
           :compact="compact"
           :player1-army-id="player1ArmyId"
           :player2-army-id="player2ArmyId"
+          :player1-has-list2="player1HasList2"
+          :player2-has-list2="player2HasList2"
         />
       </div>
     </template>
@@ -550,8 +572,14 @@ function matchPlayerLabel(slot: 'player1' | 'player2') {
           :compact="compact"
           :player1-army-id="player1ArmyId"
           :player2-army-id="player2ArmyId"
+          :player1-has-list2="player1HasList2"
+          :player2-has-list2="player2HasList2"
         />
-        <Button size="sm" @click="saveCorrection">
+        <Button
+          size="sm"
+          :disabled="!canSaveCorrection"
+          @click="saveCorrection"
+        >
           Enregistrer
         </Button>
         <Button size="sm" variant="outline" @click="cancelCorrection">

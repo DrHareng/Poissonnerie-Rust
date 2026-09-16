@@ -19,6 +19,7 @@ import PlayerLink from '@/components/PlayerLink.vue'
 import MatchContextCell from '@/components/MatchContextCell.vue'
 import PageTitleTabs from '@/components/PageTitleTabs.vue'
 import { useAuth } from '@/composables/useAuth'
+import { useAdminEditMode } from '@/composables/useAdminEditMode'
 import { useAppSidePanel } from '@/composables/useAppSidePanel'
 import { useArmies } from '@/composables/useArmies'
 import { useListPage } from '@/composables/useListPage'
@@ -54,7 +55,8 @@ const LEGACY_ARMY_FILTER_STORAGE_KEY = 'poissonnerie.army-lists-filter'
 
 const router = useRouter()
 const route = useRoute()
-const { isAuthenticated, isAdmin } = useAuth()
+const { isAuthenticated } = useAuth()
+const { showAdminUi: isAdmin } = useAdminEditMode()
 const { setCustomSide } = useAppSidePanel()
 const { armies, ensureLoaded } = useArmies()
 const {

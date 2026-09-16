@@ -400,6 +400,8 @@ export function updateMatchProgress(
     lieutenant_winner_choice?: string
     lieutenant_other_choice?: string
     partie_step?: string
+    player1_list_slot?: number
+    player2_list_slot?: number
   },
 ): Promise<MatchRecord> {
   return request<MatchRecord>(`/api/matches/${id}`, {
@@ -908,6 +910,8 @@ export function correctTournamentMatch(
     player2_objectives: number
     player1_survivors?: number
     player2_survivors?: number
+    player1_list_slot?: number
+    player2_list_slot?: number
   },
 ): Promise<TournamentMatch> {
   return request<TournamentMatch>(`/api/tournament-matches/${matchId}/correct`, {

@@ -160,6 +160,11 @@ struct UpdateMatchProgressRequest {
     lieutenant_other_choice: Option<String>,
     #[serde(default)]
     partie_step: Option<String>,
+    /// Mode tournoi : choix des listes (avant / avec le jet de lieutenant).
+    #[serde(default)]
+    player1_list_slot: Option<u8>,
+    #[serde(default)]
+    player2_list_slot: Option<u8>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -1098,7 +1103,7 @@ async fn viewer_player_name(state: &AppState, session: &Session) -> Option<Strin
 fn mask_tournament_elo_lists(
     state: &AppState,
     record: &mut MatchRecord,
-    _viewer_player: Option<&str>,
+    viewer_player: Option<&str>,
 ) {
     let Some(tournament_id) = record.tournament_id else {
         return;
@@ -1112,11 +1117,21 @@ fn mask_tournament_elo_lists(
     if status == Some(TournamentStatus::Completed) {
         return;
     }
-    // Listes masquées pour tout le monde tant que le tournoi n'est pas terminé.
-    record.player1_army_list_code = None;
-    record.player2_army_list_code = None;
-    record.player1_army_list_id = None;
-    record.player2_army_list_id = None;
+    let viewer_key = viewer_player.map(crate::normalize_name);
+    let can_see = |player_name: &str| {
+        viewer_key
+            .as_ref()
+            .is_some_and(|key| crate::normalize_name(player_name) == *key)
+    };
+    // Chacun peut revoir sa propre liste ; l’adversaire reste masqué jusqu’à la fin.
+    if !can_see(&record.player1) {
+        record.player1_army_list_code = None;
+        record.player1_army_list_id = None;
+    }
+    if !can_see(&record.player2) {
+        record.player2_army_list_code = None;
+        record.player2_army_list_id = None;
+    }
 }
 
 fn mask_draft_reports(record: &mut MatchRecord, viewer_player: Option<&str>) {
@@ -2066,9 +2081,52 @@ async fn update_match_progress(
     };
 
     let mut board = state.board.lock().unwrap();
-    let record = board
+    let mut record = board
         .update_in_progress_match(id, update)
         .map_err(|error| ApiError::bad_request(error.to_string()))?;
+
+    if let (Some(slot1), Some(slot2)) = (payload.player1_list_slot, payload.player2_list_slot) {
+        if let Some(tournament_id) = record.tournament_id {
+            let tm = state
+                .tournaments
+                .find_match_by_elo_match_id(id)
+                .map_err(|error| ApiError::bad_request(error.to_string()))?
+                .ok_or_else(|| ApiError::bad_request("match de tournoi introuvable"))?;
+            if tm.tournament_id != tournament_id {
+                return Err(ApiError::bad_request("match de tournoi incohérent"));
+            }
+            let updated = state
+                .tournaments
+                .set_match_list_slots(tm.id, slot1, slot2)
+                .map_err(|error| ApiError::bad_request(error.to_string()))?;
+            if let Some(code) = updated.player1_army_list_code.as_deref() {
+                if let Ok(list) = state.army_lists.get_or_create(code) {
+                    let _ = board.update_match_army_list(
+                        id,
+                        updated.player1.as_deref().unwrap_or(""),
+                        list.id,
+                        &list.code,
+                        list.army_id,
+                    );
+                }
+            }
+            if let Some(code) = updated.player2_army_list_code.as_deref() {
+                if let Ok(list) = state.army_lists.get_or_create(code) {
+                    let _ = board.update_match_army_list(
+                        id,
+                        updated.player2.as_deref().unwrap_or(""),
+                        list.id,
+                        &list.code,
+                        list.army_id,
+                    );
+                }
+            }
+            if let Some(fresh) = board.get_match(id).cloned() {
+                record = fresh;
+            }
+        }
+    }
+
     board
         .save(&state.db_path)
         .map_err(|error| ApiError::bad_request(error.to_string()))?;

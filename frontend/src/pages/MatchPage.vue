@@ -27,6 +27,7 @@ import PlayerLink from '@/components/PlayerLink.vue'
 import ContentHoverTip from '@/components/ContentHoverTip.vue'
 import CombatEspritPlayerHand from '@/components/partie/CombatEspritPlayerHand.vue'
 import { useAuth } from '@/composables/useAuth'
+import { useAdminEditMode } from '@/composables/useAdminEditMode'
 import { COMBAT_ESPRIT_SLUG, draftStepBadges } from '@/lib/combatEspritDraft'
 import { secondaryImageSrc } from '@/lib/secondaryImages'
 import { choiceLabel } from '@/lib/lieutenantRoll'
@@ -51,7 +52,8 @@ import {
 
 const route = useRoute()
 const router = useRouter()
-const { player: currentPlayer, isAuthenticated, isAdmin, login } = useAuth()
+const { player: currentPlayer, isAuthenticated, login } = useAuth()
+const { showAdminUi: isAdmin } = useAdminEditMode()
 
 const match = ref<MatchRecord | null>(null)
 const armies = ref<Army[]>([])
@@ -240,8 +242,14 @@ function openCr() {
 
 const isTournamentMatch = computed(() => match.value?.tournament_id != null)
 
-function armyListHidden(code: string | null | undefined) {
-  return isTournamentMatch.value && !code?.trim()
+function armyListHidden(playerName: string, code: string | null | undefined) {
+  if (!isTournamentMatch.value) return false
+  if (code?.trim()) return false
+  const me = currentPlayer.value?.name
+  if (me && me.localeCompare(playerName, undefined, { sensitivity: 'accent' }) === 0) {
+    return false
+  }
+  return true
 }
 
 function eloDelta(oldRating: number, newRating: number): string {
@@ -550,7 +558,7 @@ onMounted(loadMatch)
                 />
               </div>
               <p
-                v-if="armyListHidden(match.player1_army_list_code)"
+                v-if="armyListHidden(match.player1, match.player1_army_list_code)"
                 class="text-sm text-muted-foreground italic"
               >
                 Liste secrète jusqu’à la fin du tournoi
@@ -696,7 +704,7 @@ onMounted(loadMatch)
                 />
               </div>
               <p
-                v-if="armyListHidden(match.player2_army_list_code)"
+                v-if="armyListHidden(match.player2, match.player2_army_list_code)"
                 class="text-sm text-muted-foreground italic"
               >
                 Liste secrète jusqu’à la fin du tournoi

@@ -16,20 +16,73 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 
-const props = defineProps<{
-  player1DisplayName: string
-  player2DisplayName: string
-  initial?: PartieLieutenant | null
-}>()
+export type PartieListSlots = {
+  player1: number
+  player2: number
+}
+
+const props = withDefaults(
+  defineProps<{
+    player1DisplayName: string
+    player2DisplayName: string
+    initial?: PartieLieutenant | null
+    /** Mode tournoi : saisie des listes avant le jet. */
+    tournamentMode?: boolean
+    player1HasList2?: boolean
+    player2HasList2?: boolean
+    listLabel?: string
+    initialList1?: number | null
+    initialList2?: number | null
+  }>(),
+  {
+    tournamentMode: false,
+    player1HasList2: false,
+    player2HasList2: false,
+    listLabel: 'Liste',
+    initialList1: null,
+    initialList2: null,
+  },
+)
 
 const emit = defineEmits<{
   back: []
-  next: [value: PartieLieutenant]
+  next: [value: PartieLieutenant, lists?: PartieListSlots]
 }>()
+
+const list1 = ref<number | undefined>(
+  props.player1HasList2 ? (props.initialList1 ?? undefined) : 1,
+)
+const list2 = ref<number | undefined>(
+  props.player2HasList2 ? (props.initialList2 ?? undefined) : 1,
+)
 
 const winner = ref<LieutenantWinner | undefined>(props.initial?.winner)
 const winnerChoice = ref(props.initial?.winnerChoice)
 const otherChoice = ref(props.initial?.otherChoice)
+
+watch(
+  () =>
+    [
+      props.player1HasList2,
+      props.player2HasList2,
+      props.initialList1,
+      props.initialList2,
+    ] as const,
+  ([p1Has, p2Has, init1, init2]) => {
+    list1.value = p1Has ? (init1 ?? list1.value ?? undefined) : 1
+    list2.value = p2Has ? (init2 ?? list2.value ?? undefined) : 1
+  },
+)
+
+const listsReady = computed(() => {
+  if (!props.tournamentMode) return true
+  return (
+    (list1.value === 1 || list1.value === 2)
+    && (list2.value === 1 || list2.value === 2)
+    && (list1.value !== 2 || props.player1HasList2)
+    && (list2.value !== 2 || props.player2HasList2)
+  )
+})
 
 const winnerDisplayName = computed(() =>
   winner.value === 'player1'
@@ -51,13 +104,17 @@ const otherChoices = computed(() =>
   winnerChoice.value ? otherPlayerChoices(winnerChoice.value) : [],
 )
 
-const showWinnerChoice = computed(() => Boolean(winner.value))
+const showWinnerChoice = computed(
+  () => listsReady.value && Boolean(winner.value),
+)
 const showOtherChoice = computed(
-  () => Boolean(winner.value && winnerChoice.value),
+  () => listsReady.value && Boolean(winner.value && winnerChoice.value),
 )
 
 const canContinue = computed(
-  () => Boolean(winner.value && winnerChoice.value && otherChoice.value),
+  () =>
+    listsReady.value
+    && Boolean(winner.value && winnerChoice.value && otherChoice.value),
 )
 
 watch(winner, () => {
@@ -73,22 +130,76 @@ function submit() {
   if (!canContinue.value || !winner.value || !winnerChoice.value || !otherChoice.value) {
     return
   }
-  emit('next', {
+  const lieutenant: PartieLieutenant = {
     winner: winner.value,
     winnerChoice: winnerChoice.value,
     otherChoice: otherChoice.value,
-  })
+  }
+  if (props.tournamentMode) {
+    emit('next', lieutenant, {
+      player1: list1.value!,
+      player2: list2.value!,
+    })
+    return
+  }
+  emit('next', lieutenant)
 }
 </script>
 
 <template>
   <div class="grid gap-6">
-    <p class="page-description">
+    <template v-if="tournamentMode">
+      <p class="page-description">
+        Choisissez d’abord la liste de chaque joueur, puis déterminez le jet de lieutenant.
+      </p>
+      <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
+        <div class="grid gap-2">
+          <Label :for="'lieutenant-list-1'">
+            {{ player1DisplayName }} — {{ listLabel }}
+          </Label>
+          <select
+            v-if="player1HasList2"
+            id="lieutenant-list-1"
+            v-model.number="list1"
+            class="h-9 rounded-md border border-input bg-transparent px-2 text-sm"
+          >
+            <option :value="undefined" disabled>Choisir…</option>
+            <option :value="1">Liste 1</option>
+            <option :value="2">Liste 2</option>
+          </select>
+          <span v-else class="flex h-9 items-center text-sm text-muted-foreground">
+            Liste 1
+          </span>
+        </div>
+        <div class="grid gap-2">
+          <Label :for="'lieutenant-list-2'">
+            {{ player2DisplayName }} — {{ listLabel }}
+          </Label>
+          <select
+            v-if="player2HasList2"
+            id="lieutenant-list-2"
+            v-model.number="list2"
+            class="h-9 rounded-md border border-input bg-transparent px-2 text-sm"
+          >
+            <option :value="undefined" disabled>Choisir…</option>
+            <option :value="1">Liste 1</option>
+            <option :value="2">Liste 2</option>
+          </select>
+          <span v-else class="flex h-9 items-center text-sm text-muted-foreground">
+            Liste 1
+          </span>
+        </div>
+      </div>
+    </template>
+    <p v-else class="page-description">
       Déterminez qui remporte le jet de lieutenant, puis répartissez l'initiative et
       le déploiement.
     </p>
 
-    <div class="grid gap-4">
+    <div
+      v-if="!tournamentMode || listsReady"
+      class="grid gap-4"
+    >
       <div class="grid gap-2">
         <Label for="lieutenant-winner">Jet de lieutenant</Label>
         <div class="flex flex-col gap-2 sm:flex-row sm:items-center">

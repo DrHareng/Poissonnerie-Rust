@@ -368,14 +368,14 @@ async function handleLogout() {
                     {{ inProgressMenuLabel }}
                   </RouterLink>
                 </DropdownMenuItem>
-                <DropdownMenuItem v-if="isAdmin" as-child>
+                <DropdownMenuItem v-if="isEditMode" as-child>
                   <RouterLink :to="{ name: 'admin' }" :class="menuItemClass">
                     <Shield class="size-4" />
                     Administration
                   </RouterLink>
                 </DropdownMenuItem>
                 <DropdownMenuSeparator
-                  v-if="hasPlayer || inProgressRoute || isAdmin"
+                  v-if="hasPlayer || inProgressRoute || isEditMode"
                   class="topbar-user-menu-separator"
                 />
                 <DropdownMenuItem :class="menuItemClass" @select="handleLogout">

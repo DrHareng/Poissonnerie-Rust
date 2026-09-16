@@ -247,15 +247,32 @@ fn mask_match_armies(
 fn mask_tournament_match_lists(
     tournament: &crate::tournament::Tournament,
     matches: &mut [crate::tournament::TournamentMatch],
-    _viewer: &ViewerContext,
+    viewer: &ViewerContext,
 ) {
     if tournament.status == TournamentStatus::Completed {
         return;
     }
-    // Listes masquées pour tout le monde tant que le tournoi n'est pas terminé.
+    let viewer_key = viewer
+        .player_name
+        .as_deref()
+        .map(crate::store::normalize_name);
+    let is_validator = is_viewer_list_validator(tournament, viewer);
     for tm in matches {
-        tm.player1_army_list_code = None;
-        tm.player2_army_list_code = None;
+        let can_see = |player_name: Option<&str>| {
+            if is_validator {
+                return true;
+            }
+            matches!(
+                (player_name, &viewer_key),
+                (Some(name), Some(key)) if crate::store::normalize_name(name) == *key
+            )
+        };
+        if !can_see(tm.player1.as_deref()) {
+            tm.player1_army_list_code = None;
+        }
+        if !can_see(tm.player2.as_deref()) {
+            tm.player2_army_list_code = None;
+        }
     }
 }
 
@@ -701,8 +718,12 @@ fn enrich_my_tournament_summary(
                     tm.player2_army_id = None;
                 }
             }
-            tm.player1_army_list_code = None;
-            tm.player2_army_list_code = None;
+            if crate::store::normalize_name(tm.player1.as_deref().unwrap_or("")) != player_key {
+                tm.player1_army_list_code = None;
+            }
+            if crate::store::normalize_name(tm.player2.as_deref().unwrap_or("")) != player_key {
+                tm.player2_army_list_code = None;
+            }
             tm
         })
         .collect();
@@ -1937,6 +1958,28 @@ fn sync_elo_match_after_tournament_score_edit(
     let mut board = state.board.lock().unwrap();
     if board.get_match(elo_id).is_none() {
         return Ok(());
+    }
+    if let Some(code) = tm.player1_army_list_code.as_deref() {
+        if let Ok(list) = state.army_lists.get_or_create(code) {
+            let _ = board.force_update_match_army_list(
+                elo_id,
+                tm.player1.as_deref().unwrap_or(""),
+                list.id,
+                &list.code,
+                list.army_id,
+            );
+        }
+    }
+    if let Some(code) = tm.player2_army_list_code.as_deref() {
+        if let Ok(list) = state.army_lists.get_or_create(code) {
+            let _ = board.force_update_match_army_list(
+                elo_id,
+                tm.player2.as_deref().unwrap_or(""),
+                list.id,
+                &list.code,
+                list.army_id,
+            );
+        }
     }
     board
         .patch_match_result_fields(elo_id, outcome, update, scores)

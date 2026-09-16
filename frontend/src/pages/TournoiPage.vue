@@ -50,6 +50,7 @@ import type {
   User,
 } from '@/types/elo'
 import { useAuth } from '@/composables/useAuth'
+import { useAdminEditMode } from '@/composables/useAdminEditMode'
 import { useAppSidePanel } from '@/composables/useAppSidePanel'
 import { useNetworkStatus } from '@/composables/useNetworkStatus'
 import ArmyLogo from '@/components/ArmyLogo.vue'
@@ -91,7 +92,9 @@ import { Label } from '@/components/ui/label'
 const props = defineProps<{ id: string }>()
 const route = useRoute()
 const router = useRouter()
-const { isAdmin, hasPlayer, player, isAuthenticated, user, refresh: refreshAuth } = useAuth()
+const { isAdmin: isAdminAccount, hasPlayer, player, isAuthenticated, user, refresh: refreshAuth } =
+  useAuth()
+const { showAdminUi: isAdmin } = useAdminEditMode()
 const { setCustomSide } = useAppSidePanel()
 const { isOnline } = useNetworkStatus()
 
@@ -308,7 +311,7 @@ const tournamentTabs = computed(() => {
   if (canAccessAdminTab.value) {
     tabs.push({
       id: 'admin',
-      label: isListValidator.value && !isAdmin.value
+      label: isListValidator.value && !isAdminAccount.value
         ? 'Validation des listes'
         : 'Administration',
     })
@@ -1515,6 +1518,17 @@ async function correctMatch(match: TournamentMatch, form: TournamentMatchForm) {
     return
   }
 
+  const list1 = matchHasList2(match, 'player1') ? form.list1 : 1
+  const list2 = matchHasList2(match, 'player2') ? form.list2 : 1
+  if (list1 !== 1 && list1 !== 2) {
+    toast.error('Choisissez la liste du joueur 1.')
+    return
+  }
+  if (list2 !== 1 && list2 !== 2) {
+    toast.error('Choisissez la liste du joueur 2.')
+    return
+  }
+
   await act(
     () =>
       correctTournamentMatch(match.id, {
@@ -1522,6 +1536,8 @@ async function correctMatch(match: TournamentMatch, form: TournamentMatchForm) {
         player2_objectives: form.p2,
         player1_survivors: form.s1,
         player2_survivors: form.s2,
+        player1_list_slot: list1,
+        player2_list_slot: list2,
       }),
     'Score corrigé',
   )

@@ -9,13 +9,13 @@ import AddPlayerCard from '@/components/AddPlayerCard.vue'
 import PageTitleTabs from '@/components/PageTitleTabs.vue'
 import RankingTable from '@/components/RankingTable.vue'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
-import { useAuth } from '@/composables/useAuth'
+import { useAdminEditMode } from '@/composables/useAdminEditMode'
 import { classementTabs } from '@/lib/pageTitleTabs'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 
 const router = useRouter()
-const { isAdmin } = useAuth()
+const { showAdminUi: isAdmin } = useAdminEditMode()
 
 const players = ref<RankedPlayer[]>([])
 const loading = ref(true)

@@ -35,6 +35,7 @@ import SecondaryCardGrid from '@/components/partie/SecondaryCardGrid.vue'
 import ScenarioDetailView from '@/components/ScenarioDetailView.vue'
 import ImageViewer, { type ImageViewerItem } from '@/components/ImageViewer.vue'
 import { useAuth } from '@/composables/useAuth'
+import { useAdminEditMode } from '@/composables/useAdminEditMode'
 import { useAppSidePanel } from '@/composables/useAppSidePanel'
 import { useNetworkStatus } from '@/composables/useNetworkStatus'
 import {
@@ -72,7 +73,8 @@ import {
 
 const route = useRoute()
 const router = useRouter()
-const { player: currentPlayer, isAuthenticated, isAdmin, login } = useAuth()
+const { player: currentPlayer, isAuthenticated, login } = useAuth()
+const { showAdminUi: isAdmin } = useAdminEditMode()
 const { setCustomSide } = useAppSidePanel()
 const { isOnline } = useNetworkStatus()
 
@@ -125,6 +127,8 @@ const deleting = ref(false)
 const apiOnline = ref(true)
 const tournamentDetail = ref<TournamentDetail | null>(null)
 const tournamentMatch = ref<TournamentMatch | null>(null)
+/** Listes choisies à l’étape lieutenant (mode tournoi). */
+const tournamentListSlots = ref<{ player1: number; player2: number } | null>(null)
 
 const tournamentMatchId = computed(() => {
   const raw = route.query.tournamentMatchId
@@ -405,6 +409,16 @@ function hydrateFromMatch(record: MatchRecord) {
       winnerChoice: record.lieutenant_winner_choice as PartieLieutenant['winnerChoice'],
       otherChoice: record.lieutenant_other_choice as PartieLieutenant['otherChoice'],
     })
+  }
+
+  if (
+    tournamentMatch.value?.player1_list_slot
+    && tournamentMatch.value?.player2_list_slot
+  ) {
+    tournamentListSlots.value = {
+      player1: tournamentMatch.value.player1_list_slot,
+      player2: tournamentMatch.value.player2_list_slot,
+    }
   }
 
   const resumeStep = (record.partie_step as PartieStep | null) ?? 'scenario'
@@ -738,16 +752,27 @@ async function onSecondairesNext(payload: {
   )
 }
 
-async function onLieutenantNext(value: Parameters<typeof setLieutenant>[0]) {
+async function onLieutenantNext(
+  value: Parameters<typeof setLieutenant>[0],
+  lists?: { player1: number; player2: number },
+) {
   if (!matchId.value && !clientUuid.value) return
   setLieutenant(value)
+  if (lists) {
+    tournamentListSlots.value = lists
+  }
+  const body: Parameters<typeof updateMatchProgress>[1] = {
+    lieutenant_winner: value.winner,
+    lieutenant_winner_choice: value.winnerChoice,
+    lieutenant_other_choice: value.otherChoice,
+    partie_step: 'resultat',
+  }
+  if (lists) {
+    body.player1_list_slot = lists.player1
+    body.player2_list_slot = lists.player2
+  }
   await saveProgress(
-    {
-      lieutenant_winner: value.winner,
-      lieutenant_winner_choice: value.winnerChoice,
-      lieutenant_other_choice: value.otherChoice,
-      partie_step: 'resultat',
-    },
+    body,
     () => nextStep(),
     'Impossible d’enregistrer le jet de lieutenant',
   )
@@ -1101,6 +1126,12 @@ watch(isOnline, async (online) => {
               :player1-display-name="player1DisplayName"
               :player2-display-name="player2DisplayName"
               :initial="lieutenant"
+              :tournament-mode="isTournamentPartie"
+              :player1-has-list2="player1HasList2"
+              :player2-has-list2="player2HasList2"
+              :list-label="tournamentListLabel"
+              :initial-list1="tournamentListSlots?.player1 ?? tournamentMatch?.player1_list_slot"
+              :initial-list2="tournamentListSlots?.player2 ?? tournamentMatch?.player2_list_slot"
               @back="prevStep"
               @next="onLieutenantNext"
             />
@@ -1120,6 +1151,8 @@ watch(isOnline, async (online) => {
               :player1-has-list2="player1HasList2"
               :player2-has-list2="player2HasList2"
               :list-label="tournamentListLabel"
+              :player1-list-slot="tournamentListSlots?.player1 ?? tournamentMatch?.player1_list_slot"
+              :player2-list-slot="tournamentListSlots?.player2 ?? tournamentMatch?.player2_list_slot"
               @back="prevStep"
               @update:scores="updateScores"
               @recorded="onRecorded"

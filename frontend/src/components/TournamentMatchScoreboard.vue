@@ -7,14 +7,22 @@ import { Label } from '@/components/ui/label'
 import type { TournamentMatchForm } from '@/components/TournamentMatchCard.vue'
 import type { TournamentMatch } from '@/types/elo'
 
-defineProps<{
-  match: TournamentMatch
-  mode: 'scores' | 'form' | 'players'
-  form?: TournamentMatchForm
-  player1ArmyId?: number
-  player2ArmyId?: number
-  compact?: boolean
-}>()
+withDefaults(
+  defineProps<{
+    match: TournamentMatch
+    mode: 'scores' | 'form' | 'players'
+    form?: TournamentMatchForm
+    player1ArmyId?: number
+    player2ArmyId?: number
+    player1HasList2?: boolean
+    player2HasList2?: boolean
+    compact?: boolean
+  }>(),
+  {
+    player1HasList2: false,
+    player2HasList2: false,
+  },
+)
 </script>
 
 <template>
@@ -108,6 +116,25 @@ defineProps<{
           />
         </div>
         <div class="grid gap-2">
+          <Label :for="`match-${match.id}-p1-list`">Liste</Label>
+          <select
+            v-if="player1HasList2"
+            :id="`match-${match.id}-p1-list`"
+            v-model.number="form!.list1"
+            class="h-9 rounded-md border border-input bg-transparent px-2 text-sm"
+          >
+            <option :value="undefined" disabled>Choisir…</option>
+            <option :value="1">Liste 1</option>
+            <option :value="2">Liste 2</option>
+          </select>
+          <span
+            v-else
+            class="flex h-9 items-center text-sm text-muted-foreground"
+          >
+            Liste 1
+          </span>
+        </div>
+        <div class="grid gap-2">
           <Label :for="`match-${match.id}-p1-obj`">Points d'objectifs</Label>
           <Input
             :id="`match-${match.id}-p1-obj`"
@@ -163,6 +190,25 @@ defineProps<{
             :display-name="match.player2_display_name"
             class="font-medium"
           />
+        </div>
+        <div class="grid gap-2">
+          <Label :for="`match-${match.id}-p2-list`">Liste</Label>
+          <select
+            v-if="player2HasList2"
+            :id="`match-${match.id}-p2-list`"
+            v-model.number="form!.list2"
+            class="h-9 rounded-md border border-input bg-transparent px-2 text-sm"
+          >
+            <option :value="undefined" disabled>Choisir…</option>
+            <option :value="1">Liste 1</option>
+            <option :value="2">Liste 2</option>
+          </select>
+          <span
+            v-else
+            class="flex h-9 items-center text-sm text-muted-foreground"
+          >
+            Liste 1
+          </span>
         </div>
         <div class="grid gap-2">
           <Label :for="`match-${match.id}-p2-obj`">Points d'objectifs</Label>
