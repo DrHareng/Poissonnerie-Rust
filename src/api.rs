@@ -1248,14 +1248,15 @@ fn build_player_profile(
     response.profile_display_name = Some(linked_user.effective_display_name().to_string());
     response.display_name = linked_user.effective_display_name().to_string();
 
+    // Pseudo Discord d'origine : uniquement en second si un pseudo local est défini.
+    if linked_user.has_local_display_name() {
+        response.discord_display_name = Some(linked_user.display_name.clone());
+    }
+
     if let Some(viewer) = viewer {
         if let Some(viewer_player) = board.get_player_by_discord_username(&viewer.username) {
             response.is_own_profile =
                 viewer_player.name.eq_ignore_ascii_case(&player.name);
-        }
-
-        if viewer.is_admin && linked_user.has_local_display_name() {
-            response.discord_display_name = Some(linked_user.display_name.clone());
         }
     }
 

@@ -548,6 +548,9 @@ pub struct TournamentMatch {
     pub scenario_other: Option<String>,
     /// Libellé d'affichage (nom catalogue ou texte libre).
     pub scenario_name: Option<String>,
+    /// Slug catalogue pour lien `/scenarios/:slug`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub scenario_slug: Option<String>,
     pub player1_army_id: Option<u32>,
     pub player2_army_id: Option<u32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1260,6 +1263,7 @@ mod tests {
             scenario_id: None,
             scenario_other: None,
             scenario_name: None,
+            scenario_slug: None,
             player1_army_id: None,
             player2_army_id: None,
             player1_army_list_code: None,
@@ -1431,6 +1435,7 @@ mod tests {
                 scenario_id: None,
                 scenario_other: None,
                 scenario_name: None,
+            scenario_slug: None,
                 player1_army_id: None,
                 player2_army_id: None,
                 player1_army_list_code: None,
@@ -1483,6 +1488,7 @@ mod tests {
                 scenario_id: None,
                 scenario_other: None,
                 scenario_name: None,
+            scenario_slug: None,
                 player1_army_id: None,
                 player2_army_id: None,
                 player1_army_list_code: None,
@@ -1526,6 +1532,7 @@ mod tests {
                 scenario_id: None,
                 scenario_other: None,
                 scenario_name: None,
+            scenario_slug: None,
                 player1_army_id: None,
                 player2_army_id: None,
                 player1_army_list_code: None,
@@ -1592,6 +1599,7 @@ mod tests {
                 scenario_id: None,
                 scenario_other: None,
                 scenario_name: None,
+            scenario_slug: None,
                 player1_army_id: None,
                 player2_army_id: None,
                 player1_army_list_code: None,
@@ -1638,6 +1646,7 @@ mod tests {
                 scenario_id: None,
                 scenario_other: None,
                 scenario_name: None,
+            scenario_slug: None,
                 player1_army_id: None,
                 player2_army_id: None,
                 player1_army_list_code: None,

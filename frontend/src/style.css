@@ -602,6 +602,10 @@
     @apply min-w-0 truncate;
   }
 
+  .tournament-match-meta-scenario--link {
+    @apply text-primary underline-offset-2 hover:underline;
+  }
+
   .tournament-match-meta-date {
     @apply shrink-0 whitespace-nowrap tabular-nums;
   }
@@ -809,6 +813,10 @@
 
   .pool-col-scenario {
     @apply max-w-[10rem] truncate text-muted-foreground;
+  }
+
+  .pool-scenario-link {
+    @apply text-primary underline-offset-2 hover:underline;
   }
 
   .pool-col-admin {

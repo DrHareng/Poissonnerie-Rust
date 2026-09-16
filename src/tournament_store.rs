@@ -4304,6 +4304,7 @@ impl TournamentStore {
                    tm.confirmed_by_user_id, tm.confirmed_at,
                    tm.scenario_id, tm.scenario_other,
                    COALESCE(s.name, tm.scenario_other),
+                   NULLIF(TRIM(s.slug), ''),
                    tm.player1_army_id, tm.player2_army_id, tm.played_at, tm.is_unplayed,
                    tm.player1_army_list_code, tm.player2_army_list_code,
                    tm.player1_army_list_id, tm.player2_army_list_id,
@@ -4679,16 +4680,17 @@ fn row_to_tournament_match(row: &rusqlite::Row<'_>) -> rusqlite::Result<Tourname
         scenario_id: row.get(26)?,
         scenario_other: row.get(27)?,
         scenario_name: row.get(28)?,
-        player1_army_id: row.get(29)?,
-        player2_army_id: row.get(30)?,
-        played_at: row.get(31)?,
-        is_unplayed: row.get::<_, i64>(32)? != 0,
-        player1_army_list_code: row.get(33)?,
-        player2_army_list_code: row.get(34)?,
-        player1_army_list_id: row.get(35)?,
-        player2_army_list_id: row.get(36)?,
+        scenario_slug: row.get(29)?,
+        player1_army_id: row.get(30)?,
+        player2_army_id: row.get(31)?,
+        played_at: row.get(32)?,
+        is_unplayed: row.get::<_, i64>(33)? != 0,
+        player1_army_list_code: row.get(34)?,
+        player2_army_list_code: row.get(35)?,
+        player1_army_list_id: row.get(36)?,
+        player2_army_list_id: row.get(37)?,
         elo_match_id: row
-            .get::<_, Option<i64>>(37)?
+            .get::<_, Option<i64>>(38)?
             .map(|id| id as u64),
     })
 }

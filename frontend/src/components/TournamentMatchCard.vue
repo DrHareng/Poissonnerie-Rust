@@ -9,11 +9,15 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from 'reka-ui'
+import { RouterLink } from 'vue-router'
 import TournamentMatchScoreboard from '@/components/TournamentMatchScoreboard.vue'
 import ArmyLogo from '@/components/ArmyLogo.vue'
 import PlayerLink from '@/components/PlayerLink.vue'
 import { Button } from '@/components/ui/button'
-import { formatMatchRecordedDate } from '@/lib/tournamentMatchDisplay'
+import {
+  formatMatchRecordedDate,
+  tournamentMatchScenarioPath,
+} from '@/lib/tournamentMatchDisplay'
 import { COUPE_REQUIRES_NETWORK } from '@/lib/partieOffline'
 import type { TournamentMatch } from '@/types/elo'
 
@@ -125,6 +129,11 @@ const canCorrect = computed(
 
 const canCancelForfeit = computed(
   () => props.isAdmin && props.match.is_forfeit,
+)
+
+const scenarioPath = computed(() => tournamentMatchScenarioPath(props.match))
+const scenarioLabel = computed(
+  () => props.match.scenario_name?.trim() || null,
 )
 
 const selfForfeitName = computed(() => {
@@ -307,12 +316,22 @@ function matchPlayerLabel(slot: 'player1' | 'player2') {
         </div>
         <div class="tournament-match-meta">
           <span class="tournament-match-meta-phase">Scénario</span>
-          <span
-            class="tournament-match-meta-scenario"
-            :class="{ 'tournament-match-meta-empty': !match.scenario_name }"
-            :title="match.scenario_name ?? undefined"
+          <RouterLink
+            v-if="scenarioPath && scenarioLabel"
+            :to="scenarioPath"
+            class="tournament-match-meta-scenario tournament-match-meta-scenario--link"
+            :title="scenarioLabel"
+            @click.stop
           >
-            {{ match.scenario_name ?? '—' }}
+            {{ scenarioLabel }}
+          </RouterLink>
+          <span
+            v-else
+            class="tournament-match-meta-scenario"
+            :class="{ 'tournament-match-meta-empty': !scenarioLabel }"
+            :title="scenarioLabel ?? undefined"
+          >
+            {{ scenarioLabel ?? '—' }}
           </span>
         </div>
       </div>
@@ -326,12 +345,22 @@ function matchPlayerLabel(slot: 'player1' | 'player2') {
         >
           {{ phaseLabel ?? '—' }}
         </span>
-        <span
-          class="tournament-match-meta-scenario"
-          :class="{ 'tournament-match-meta-empty': !match.scenario_name }"
-          :title="match.scenario_name ?? undefined"
+        <RouterLink
+          v-if="scenarioPath && scenarioLabel"
+          :to="scenarioPath"
+          class="tournament-match-meta-scenario tournament-match-meta-scenario--link"
+          :title="scenarioLabel"
+          @click.stop
         >
-          {{ match.scenario_name ?? '—' }}
+          {{ scenarioLabel }}
+        </RouterLink>
+        <span
+          v-else
+          class="tournament-match-meta-scenario"
+          :class="{ 'tournament-match-meta-empty': !scenarioLabel }"
+          :title="scenarioLabel ?? undefined"
+        >
+          {{ scenarioLabel ?? '—' }}
         </span>
         <span
           v-if="!compact"

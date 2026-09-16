@@ -81,6 +81,17 @@ const headerTitle = computed(
     '',
 )
 
+/** Pseudo Discord d'origine, seulement s'il diffère du titre (pseudo local). */
+const secondaryDisplayName = computed(() => {
+  const discord = profile.value?.discord_display_name?.trim()
+  if (!discord) return null
+  const primary = headerTitle.value.trim()
+  if (!primary || discord.localeCompare(primary, undefined, { sensitivity: 'accent' }) === 0) {
+    return null
+  }
+  return discord
+})
+
 const playerMatchesCount = computed(() => {
   if (!player.value) return 0
   return player.value.wins + player.value.draws + player.value.losses
@@ -355,13 +366,11 @@ onMounted(refresh)
                       {{ headerTitle }}
                     </h1>
                     <p
-                      v-if="profile?.discord_display_name"
+                      v-if="secondaryDisplayName"
                       class="truncate text-xs text-muted-foreground"
+                      :title="secondaryDisplayName"
                     >
-                      {{ profile.discord_display_name }}
-                    </p>
-                    <p class="truncate text-xs text-muted-foreground">
-                      {{ player.name }}
+                      {{ secondaryDisplayName }}
                     </p>
                   </div>
                 </div>

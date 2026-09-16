@@ -9,11 +9,13 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from 'reka-ui'
+import { RouterLink } from 'vue-router'
 import ArmyLogo from '@/components/ArmyLogo.vue'
 import MatchResultBadges from '@/components/MatchResultBadges.vue'
 import PlayerLink from '@/components/PlayerLink.vue'
 import TournamentMatchScoreboard from '@/components/TournamentMatchScoreboard.vue'
 import { Button } from '@/components/ui/button'
+import { tournamentMatchScenarioPath } from '@/lib/tournamentMatchDisplay'
 import { COUPE_REQUIRES_NETWORK } from '@/lib/partieOffline'
 import type { TournamentMatchForm } from '@/components/TournamentMatchCard.vue'
 import type { TournamentMatch } from '@/types/elo'
@@ -151,6 +153,14 @@ function scoreColumnPendingLabel(match: TournamentMatch) {
   return '—'
 }
 
+function scenarioLabel(match: TournamentMatch) {
+  return match.scenario_name?.trim() || match.scenario_other?.trim() || null
+}
+
+function scenarioPath(match: TournamentMatch) {
+  return tournamentMatchScenarioPath(match)
+}
+
 function startCorrection(match: TournamentMatch) {
   const form = props.getForm(match)
   form.p1 = match.player1_objectives
@@ -259,11 +269,22 @@ watch(
               />
             </span>
           </td>
-          <td
-            class="pool-col-scenario"
-            :title="match.scenario_name ?? match.scenario_other ?? undefined"
-          >
-            {{ match.scenario_name || match.scenario_other || '—' }}
+          <td class="pool-col-scenario">
+            <RouterLink
+              v-if="scenarioPath(match) && scenarioLabel(match)"
+              :to="scenarioPath(match)!"
+              class="pool-scenario-link"
+              :title="scenarioLabel(match)!"
+              @click.stop
+            >
+              {{ scenarioLabel(match) }}
+            </RouterLink>
+            <span
+              v-else
+              :title="scenarioLabel(match) ?? undefined"
+            >
+              {{ scenarioLabel(match) ?? '—' }}
+            </span>
           </td>
           <td class="pool-col-admin">
             <div class="pool-match-admin-actions">

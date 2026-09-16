@@ -41,6 +41,15 @@ export function matchHasResult(match: TournamentMatch) {
   )
 }
 
+/** Chemin interne vers la fiche scénario (clic molette = nouvel onglet). */
+export function tournamentMatchScenarioPath(
+  match: Pick<TournamentMatch, 'scenario_slug'>,
+): string | null {
+  const slug = match.scenario_slug?.trim()
+  if (!slug) return null
+  return `/scenarios/${encodeURIComponent(slug)}`
+}
+
 export function formatMatchDate(timestamp: number) {
   return new Intl.DateTimeFormat('fr-FR', {
     dateStyle: 'short',

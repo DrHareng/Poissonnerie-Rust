@@ -376,6 +376,7 @@ export interface TournamentMatch {
   scenario_id?: number | null
   scenario_other?: string | null
   scenario_name?: string | null
+  scenario_slug?: string | null
   player1_army_id?: number | null
   player2_army_id?: number | null
   player1_army_list_code?: string | null
