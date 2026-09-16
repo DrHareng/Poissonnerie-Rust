@@ -1496,18 +1496,17 @@ async function correctMatch(match: TournamentMatch, form: TournamentMatchForm) {
 }
 
 async function forfeitMatch(match: TournamentMatch, forfeitPlayer: string) {
-  const label =
-    player.value && forfeitPlayer.toLowerCase() === player.value.name.toLowerCase()
-      ? 'Forfait déclaré — en attente de confirmation'
-      : 'Forfait déclaré — en attente de confirmation'
-  if (
-    !window.confirm(
-      `Confirmer le forfait de ${forfeitPlayer} ? L’adversaire (ou un admin) devra valider.`,
-    )
-  ) {
-    return
-  }
-  await act(() => forfeitTournamentMatch(match.id, forfeitPlayer), label)
+  const isSelf =
+    !!player.value
+    && forfeitPlayer.toLowerCase() === player.value.name.toLowerCase()
+  const message = isSelf
+    ? 'Déclarer forfait ? L’adversaire (ou un admin) devra valider.'
+    : `Déclarer le forfait de ${forfeitPlayer} ? L’adversaire (ou un admin) devra valider.`
+  if (!window.confirm(message)) return
+  await act(
+    () => forfeitTournamentMatch(match.id, forfeitPlayer),
+    'Forfait déclaré — en attente de confirmation',
+  )
 }
 
 async function cancelForfeit(match: TournamentMatch) {
@@ -1516,6 +1515,13 @@ async function cancelForfeit(match: TournamentMatch) {
 }
 
 async function markMatchUnplayed(match: TournamentMatch) {
+  if (
+    !window.confirm(
+      'Marquer ce match comme non joué ? Les deux joueurs n’obtiendront pas de points.',
+    )
+  ) {
+    return
+  }
   await act(
     () => unplayedTournamentMatch(match.id),
     'Match non joué enregistré',
@@ -1759,6 +1765,7 @@ onMounted(refresh)
                       v-for="match in myUpcomingMatches"
                       :key="match.id"
                       compact
+                      opponent-focused
                       :match="match"
                       :form="getForm(match)"
                       :can-interact="canInteractWithMatch(match)"
@@ -1983,6 +1990,7 @@ onMounted(refresh)
                     v-for="match in myUpcomingMatches"
                     :key="`mobile-${match.id}`"
                     compact
+                    opponent-focused
                     :match="match"
                     :form="getForm(match)"
                     :can-interact="canInteractWithMatch(match)"

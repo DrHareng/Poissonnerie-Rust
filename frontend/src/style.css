@@ -622,6 +622,27 @@
     @apply h-6 px-2 text-[11px];
   }
 
+  .tournament-match-options-trigger {
+    @apply size-7 shrink-0 px-0;
+  }
+
+  .tournament-match-opponent-focus {
+    @apply grid gap-1.5;
+  }
+
+  .tournament-match-opponent-row {
+    @apply flex min-w-0 items-center gap-2;
+  }
+
+  .tournament-match-opponent-focus .tournament-match-vs {
+    @apply shrink-0 self-center text-sm tracking-[0.12em];
+  }
+
+  .tournament-match-opponent-focus .tournament-match-meta {
+    @apply mb-0;
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+
   .tournament-match-layout {
     @apply grid gap-2;
   }
