@@ -10,6 +10,7 @@ function brandImage(path: string): string {
 /** Illustrations du panneau gauche. Les `name` s'affichent dans les préférences joueur. */
 export const SIDE_IMAGES = [
   { id: 'side_01', src: brandImage('/brand/side_01.png'), name: 'Lune & Griffes' },
+  { id: 'side_01b', src: brandImage('/brand/side_01b.png'), name: 'Lune & Griffes 2' },
   { id: 'side_02', src: brandImage('/brand/side_02.png'), name: 'Saint Sépulcre' },
   { id: 'side_03', src: brandImage('/brand/side_03.png'), name: 'Écailles de Saint-Nazaire' },
   { id: 'side_04', src: brandImage('/brand/side_04.png'), name: 'Sous la montagne' },

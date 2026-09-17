@@ -186,108 +186,6 @@ onMounted(async () => {
     >
       <div class="grid min-w-0 gap-4 self-start">
         <Card class="neon-panel">
-          <CardHeader class="pb-3">
-            <div class="flex items-center justify-between gap-3">
-              <CardTitle class="flex items-center gap-2">
-                <Trophy class="size-5 text-primary" />
-                Dernier tournoi
-              </CardTitle>
-              <RouterLink
-                to="/tournois"
-                class="text-sm font-medium text-primary hover:underline"
-              >
-                Voir tout
-              </RouterLink>
-            </div>
-          </CardHeader>
-          <CardContent>
-            <div
-              v-if="loading"
-              class="rounded-lg border border-dashed p-6 text-center text-sm text-muted-foreground"
-            >
-              Chargement…
-            </div>
-            <div
-              v-else-if="!tournament"
-              class="rounded-lg border border-dashed p-6 text-center text-sm text-muted-foreground"
-            >
-              Aucun tournoi.
-            </div>
-            <button
-              v-else
-              type="button"
-              class="grid w-full gap-3 rounded-lg border p-4 text-left transition hover:border-primary/50 hover:bg-muted/30"
-              @click="openTournament"
-            >
-              <div class="flex items-start justify-between gap-4">
-                <div class="min-w-0 space-y-1">
-                  <p class="font-medium">{{ tournament.name }}</p>
-                  <p class="text-sm text-muted-foreground">
-                    {{
-                      formatRegistrationSummary(
-                        tournament.registered_count,
-                        tournament.waitlist_count,
-                        tournamentRegistrationCapacity(
-                          tournament.pool_count,
-                          tournament.structure,
-                        ),
-                      )
-                    }}
-                  </p>
-                </div>
-                <Badge variant="outline" class="shrink-0">
-                  {{ tournament.display_status }}
-                </Badge>
-              </div>
-              <TournamentPoolsPreview
-                v-if="isTournamentPoolsPhase(tournament)"
-                :pools="tournament.pools ?? []"
-                :registrations="tournament.registrations ?? []"
-                :matches="tournament.pool_matches ?? []"
-                :qualified-per-pool="tournament.qualified_per_pool ?? 0"
-                selectable
-                @click.stop
-                @select-pool="openTournamentPool"
-              />
-              <TournamentDescriptionWithRegistrants
-                v-else-if="
-                  isTournamentRegistrationPhase(tournament.status)
-                  && (tournament.description?.trim()
-                    || (tournament.registrations?.length ?? 0) > 0
-                    || (tournament.pool_scenarios?.length ?? 0) > 0)
-                "
-                :description="tournament.description"
-                :registrations="tournament.registrations ?? []"
-                :scenarios="tournament.pool_scenarios ?? []"
-                compact
-              />
-              <div
-                v-else-if="tournament.description?.trim()"
-                class="prose prose-sm max-w-none text-left text-muted-foreground"
-              >
-                <MarkdownContent :source="tournament.description" />
-              </div>
-              <div
-                v-if="
-                  (tournament.pool_scenarios?.length ?? 0) > 0
-                  && !isTournamentRegistrationPhase(tournament.status)
-                  && !isTournamentPoolsPhase(tournament)
-                "
-                class="space-y-1 text-left"
-              >
-                <p class="text-xs font-medium text-muted-foreground">Scénarios de poules</p>
-                <TournamentPoolScenarioLinks :scenarios="tournament.pool_scenarios ?? []" />
-              </div>
-              <BracketTree
-                v-if="tournament.bracket_matches?.length"
-                :matches="tournament.bracket_matches"
-                compact
-              />
-            </button>
-          </CardContent>
-        </Card>
-
-        <Card class="neon-panel">
           <CardHeader class="pb-2">
             <div class="flex items-center justify-between gap-3">
               <CardTitle class="flex items-center gap-2">
@@ -372,6 +270,109 @@ onMounted(async () => {
                 </span>
               </div>
             </div>
+          </CardContent>
+        </Card>
+
+        <Card class="neon-panel">
+          <CardHeader class="pb-3">
+            <div class="flex items-center justify-between gap-3">
+              <CardTitle class="flex items-center gap-2">
+                <Trophy class="size-5 text-primary" />
+                Dernier tournoi
+              </CardTitle>
+              <RouterLink
+                to="/tournois"
+                class="text-sm font-medium text-primary hover:underline"
+              >
+                Voir tout
+              </RouterLink>
+            </div>
+          </CardHeader>
+          <CardContent>
+            <div
+              v-if="loading"
+              class="rounded-lg border border-dashed p-6 text-center text-sm text-muted-foreground"
+            >
+              Chargement…
+            </div>
+            <div
+              v-else-if="!tournament"
+              class="rounded-lg border border-dashed p-6 text-center text-sm text-muted-foreground"
+            >
+              Aucun tournoi.
+            </div>
+            <button
+              v-else
+              type="button"
+              class="grid w-full gap-3 rounded-lg border p-4 text-left transition hover:border-primary/50 hover:bg-muted/30"
+              @click="openTournament"
+            >
+              <div class="flex items-start justify-between gap-4">
+                <div class="min-w-0 space-y-1">
+                  <p class="font-medium">{{ tournament.name }}</p>
+                  <p class="text-sm text-muted-foreground">
+                    {{
+                      formatRegistrationSummary(
+                        tournament.registered_count,
+                        tournament.waitlist_count,
+                        tournamentRegistrationCapacity(
+                          tournament.pool_count,
+                          tournament.structure,
+                        ),
+                      )
+                    }}
+                  </p>
+                </div>
+                <Badge variant="outline" class="shrink-0">
+                  {{ tournament.display_status }}
+                </Badge>
+              </div>
+              <TournamentPoolsPreview
+                v-if="isTournamentPoolsPhase(tournament)"
+                :pools="tournament.pools ?? []"
+                :registrations="tournament.registrations ?? []"
+                :matches="tournament.pool_matches ?? []"
+                :qualified-per-pool="tournament.qualified_per_pool ?? 0"
+                hide-tiebreakers
+                selectable
+                @click.stop
+                @select-pool="openTournamentPool"
+              />
+              <TournamentDescriptionWithRegistrants
+                v-else-if="
+                  isTournamentRegistrationPhase(tournament.status)
+                  && (tournament.description?.trim()
+                    || (tournament.registrations?.length ?? 0) > 0
+                    || (tournament.pool_scenarios?.length ?? 0) > 0)
+                "
+                :description="tournament.description"
+                :registrations="tournament.registrations ?? []"
+                :scenarios="tournament.pool_scenarios ?? []"
+                compact
+              />
+              <div
+                v-else-if="tournament.description?.trim()"
+                class="prose prose-sm max-w-none text-left text-muted-foreground"
+              >
+                <MarkdownContent :source="tournament.description" />
+              </div>
+              <div
+                v-if="
+                  (tournament.pool_scenarios?.length ?? 0) > 0
+                  && !isTournamentRegistrationPhase(tournament.status)
+                  && !isTournamentPoolsPhase(tournament)
+                "
+                class="space-y-1 text-left"
+              >
+                <p class="text-xs font-medium text-muted-foreground">Scénarios de poules</p>
+                <TournamentPoolScenarioLinks :scenarios="tournament.pool_scenarios ?? []" />
+              </div>
+              <BracketTree
+                v-if="tournament.bracket_matches?.length"
+                :matches="tournament.bracket_matches"
+                compact
+              />
+            </button>
           </CardContent>
         </Card>
       </div>

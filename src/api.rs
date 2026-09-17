@@ -19,9 +19,9 @@ use tower_sessions::{cookie::SameSite, Expiry, Session, SessionManagerLayer};
 use crate::{
     auth::{self, AuthConfig, CallbackQuery},
     dauphine_api, default_db_path, scenario::ScenarioStore, session_store::SqliteSessionStore,
-    tournament_api, ArmyListStore, ArmyStore, DauphineStore, Leaderboard, MatchOutcome,
+    tts_map_api, tournament_api, ArmyListStore, ArmyStore, DauphineStore, Leaderboard, MatchOutcome,
     MatchRecord, MatchScores, Player, ReportStatus, ReportTemplateStore, SiteContentStore,
-    TournamentStore, User, UserStore, DEFAULT_K_FACTOR, RESSOURCES_KEY,
+    TtsMapStore, TournamentStore, User, UserStore, DEFAULT_K_FACTOR, RESSOURCES_KEY,
 };
 use crate::army_list_store::ArmyListStatsGroup;
 use crate::tournament::TournamentStatus;
@@ -40,6 +40,7 @@ pub struct AppState {
     pub scenarios: Arc<ScenarioStore>,
     pub report_templates: Arc<ReportTemplateStore>,
     pub site_content: Arc<SiteContentStore>,
+    pub tts_maps: Arc<TtsMapStore>,
     pub auth: Option<AuthConfig>,
     pub db_path: PathBuf,
     pub k_factor: f64,
@@ -285,6 +286,8 @@ struct PrefsResponse {
     secondary_view_mode: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     scenario_slug: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    tts_map_slug: Option<String>,
     army_sort_mode: String,
     player_sort_mode: String,
     tournament_completed_view_mode: String,
@@ -296,6 +299,8 @@ struct UpdatePrefsRequest {
     secondary_view_mode: Option<String>,
     #[serde(default)]
     scenario_slug: Option<String>,
+    #[serde(default)]
+    tts_map_slug: Option<String>,
     #[serde(default)]
     army_sort_mode: Option<String>,
     #[serde(default)]
@@ -448,6 +453,7 @@ pub fn router(state: AppState) -> Result<Router> {
         .route("/api/health", get(health))
         .route("/api/ressources", get(get_ressources).patch(update_ressources))
         .merge(tournament_api::tournament_routes())
+        .merge(tts_map_api::tts_map_routes())
         .merge(dauphine_api::dauphine_routes())
         .layer(cors_layer())
         .layer(session_layer)
@@ -765,6 +771,24 @@ async fn update_prefs(
         ui_update.scenario_slug = Some(slug);
     }
 
+    if let Some(raw) = payload.tts_map_slug.as_deref() {
+        if raw.trim().is_empty() {
+            let _: Option<String> = session
+                .remove(auth::SESSION_TTS_MAP_SLUG)
+                .await
+                .map_err(|error| ApiError::bad_request(error.to_string()))?;
+            ui_update.tts_map_slug = Some(String::new());
+        } else {
+            let slug = auth::normalize_scenario_slug(raw)
+                .ok_or_else(|| ApiError::bad_request("map TTS invalide"))?;
+            session
+                .insert(auth::SESSION_TTS_MAP_SLUG, slug.clone())
+                .await
+                .map_err(|error| ApiError::bad_request(error.to_string()))?;
+            ui_update.tts_map_slug = Some(slug);
+        }
+    }
+
     if let Some(raw) = payload.army_sort_mode.as_deref() {
         let mode = auth::parse_army_sort_mode(raw)
             .ok_or_else(|| ApiError::bad_request("tri sectorielles invalide"))?;
@@ -800,6 +824,7 @@ async fn update_prefs(
 
     if ui_update.secondary_view_mode.is_none()
         && ui_update.scenario_slug.is_none()
+        && ui_update.tts_map_slug.is_none()
         && ui_update.army_sort_mode.is_none()
         && ui_update.player_sort_mode.is_none()
         && ui_update.tournament_completed_view_mode.is_none()
@@ -851,6 +876,22 @@ async fn resolve_prefs(state: &AppState, session: &Session) -> Result<PrefsRespo
     } else {
         let from_session: Option<String> = session
             .get(auth::SESSION_SCENARIO_SLUG)
+            .await
+            .map_err(|error| ApiError::bad_request(error.to_string()))?;
+        from_session
+            .as_deref()
+            .and_then(auth::normalize_scenario_slug)
+    };
+
+    let tts_map_slug = if let Some(slug) = user
+        .as_ref()
+        .and_then(|u| u.tts_map_slug.as_deref())
+        .and_then(auth::normalize_scenario_slug)
+    {
+        Some(slug)
+    } else {
+        let from_session: Option<String> = session
+            .get(auth::SESSION_TTS_MAP_SLUG)
             .await
             .map_err(|error| ApiError::bad_request(error.to_string()))?;
         from_session
@@ -912,6 +953,7 @@ async fn resolve_prefs(state: &AppState, session: &Session) -> Result<PrefsRespo
     Ok(PrefsResponse {
         secondary_view_mode: secondary_view_mode.to_string(),
         scenario_slug,
+        tts_map_slug,
         army_sort_mode: army_sort_mode.to_string(),
         player_sort_mode: player_sort_mode.to_string(),
         tournament_completed_view_mode: tournament_completed_view_mode.to_string(),
@@ -2564,6 +2606,7 @@ pub fn default_state() -> anyhow::Result<AppState> {
     let scenarios = ScenarioStore::open(&db_path)?;
     let report_templates = ReportTemplateStore::open(&db_path)?;
     let site_content = SiteContentStore::open(&db_path)?;
+    let tts_maps = TtsMapStore::open(&db_path)?;
     let auth = AuthConfig::from_env().ok();
     Ok(AppState {
         board: Arc::new(Mutex::new(board)),
@@ -2575,6 +2618,7 @@ pub fn default_state() -> anyhow::Result<AppState> {
         scenarios: Arc::new(scenarios),
         report_templates: Arc::new(report_templates),
         site_content: Arc::new(site_content),
+        tts_maps: Arc::new(tts_maps),
         auth,
         db_path,
         k_factor: DEFAULT_K_FACTOR,

@@ -291,6 +291,7 @@ pub fn migrate(conn: &Connection) -> Result<()> {
 
     migrate_match_reports(conn)?;
     migrate_site_content(conn)?;
+    migrate_tts_maps(conn)?;
 
     if column_exists(conn, "matches", "tournament_id")?
         && column_exists(conn, "matches", "tournament_phase")?
@@ -493,7 +494,8 @@ pub fn migrate(conn: &Connection) -> Result<()> {
         "tournament_registrations",
         "army_list_1_validated",
         "ALTER TABLE tournament_registrations ADD COLUMN army_list_1_validated INTEGER NOT NULL DEFAULT 0",
-    )? {
+    )? && column_exists(conn, "tournament_registrations", "army_list_1")?
+    {
         conn.execute(
             "
             UPDATE tournament_registrations
@@ -510,7 +512,8 @@ pub fn migrate(conn: &Connection) -> Result<()> {
         "tournament_registrations",
         "army_list_2_validated",
         "ALTER TABLE tournament_registrations ADD COLUMN army_list_2_validated INTEGER NOT NULL DEFAULT 0",
-    )? {
+    )? && column_exists(conn, "tournament_registrations", "army_list_2")?
+    {
         conn.execute(
             "
             UPDATE tournament_registrations
@@ -1019,6 +1022,51 @@ fn migrate_site_content(conn: &Connection) -> Result<()> {
         ",
     )?;
     crate::site_content::seed_ressources_content(conn)?;
+    Ok(())
+}
+
+fn migrate_tts_maps(conn: &Connection) -> Result<()> {
+    conn.execute_batch(
+        "
+        CREATE TABLE IF NOT EXISTS tts_maps (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            slug TEXT NOT NULL UNIQUE,
+            name TEXT NOT NULL,
+            json_filename TEXT,
+            sort_order INTEGER NOT NULL DEFAULT 0,
+            created_at INTEGER NOT NULL,
+            updated_at INTEGER NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS tts_map_pictures (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            map_id INTEGER NOT NULL REFERENCES tts_maps(id) ON DELETE CASCADE,
+            filename TEXT NOT NULL,
+            original_name TEXT NOT NULL,
+            created_at INTEGER NOT NULL,
+            UNIQUE(map_id, filename)
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_tts_map_pictures_map
+            ON tts_map_pictures(map_id);
+
+        CREATE TABLE IF NOT EXISTS tts_module_updates (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            body_md TEXT NOT NULL,
+            created_at INTEGER NOT NULL,
+            updated_at INTEGER NOT NULL
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_tts_module_updates_created
+            ON tts_module_updates(created_at DESC, id DESC);
+        ",
+    )?;
+    add_column_if_missing(
+        conn,
+        "users",
+        "tts_map_slug",
+        "ALTER TABLE users ADD COLUMN tts_map_slug TEXT",
+    )?;
     Ok(())
 }
 

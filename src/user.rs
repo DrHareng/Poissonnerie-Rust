@@ -19,6 +19,7 @@ pub struct User {
     pub local_avatar_url: Option<String>,
     pub secondary_view_mode: Option<String>,
     pub scenario_slug: Option<String>,
+    pub tts_map_slug: Option<String>,
     pub army_sort_mode: Option<String>,
     pub player_sort_mode: Option<String>,
     pub tournament_completed_view_mode: Option<String>,
@@ -104,6 +105,7 @@ pub struct LocalProfileUpdate {
 pub struct UiPrefsUpdate {
     pub secondary_view_mode: Option<String>,
     pub scenario_slug: Option<String>,
+    pub tts_map_slug: Option<String>,
     pub army_sort_mode: Option<String>,
     pub player_sort_mode: Option<String>,
     pub tournament_completed_view_mode: Option<String>,
@@ -221,6 +223,11 @@ impl UserStore {
             .secondary_view_mode
             .or(current.secondary_view_mode);
         let scenario_slug = update.scenario_slug.or(current.scenario_slug);
+        let tts_map_slug = match update.tts_map_slug {
+            Some(value) if value.trim().is_empty() => None,
+            Some(value) => Some(value),
+            None => current.tts_map_slug,
+        };
         let army_sort_mode = update.army_sort_mode.or(current.army_sort_mode);
         let player_sort_mode = update.player_sort_mode.or(current.player_sort_mode);
         let tournament_completed_view_mode = update
@@ -232,14 +239,16 @@ impl UserStore {
             UPDATE users
             SET secondary_view_mode = ?1,
                 scenario_slug = ?2,
-                army_sort_mode = ?3,
-                player_sort_mode = ?4,
-                tournament_completed_view_mode = ?5
-            WHERE id = ?6
+                tts_map_slug = ?3,
+                army_sort_mode = ?4,
+                player_sort_mode = ?5,
+                tournament_completed_view_mode = ?6
+            WHERE id = ?7
             ",
             params![
                 secondary_view_mode,
                 scenario_slug,
+                tts_map_slug,
                 army_sort_mode,
                 player_sort_mode,
                 tournament_completed_view_mode,
@@ -272,7 +281,7 @@ impl UserStore {
             "
             SELECT id, discord_id, username, display_name, avatar_url,
                    local_display_name, local_avatar_url, secondary_view_mode,
-                   scenario_slug, army_sort_mode, player_sort_mode,
+                   scenario_slug, tts_map_slug, army_sort_mode, player_sort_mode,
                    tournament_completed_view_mode, is_admin,
                    created_at, last_login_at
             FROM users
@@ -288,7 +297,7 @@ impl UserStore {
             "
             SELECT id, discord_id, username, display_name, avatar_url,
                    local_display_name, local_avatar_url, secondary_view_mode,
-                   scenario_slug, army_sort_mode, player_sort_mode,
+                   scenario_slug, tts_map_slug, army_sort_mode, player_sort_mode,
                    tournament_completed_view_mode, is_admin,
                    created_at, last_login_at
             FROM users
@@ -311,7 +320,7 @@ impl UserStore {
             "
             SELECT id, discord_id, username, display_name, avatar_url,
                    local_display_name, local_avatar_url, secondary_view_mode,
-                   scenario_slug, army_sort_mode, player_sort_mode,
+                   scenario_slug, tts_map_slug, army_sort_mode, player_sort_mode,
                    tournament_completed_view_mode, is_admin,
                    created_at, last_login_at
             FROM users
@@ -334,7 +343,7 @@ impl UserStore {
             "
             SELECT id, discord_id, username, display_name, avatar_url,
                    local_display_name, local_avatar_url, secondary_view_mode,
-                   scenario_slug, army_sort_mode, player_sort_mode,
+                   scenario_slug, tts_map_slug, army_sort_mode, player_sort_mode,
                    tournament_completed_view_mode, is_admin,
                    created_at, last_login_at
             FROM users
@@ -371,12 +380,13 @@ fn row_to_user(row: &rusqlite::Row<'_>) -> rusqlite::Result<User> {
         local_avatar_url: row.get(6)?,
         secondary_view_mode: row.get(7)?,
         scenario_slug: row.get(8)?,
-        army_sort_mode: row.get(9)?,
-        player_sort_mode: row.get(10)?,
-        tournament_completed_view_mode: row.get(11)?,
-        is_admin: row.get::<_, i64>(12)? != 0,
-        created_at: row.get(13)?,
-        last_login_at: row.get(14)?,
+        tts_map_slug: row.get(9)?,
+        army_sort_mode: row.get(10)?,
+        player_sort_mode: row.get(11)?,
+        tournament_completed_view_mode: row.get(12)?,
+        is_admin: row.get::<_, i64>(13)? != 0,
+        created_at: row.get(14)?,
+        last_login_at: row.get(15)?,
     })
 }
 

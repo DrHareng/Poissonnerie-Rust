@@ -17,6 +17,7 @@ pub const SESSION_OAUTH_MOBILE: &str = "oauth_mobile";
 pub const SESSION_USER_ID: &str = "user_id";
 pub const SESSION_SECONDARY_VIEW_MODE: &str = "secondary_view_mode";
 pub const SESSION_SCENARIO_SLUG: &str = "scenario_slug";
+pub const SESSION_TTS_MAP_SLUG: &str = "tts_map_slug";
 pub const SESSION_ARMY_SORT_MODE: &str = "army_sort_mode";
 pub const SESSION_PLAYER_SORT_MODE: &str = "player_sort_mode";
 pub const SESSION_TOURNAMENT_COMPLETED_VIEW_MODE: &str = "tournament_completed_view_mode";
@@ -146,6 +147,19 @@ pub async fn login_with_code(
         SESSION_SCENARIO_SLUG,
         |value| UiPrefsUpdate {
             scenario_slug: Some(value.to_string()),
+            ..UiPrefsUpdate::default()
+        },
+    )
+    .await?;
+
+    sync_string_pref_on_login(
+        users,
+        session,
+        user.id,
+        user.tts_map_slug.as_deref(),
+        SESSION_TTS_MAP_SLUG,
+        |value| UiPrefsUpdate {
+            tts_map_slug: Some(value.to_string()),
             ..UiPrefsUpdate::default()
         },
     )

@@ -18,6 +18,8 @@ pub mod scenario_pack;
 pub mod session_store;
 pub mod site_content;
 pub mod store;
+pub mod tts_map;
+pub mod tts_map_api;
 pub mod tournament;
 pub mod tournament_api;
 pub mod tournament_store;
@@ -36,6 +38,7 @@ pub use report_template::{ReportTemplate, ReportTemplateStore};
 pub use player::{apply_match, MatchOutcome, Player, RatingUpdate, DEFAULT_RATING};
 pub use scenario::{strip_scenario_prefix, Scenario, ScenarioStore};
 pub use site_content::{SiteContent, SiteContentStore, RESSOURCES_KEY};
+pub use tts_map::TtsMapStore;
 pub use store::{
     fix_tournament_player_army, fix_tournament_player_army_opts, merge_players, normalize_name,
     recompute_elo_from_matches,

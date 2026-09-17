@@ -19,6 +19,7 @@ const props = withDefaults(
     rules?: CommonRule[]
     /** Éditeur sans liens de règles ni images. */
     simpleMarkdown?: boolean
+    extraImages?: { label: string; value: string }[]
     persist: (payload: { name?: string; body: string }) => Promise<void>
   }>(),
   {
@@ -27,6 +28,7 @@ const props = withDefaults(
     markdown: true,
     rules: () => [],
     simpleMarkdown: false,
+    extraImages: () => [],
   },
 )
 
@@ -117,6 +119,7 @@ async function save() {
       :rows="rows"
       :rules="rules"
       :simple="simpleMarkdown"
+      :extra-images="extraImages"
     />
     <textarea
       v-else

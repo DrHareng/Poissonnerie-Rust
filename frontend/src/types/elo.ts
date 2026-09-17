@@ -477,3 +477,45 @@ export interface PaginatedReports {
 export interface ApiError {
   error: string
 }
+
+export interface TtsMapSummary {
+  id: number
+  slug: string
+  name: string
+  has_json: boolean
+  json_filename?: string | null
+  picture_count: number
+  created_at: number
+  updated_at: number
+}
+
+export interface TtsMapPicture {
+  id: number
+  filename: string
+  original_name: string
+  url: string
+  created_at: number
+}
+
+export interface TtsMapDetail {
+  id: number
+  slug: string
+  name: string
+  json_filename?: string | null
+  json_url?: string | null
+  pictures: TtsMapPicture[]
+  created_at: number
+  updated_at: number
+}
+
+export interface TtsModuleUpdate {
+  id: number
+  body_md: string
+  created_at: number
+  updated_at: number
+}
+
+export interface TtsContentImage {
+  label: string
+  path: string
+}

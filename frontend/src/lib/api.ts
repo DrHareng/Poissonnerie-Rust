@@ -29,6 +29,10 @@ import type {
   TournamentMatch,
   TournamentRegistration,
   TournamentScenarioSlot,
+  TtsContentImage,
+  TtsMapDetail,
+  TtsMapSummary,
+  TtsModuleUpdate,
   User,
 } from '@/types/elo'
 import { withBase } from '@/lib/basePath'
@@ -159,6 +163,7 @@ export type TournamentCompletedViewMode = 'detailed' | 'compressed'
 export interface UserPrefs {
   secondary_view_mode: SecondaryViewMode
   scenario_slug?: string | null
+  tts_map_slug?: string | null
   army_sort_mode: ArmySortMode
   player_sort_mode: PlayerSortMode
   tournament_completed_view_mode: TournamentCompletedViewMode
@@ -171,6 +176,7 @@ export function fetchPrefs(): Promise<UserPrefs> {
 export function updatePrefs(payload: {
   secondary_view_mode?: SecondaryViewMode
   scenario_slug?: string
+  tts_map_slug?: string
   army_sort_mode?: ArmySortMode
   player_sort_mode?: PlayerSortMode
   tournament_completed_view_mode?: TournamentCompletedViewMode
@@ -197,6 +203,107 @@ export function updateRessources(payload: {
     method: 'PATCH',
     body: JSON.stringify(payload),
   })
+}
+
+export function fetchTtsMaps(): Promise<TtsMapSummary[]> {
+  return request('/api/tts-maps')
+}
+
+export function fetchTtsMap(id: number): Promise<TtsMapDetail> {
+  return request(`/api/tts-maps/${id}`)
+}
+
+export function createTtsMap(name: string): Promise<TtsMapDetail> {
+  return request('/api/tts-maps', {
+    method: 'POST',
+    body: JSON.stringify({ name }),
+  })
+}
+
+export function renameTtsMap(id: number, name: string): Promise<TtsMapDetail> {
+  return request(`/api/tts-maps/${id}`, {
+    method: 'PATCH',
+    body: JSON.stringify({ name }),
+  })
+}
+
+export function deleteTtsMap(id: number): Promise<void> {
+  return request(`/api/tts-maps/${id}`, { method: 'DELETE' })
+}
+
+export function fetchTtsModuleUpdates(): Promise<TtsModuleUpdate[]> {
+  return request('/api/tts-module-updates')
+}
+
+export function createTtsModuleUpdate(bodyMd: string): Promise<TtsModuleUpdate> {
+  return request('/api/tts-module-updates', {
+    method: 'POST',
+    body: JSON.stringify({ body_md: bodyMd }),
+  })
+}
+
+export function updateTtsModuleUpdate(
+  id: number,
+  bodyMd: string,
+): Promise<TtsModuleUpdate> {
+  return request(`/api/tts-module-updates/${id}`, {
+    method: 'PATCH',
+    body: JSON.stringify({ body_md: bodyMd }),
+  })
+}
+
+export function deleteTtsModuleUpdate(id: number): Promise<void> {
+  return request(`/api/tts-module-updates/${id}`, { method: 'DELETE' })
+}
+
+export function fetchTtsContentImages(): Promise<TtsContentImage[]> {
+  return request('/api/tts-map-content-images')
+}
+
+async function uploadFile<T>(path: string, file: File): Promise<T> {
+  const sessionId = getNativeSession()
+  const body = new FormData()
+  body.append('file', file)
+  const response = await fetch(withBase(path), {
+    ...defaultFetchOptions,
+    method: 'POST',
+    headers: {
+      ...(sessionId ? { 'X-Poissonnerie-Session': sessionId } : {}),
+    },
+    body,
+  })
+  if (!response.ok) {
+    let message = `Erreur HTTP ${response.status}`
+    try {
+      const payload = (await response.json()) as ApiError
+      if (payload.error) message = payload.error
+    } catch {
+      // ignore JSON parse errors
+    }
+    throw new Error(message)
+  }
+  return (await response.json()) as T
+}
+
+export function uploadTtsMapJson(id: number, file: File): Promise<TtsMapDetail> {
+  return uploadFile(`/api/tts-maps/${id}/json`, file)
+}
+
+export function uploadTtsMapPicture(
+  id: number,
+  file: File,
+): Promise<TtsMapDetail> {
+  return uploadFile(`/api/tts-maps/${id}/pictures`, file)
+}
+
+export function deleteTtsMapPicture(
+  mapId: number,
+  filename: string,
+): Promise<TtsMapDetail> {
+  return request(
+    `/api/tts-maps/${mapId}/pictures/${encodeURIComponent(filename)}`,
+    { method: 'DELETE' },
+  )
 }
 
 export function addPlayer(payload: { name: string; discord_username: string }): Promise<Player> {

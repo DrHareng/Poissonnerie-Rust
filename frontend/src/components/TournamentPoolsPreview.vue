@@ -27,12 +27,15 @@ const props = withDefaults(
     selectable?: boolean
     /** Nombre de premiers du classement qualifiés (surbrillance discrète). */
     qualifiedPerPool?: number
+    /** Masque les colonnes PO / PS (aperçu compressé, ex. accueil). */
+    hideTiebreakers?: boolean
   }>(),
   {
     registrations: () => [],
     matches: () => [],
     selectable: false,
     qualifiedPerPool: 0,
+    hideTiebreakers: false,
   },
 )
 
@@ -150,8 +153,8 @@ function isQualifiedRank(rankIndex: number) {
             <th class="pool-col-player">Joueur</th>
             <th class="pool-col-played">jouée</th>
             <th class="pool-col-stat">PT</th>
-            <th class="pool-col-stat">PO</th>
-            <th class="pool-col-stat">PS</th>
+            <th v-if="!hideTiebreakers" class="pool-col-stat">PO</th>
+            <th v-if="!hideTiebreakers" class="pool-col-stat">PS</th>
           </tr>
         </thead>
         <tbody>
@@ -186,8 +189,8 @@ function isQualifiedRank(rankIndex: number) {
               {{ playerGamesLabel(pool, pp.player_name) }}
             </td>
             <td class="pool-col-stat">{{ pp.points }}</td>
-            <td class="pool-col-stat">{{ pp.objectives }}</td>
-            <td class="pool-col-stat">{{ pp.survivors }}</td>
+            <td v-if="!hideTiebreakers" class="pool-col-stat">{{ pp.objectives }}</td>
+            <td v-if="!hideTiebreakers" class="pool-col-stat">{{ pp.survivors }}</td>
           </tr>
         </tbody>
       </table>

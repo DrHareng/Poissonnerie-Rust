@@ -25,12 +25,15 @@ const props = withDefaults(
     placeholder?: string
     /** Masque les liens de règles et l’insertion d’images de scénario. */
     simple?: boolean
+    /** Images TTS (`[img]/api/tts-maps/…[img]`). */
+    extraImages?: { label: string; value: string }[]
   }>(),
   {
     rows: 10,
     rules: () => [],
     placeholder: '',
     simple: false,
+    extraImages: () => [],
   },
 )
 
@@ -452,6 +455,23 @@ function onKeydown(event: KeyboardEvent) {
           </option>
         </select>
       </template>
+
+      <select
+        v-if="extraImages.length > 0"
+        v-model="imagePick"
+        class="md-editor-rule-pick h-6 max-w-[12rem] rounded-[min(var(--radius-md),10px)] border border-transparent bg-transparent px-1 text-xs text-muted-foreground outline-none hover:bg-muted focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50"
+        title="Insérer une photo de map TTS"
+        @mousedown="rememberSelection"
+      >
+        <option value="">Photo TTS…</option>
+        <option
+          v-for="image in extraImages"
+          :key="image.value"
+          :value="image.value"
+        >
+          {{ image.label }}
+        </option>
+      </select>
 
       <Button
         type="button"

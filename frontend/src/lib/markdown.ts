@@ -276,10 +276,30 @@ function renderLink(href: string, innerHtml: string): string {
   return `<a class="md-link" href="${escapeHtml(href)}" target="_blank" rel="noopener noreferrer">${innerHtml}</a>`
 }
 
+function safeTtsMapImagePath(raw: string): string | null {
+  const trimmed = raw.trim()
+  const match = /^\/api\/tts-maps\/(\d+)\/pictures\/([^/?#]+)$/i.exec(trimmed)
+  if (!match) return null
+  let filename = match[2] ?? ''
+  try {
+    filename = decodeURIComponent(filename)
+  } catch {
+    return null
+  }
+  if (!safeScenarioImageFilename(filename)) return null
+  return `/api/tts-maps/${match[1]}/pictures/${encodeURIComponent(filename)}`
+}
+
 function renderMarkdownImage(rawFilename: string): string {
   const trimmed = rawFilename.trim()
   const remote = safeHttpUrl(trimmed)
   if (remote) return renderRemoteImage(remote)
+
+  const ttsPath = safeTtsMapImagePath(trimmed)
+  if (ttsPath) {
+    const filename = decodeURIComponent(ttsPath.split('/').pop() ?? '')
+    return renderImgTag(withBase(ttsPath), filename)
+  }
 
   const file = safeScenarioImageFilename(trimmed)
   if (!file) {
