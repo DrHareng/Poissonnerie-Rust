@@ -17,7 +17,7 @@ import ImageViewer, {
   type ImageViewerItem,
 } from '@/components/ImageViewer.vue'
 import MarkdownContent from '@/components/MarkdownContent.vue'
-import TtsMapVariantsBlock from '@/components/TtsMapVariantsBlock.vue'
+import TtsMapScenarioMenu from '@/components/TtsMapScenarioMenu.vue'
 import { useAdminEditMode } from '@/composables/useAdminEditMode'
 import { withBase } from '@/lib/basePath'
 import {
@@ -179,9 +179,18 @@ watch(
 
   <template v-else-if="scenario">
     <section class="page-header relative shrink-0">
-      <h2 class="page-title text-2xl" :class="{ 'pr-24': canEditContent }">
-        {{ scenario.name }}
-      </h2>
+      <div
+        class="flex items-center justify-between gap-3"
+        :class="{ 'pr-24': canEditContent }"
+      >
+        <h2 class="page-title min-w-0 flex-1 text-2xl">
+          {{ scenario.name }}
+        </h2>
+        <TtsMapScenarioMenu
+          class="shrink-0"
+          :scenario-id="scenario.id"
+        />
+      </div>
       <AdminContentEditor
         :can-edit="canEditContent"
         :body="scenario.flavor_text ?? ''"
@@ -413,8 +422,6 @@ watch(
         </CardContent>
       </Card>
     </div>
-
-    <TtsMapVariantsBlock class="shrink-0 pb-4" :scenario-id="scenario.id" />
 
     <ImageViewer
       v-model:open="imageViewerOpen"

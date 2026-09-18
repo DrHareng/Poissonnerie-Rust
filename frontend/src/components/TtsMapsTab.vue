@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, ref, watch } from 'vue'
-import { RouterLink, useRoute, useRouter } from 'vue-router'
+import { computed, onMounted, ref, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { toast } from 'vue-sonner'
 import { CircleAlert, Copy, Dices, Download, Plus, Trash2 } from '@lucide/vue'
 import {
@@ -9,7 +9,6 @@ import {
   deleteTtsMap,
   deleteTtsMapPicture,
   deleteTtsModuleUpdate,
-  fetchPrefs,
   fetchTtsContentImages,
   fetchTtsMap,
   fetchTtsMaps,
@@ -37,9 +36,9 @@ import ImageViewer, {
 import MarkdownContent from '@/components/MarkdownContent.vue'
 import MarkdownEditor from '@/components/MarkdownEditor.vue'
 import TtsMapReportDialog from '@/components/TtsMapReportDialog.vue'
+import TtsMapTile from '@/components/TtsMapTile.vue'
 import TtsMapVariantsBlock from '@/components/TtsMapVariantsBlock.vue'
 import { useAdminEditMode } from '@/composables/useAdminEditMode'
-import { useAppSidePanel } from '@/composables/useAppSidePanel'
 import { useAuth } from '@/composables/useAuth'
 import { Button } from '@/components/ui/button'
 import {
@@ -51,11 +50,14 @@ import {
 } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 
+const emit = defineEmits<{
+  mapChange: [payload: { slug: string; name: string } | null]
+}>()
+
 const route = useRoute()
 const router = useRouter()
 const { canEditContent } = useAdminEditMode()
 const { isAuthenticated } = useAuth()
-const { setCustomSide } = useAppSidePanel()
 
 const maps = ref<TtsMapSummary[]>([])
 const updates = ref<TtsModuleUpdate[]>([])
@@ -122,54 +124,10 @@ function selectMap(slug: string | null) {
   router.replace(slug ? mapTo(slug) : updatesTo())
 }
 
-function onMapLinkClick(slug: string, event: MouseEvent) {
-  if (
-    event.button !== 0 ||
-    event.metaKey ||
-    event.ctrlKey ||
-    event.shiftKey ||
-    event.altKey
-  ) {
-    return
-  }
-  persistMapSlug(slug)
-}
-
-function onUpdatesClick(event: MouseEvent) {
-  if (
-    event.button !== 0 ||
-    event.metaKey ||
-    event.ctrlKey ||
-    event.shiftKey ||
-    event.altKey
-  ) {
-    return
-  }
-  persistMapSlug(null)
-}
-
 function drawMap() {
   if (!maps.value.length) return
   const pick = maps.value[Math.floor(Math.random() * maps.value.length)]!
   selectMap(pick.slug)
-}
-
-function scrollActiveIntoView() {
-  const run = () => {
-    document.querySelectorAll('.scenario-side-item--active').forEach((el) => {
-      ;(el as HTMLElement).scrollIntoView({
-        block: 'center',
-        inline: 'nearest',
-      })
-    })
-  }
-  void nextTick(() => {
-    run()
-    requestAnimationFrame(() => {
-      run()
-      requestAnimationFrame(run)
-    })
-  })
 }
 
 function formatUpdateDate(timestamp: number) {
@@ -239,6 +197,7 @@ function summaryFromDetail(map: TtsMapDetail): TtsMapSummary {
     has_json: Boolean(map.json_filename),
     json_filename: map.json_filename,
     picture_count: map.pictures.length,
+    pictures: map.pictures,
     created_at: map.created_at,
     updated_at: map.updated_at,
   }
@@ -350,13 +309,7 @@ async function onPicturesSelected(event: Event) {
     }
     detail.value = current
     maps.value = maps.value.map((map) =>
-      map.id === current.id
-        ? {
-            ...map,
-            picture_count: current.pictures.length,
-            updated_at: current.updated_at,
-          }
-        : map,
+      map.id === current.id ? summaryFromDetail(current) : map,
     )
     toast.success(
       files.length > 1 ? 'Photos enregistrées' : 'Photo enregistrée',
@@ -379,13 +332,7 @@ async function removePicture(picture: TtsMapPicture) {
   try {
     detail.value = await deleteTtsMapPicture(detail.value.id, picture.filename)
     maps.value = maps.value.map((map) =>
-      map.id === detail.value?.id
-        ? {
-            ...map,
-            picture_count: detail.value.pictures.length,
-            updated_at: detail.value.updated_at,
-          }
-        : map,
+      map.id === detail.value?.id ? summaryFromDetail(detail.value) : map,
     )
     toast.success('Photo supprimée')
     await loadContentImages()
@@ -444,21 +391,8 @@ async function removeUpdate(update: TtsModuleUpdate) {
 
 onMounted(async () => {
   try {
-    const [prefs] = await Promise.all([
-      fetchPrefs().catch(() => null),
-      loadLists(),
-    ])
-    const queryMap = Array.isArray(route.query.map)
-      ? route.query.map[0]
-      : route.query.map
-    if (typeof queryMap === 'string') {
-      persistMapSlug(queryMap)
-    } else if (
-      prefs?.tts_map_slug &&
-      maps.value.some((map) => map.slug === prefs.tts_map_slug)
-    ) {
-      router.replace(mapTo(prefs.tts_map_slug))
-    }
+    await loadLists()
+    persistMapSlug(selectedSlug.value)
     apiOnline.value = true
   } catch (error) {
     apiOnline.value = false
@@ -478,23 +412,18 @@ watch(canEditContent, (canEdit) => {
 })
 
 watch(
-  [loading, apiOnline],
-  ([isLoading, online]) => {
-    setCustomSide(!isLoading && online)
-  },
-  { immediate: true },
-)
-
-watch(
   selectedSlug,
   (slug) => {
+    if (!loading.value) persistMapSlug(slug)
     if (!slug) {
       detail.value = null
+      emit('mapChange', null)
       document.title = pageTitle('Module TTS')
       return
     }
     const summary = maps.value.find((map) => map.slug === slug)
     if (!summary) return
+    emit('mapChange', { slug: summary.slug, name: summary.name })
     document.title = pageTitle(summary.name)
     void loadDetail(summary.id)
   },
@@ -502,17 +431,17 @@ watch(
 )
 
 watch(
-  selectedSlug,
-  () => {
-    reportOpen.value = false
+  () => detail.value?.name,
+  (name) => {
+    if (!selectedSlug.value || !name) return
+    emit('mapChange', { slug: selectedSlug.value, name })
+    document.title = pageTitle(name)
   },
 )
 
-watch(
-  selectedSlug,
-  () => scrollActiveIntoView(),
-  { flush: 'post' },
-)
+watch(selectedSlug, () => {
+  reportOpen.value = false
+})
 </script>
 
 <template>
@@ -525,135 +454,6 @@ watch(
     </p>
 
     <template v-else>
-      <Teleport defer to="#app-side-panel">
-        <Card class="neon-panel flex h-full max-h-full min-h-0 flex-col overflow-hidden">
-          <CardHeader class="shrink-0 pb-3">
-            <CardTitle>Module TTS</CardTitle>
-            <CardDescription>Tabletop Simulator</CardDescription>
-          </CardHeader>
-          <div class="scenario-side-list shrink-0 space-y-2 px-3 pb-3">
-            <RouterLink
-              :to="updatesTo()"
-              class="scenario-side-item"
-              :class="{ 'scenario-side-item--active': !selectedSlug }"
-              :aria-current="!selectedSlug ? 'page' : undefined"
-              @click="onUpdatesClick($event)"
-            >
-              Mises à jour
-            </RouterLink>
-            <button
-              type="button"
-              class="scenario-side-draw"
-              :disabled="maps.length === 0"
-              @click="drawMap"
-            >
-              <Dices class="size-4" />
-              Tirer au sort
-            </button>
-          </div>
-          <CardContent class="min-h-0 flex-1 overflow-y-auto pt-0">
-            <nav class="scenario-side-list" aria-label="Maps du module TTS">
-              <RouterLink
-                v-for="map in maps"
-                :key="map.id"
-                :to="mapTo(map.slug)"
-                class="scenario-side-item"
-                :class="{
-                  'scenario-side-item--active': selectedSlug === map.slug,
-                }"
-                :aria-current="selectedSlug === map.slug ? 'page' : undefined"
-                @click="onMapLinkClick(map.slug, $event)"
-              >
-                {{ map.name }}
-              </RouterLink>
-            </nav>
-            <form
-              v-if="canEditContent"
-              class="mt-4 space-y-2 border-t border-border/60 pt-3"
-              @submit.prevent="createMap"
-            >
-              <Input
-                v-model="newMapName"
-                placeholder="Nom de la map"
-                autocomplete="off"
-              />
-              <Button
-                type="submit"
-                size="sm"
-                class="w-full"
-                :disabled="creatingMap"
-              >
-                <Plus class="size-4" />
-                {{ creatingMap ? 'Création…' : 'Ajouter une map' }}
-              </Button>
-            </form>
-          </CardContent>
-        </Card>
-      </Teleport>
-
-      <Card class="neon-panel mb-4 lg:hidden">
-        <CardHeader class="pb-3">
-          <CardTitle>Module TTS</CardTitle>
-        </CardHeader>
-        <div class="scenario-side-list shrink-0 space-y-2 px-3 pb-3">
-          <RouterLink
-            :to="updatesTo()"
-            class="scenario-side-item"
-            :class="{ 'scenario-side-item--active': !selectedSlug }"
-            :aria-current="!selectedSlug ? 'page' : undefined"
-            @click="onUpdatesClick($event)"
-          >
-            Mises à jour
-          </RouterLink>
-          <button
-            type="button"
-            class="scenario-side-draw"
-            :disabled="maps.length === 0"
-            @click="drawMap"
-          >
-            <Dices class="size-4" />
-            Tirer au sort
-          </button>
-        </div>
-        <CardContent class="pt-0">
-          <nav class="scenario-side-list" aria-label="Maps du module TTS">
-            <RouterLink
-              v-for="map in maps"
-              :key="`mobile-${map.id}`"
-              :to="mapTo(map.slug)"
-              class="scenario-side-item"
-              :class="{
-                'scenario-side-item--active': selectedSlug === map.slug,
-              }"
-              :aria-current="selectedSlug === map.slug ? 'page' : undefined"
-              @click="onMapLinkClick(map.slug, $event)"
-            >
-              {{ map.name }}
-            </RouterLink>
-          </nav>
-          <form
-            v-if="canEditContent"
-            class="mt-4 space-y-2 border-t border-border/60 pt-3"
-            @submit.prevent="createMap"
-          >
-            <Input
-              v-model="newMapName"
-              placeholder="Nom de la map"
-              autocomplete="off"
-            />
-            <Button
-              type="submit"
-              size="sm"
-              class="w-full"
-              :disabled="creatingMap"
-            >
-              <Plus class="size-4" />
-              {{ creatingMap ? 'Création…' : 'Ajouter une map' }}
-            </Button>
-          </form>
-        </CardContent>
-      </Card>
-
       <template v-if="selectedSlug">
         <p v-if="detailLoading" class="text-sm text-muted-foreground">
           Chargement…
@@ -813,72 +613,110 @@ watch(
         </p>
       </template>
 
-      <div v-else class="grid gap-3 pb-4">
-        <Card v-if="canEditContent" class="neon-panel shrink-0">
-          <CardHeader>
-            <CardTitle>Nouvelle mise à jour</CardTitle>
-          </CardHeader>
-          <CardContent class="space-y-3">
-            <MarkdownEditor
-              v-model="newUpdateBody"
-              :rows="8"
-              simple
-              :extra-images="extraImages"
+      <div v-else class="grid gap-6 pb-4">
+        <div class="flex flex-wrap items-end gap-2">
+          <Button
+            type="button"
+            size="sm"
+            :disabled="maps.length === 0"
+            @click="drawMap"
+          >
+            <Dices class="size-4" />
+            Tirer au sort
+          </Button>
+          <form
+            v-if="canEditContent"
+            class="flex min-w-0 flex-1 flex-wrap items-end gap-2"
+            @submit.prevent="createMap"
+          >
+            <Input
+              v-model="newMapName"
+              class="max-w-xs"
+              placeholder="Nom de la map"
+              autocomplete="off"
             />
-            <div class="flex justify-end">
-              <Button
-                type="button"
-                size="sm"
-                :disabled="creatingUpdate"
-                @click="createUpdate"
-              >
-                {{ creatingUpdate ? 'Publication…' : 'Publier' }}
-              </Button>
-            </div>
-          </CardContent>
-        </Card>
-
-        <p v-if="updates.length === 0" class="text-sm text-muted-foreground">
-          Aucune mise à jour pour l’instant.
-        </p>
-
-        <Card
-          v-for="update in updates"
-          :key="update.id"
-          class="neon-panel relative shrink-0"
-        >
-          <CardHeader :class="{ 'pr-28': canEditContent }">
-            <CardTitle class="text-base font-medium">
-              {{ formatUpdateDate(update.created_at) }}
-            </CardTitle>
-            <CardDescription v-if="update.updated_at !== update.created_at">
-              Modifié le {{ formatUpdateDate(update.updated_at) }}
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            <AdminContentEditor
-              :can-edit="canEditContent"
-              :body="update.body_md"
-              :rows="8"
-              simple-markdown
-              :extra-images="extraImages"
-              :persist="(payload) => saveUpdate(update.id, payload)"
-            >
-              <MarkdownContent :source="update.body_md" />
-            </AdminContentEditor>
-            <Button
-              v-if="canEditContent"
-              type="button"
-              variant="ghost"
-              size="sm"
-              class="absolute top-3 right-20 z-10"
-              @click="removeUpdate(update)"
-            >
-              <Trash2 class="size-3.5" />
-              Supprimer
+            <Button type="submit" size="sm" :disabled="creatingMap">
+              <Plus class="size-4" />
+              {{ creatingMap ? 'Création…' : 'Ajouter une map' }}
             </Button>
-          </CardContent>
-        </Card>
+          </form>
+        </div>
+
+        <p v-if="maps.length === 0" class="text-sm text-muted-foreground">
+          Aucune map pour l’instant.
+        </p>
+        <div v-else class="tts-map-grid">
+          <TtsMapTile v-for="map in maps" :key="map.id" :map="map" />
+        </div>
+
+        <section class="grid gap-3">
+          <h2 class="page-title text-xl">Mises à jour</h2>
+          <Card v-if="canEditContent" class="neon-panel shrink-0">
+            <CardHeader>
+              <CardTitle>Nouvelle mise à jour</CardTitle>
+            </CardHeader>
+            <CardContent class="space-y-3">
+              <MarkdownEditor
+                v-model="newUpdateBody"
+                :rows="8"
+                simple
+                :extra-images="extraImages"
+              />
+              <div class="flex justify-end">
+                <Button
+                  type="button"
+                  size="sm"
+                  :disabled="creatingUpdate"
+                  @click="createUpdate"
+                >
+                  {{ creatingUpdate ? 'Publication…' : 'Publier' }}
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+
+          <p v-if="updates.length === 0" class="text-sm text-muted-foreground">
+            Aucune mise à jour pour l’instant.
+          </p>
+
+          <Card
+            v-for="update in updates"
+            :key="update.id"
+            class="neon-panel relative shrink-0"
+          >
+            <CardHeader :class="{ 'pr-28': canEditContent }">
+              <CardTitle class="text-base font-medium">
+                {{ formatUpdateDate(update.created_at) }}
+              </CardTitle>
+              <CardDescription v-if="update.updated_at !== update.created_at">
+                Modifié le {{ formatUpdateDate(update.updated_at) }}
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <AdminContentEditor
+                :can-edit="canEditContent"
+                :body="update.body_md"
+                :rows="8"
+                simple-markdown
+                :extra-images="extraImages"
+                :persist="(payload) => saveUpdate(update.id, payload)"
+              >
+                <MarkdownContent :source="update.body_md" />
+              </AdminContentEditor>
+              <Button
+                v-if="canEditContent"
+                type="button"
+                variant="ghost"
+                size="sm"
+                class="absolute top-3 right-20 z-10"
+                @click="removeUpdate(update)"
+              >
+                <Trash2 class="size-3.5" />
+                Supprimer
+              </Button>
+            </CardContent>
+          </Card>
+        </section>
       </div>
     </template>
 

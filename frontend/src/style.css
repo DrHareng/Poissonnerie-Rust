@@ -1224,6 +1224,30 @@
     @apply pointer-events-none opacity-50;
   }
 
+  .tts-map-grid {
+    @apply grid grid-cols-2 gap-3 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4;
+  }
+
+  .tts-map-tile {
+    @apply relative block aspect-square overflow-hidden rounded-lg border text-left no-underline transition hover:border-primary/50 hover:bg-muted/30;
+  }
+
+  .tts-map-tile-media {
+    @apply absolute inset-0 bg-muted/30;
+  }
+
+  .tts-map-tile-media img {
+    @apply size-full object-cover;
+  }
+
+  .tts-map-tile-empty {
+    @apply flex size-full items-center justify-center px-3 text-center text-sm text-muted-foreground;
+  }
+
+  .tts-map-tile-name {
+    @apply absolute inset-x-0 bottom-0 truncate bg-gradient-to-t from-black/80 via-black/45 to-transparent px-3 pb-2.5 pt-8 text-sm font-medium text-white;
+  }
+
   .secondary-card-grid {
     @apply grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3;
   }

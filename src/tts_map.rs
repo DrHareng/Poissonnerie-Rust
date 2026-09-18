@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
@@ -23,6 +24,8 @@ pub struct TtsMapSummary {
     pub has_json: bool,
     pub json_filename: Option<String>,
     pub picture_count: i64,
+    #[serde(default)]
+    pub pictures: Vec<TtsMapPicture>,
     pub created_at: u64,
     pub updated_at: u64,
 }
@@ -130,22 +133,58 @@ impl TtsMapStore {
             ORDER BY m.sort_order ASC, m.name COLLATE NOCASE ASC
             ",
         )?;
-        let rows = stmt.query_map([], |row| {
-            let json_filename: Option<String> = row.get(3)?;
-            Ok(TtsMapSummary {
-                id: row.get(0)?,
-                slug: row.get(1)?,
-                name: row.get(2)?,
-                has_json: json_filename
-                    .as_deref()
-                    .is_some_and(|name| !name.trim().is_empty()),
-                json_filename,
-                picture_count: row.get(4)?,
-                created_at: row.get(5)?,
-                updated_at: row.get(6)?,
-            })
+        let mut maps = stmt
+            .query_map([], |row| {
+                let json_filename: Option<String> = row.get(3)?;
+                Ok(TtsMapSummary {
+                    id: row.get(0)?,
+                    slug: row.get(1)?,
+                    name: row.get(2)?,
+                    has_json: json_filename
+                        .as_deref()
+                        .is_some_and(|name| !name.trim().is_empty()),
+                    json_filename,
+                    picture_count: row.get(4)?,
+                    pictures: Vec::new(),
+                    created_at: row.get(5)?,
+                    updated_at: row.get(6)?,
+                })
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+
+        let index_by_id: HashMap<i64, usize> = maps
+            .iter()
+            .enumerate()
+            .map(|(index, map)| (map.id, index))
+            .collect();
+        let mut pic_stmt = conn.prepare(
+            "
+            SELECT map_id, id, filename, original_name, created_at
+            FROM tts_map_pictures
+            ORDER BY created_at ASC, id ASC
+            ",
+        )?;
+        let pictures = pic_stmt.query_map([], |row| {
+            let map_id: i64 = row.get(0)?;
+            let filename: String = row.get(2)?;
+            Ok((
+                map_id,
+                TtsMapPicture {
+                    id: row.get(1)?,
+                    url: picture_url(map_id, &filename),
+                    filename,
+                    original_name: row.get(3)?,
+                    created_at: row.get(4)?,
+                },
+            ))
         })?;
-        rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
+        for item in pictures {
+            let (map_id, picture) = item?;
+            if let Some(&index) = index_by_id.get(&map_id) {
+                maps[index].pictures.push(picture);
+            }
+        }
+        Ok(maps)
     }
 
     pub fn get_map(&self, id: i64) -> Result<Option<TtsMapDetail>> {
@@ -1312,6 +1351,10 @@ mod tests {
             .unwrap();
         assert_eq!(with_pic.pictures.len(), 1);
         assert_eq!(with_pic.pictures[0].filename, "Vue_nord.png");
+        let listed = store.list_maps().unwrap();
+        assert_eq!(listed.len(), 1);
+        assert_eq!(listed[0].pictures.len(), 1);
+        assert_eq!(listed[0].pictures[0].filename, "Vue_nord.png");
 
         let update = store.create_update("Nouveau pack TTS").unwrap();
         assert_eq!(store.list_updates().unwrap().len(), 1);

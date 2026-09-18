@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
-import { useRoute, useRouter } from 'vue-router'
+import { RouterLink, useRoute, useRouter } from 'vue-router'
 import { BookOpen } from '@lucide/vue'
 import { toast } from 'vue-sonner'
 import { fetchRessources, updateRessources } from '@/lib/api'
@@ -34,6 +34,7 @@ const bodyMd = ref('')
 const loading = ref(true)
 const apiOnline = ref(true)
 const liensLoaded = ref(false)
+const currentMap = ref<{ slug: string; name: string } | null>(null)
 
 const activeTab = computed<RessourcesTabId>(() => {
   const raw = route.query.tab
@@ -44,19 +45,19 @@ const activeTab = computed<RessourcesTabId>(() => {
   return 'maps'
 })
 
-const activeTabLabel = computed(
-  () => tabs.find((tab) => tab.id === activeTab.value)?.label ?? 'Module TTS',
-)
+const activeTabLabel = computed(() => {
+  if (activeTab.value === 'maps' && currentMap.value) {
+    return currentMap.value.name
+  }
+  return tabs.find((tab) => tab.id === activeTab.value)?.label ?? 'Module TTS'
+})
 
 function setActiveTab(tab: RessourcesTabId) {
   if (tab === 'maps') {
-    const map = route.query.map
-    router.replace({
-      name: 'ressources',
-      query: typeof map === 'string' && map ? { map } : {},
-    })
+    router.replace({ name: 'ressources', query: {} })
     return
   }
+  currentMap.value = null
   router.replace({ name: 'ressources', query: { tab: 'liens' } })
 }
 
@@ -110,12 +111,26 @@ watch(activeTab, (tab) => {
           :key="tab.id"
           type="button"
           class="page-title-tab"
-          :class="{ 'page-title-tab--active': activeTab === tab.id }"
-          :aria-current="activeTab === tab.id ? 'page' : undefined"
+          :class="{
+            'page-title-tab--active':
+              !currentMap && activeTab === tab.id,
+          }"
+          :aria-current="
+            !currentMap && activeTab === tab.id ? 'page' : undefined
+          "
           @click="setActiveTab(tab.id)"
         >
           {{ tab.label }}
         </button>
+        <RouterLink
+          v-if="currentMap"
+          :to="{ name: 'ressources', query: { map: currentMap.slug } }"
+          class="page-title-tab page-title-tab--detail page-title-tab--active"
+          aria-current="page"
+          :title="currentMap.name"
+        >
+          <span class="page-title-tab-detail">> {{ currentMap.name }}</span>
+        </RouterLink>
       </div>
     </nav>
 
@@ -126,7 +141,10 @@ watch(activeTab, (tab) => {
       </AlertDescription>
     </Alert>
 
-    <TtsMapsTab v-else-if="activeTab === 'maps'" />
+    <TtsMapsTab
+      v-else-if="activeTab === 'maps'"
+      @map-change="currentMap = $event"
+    />
 
     <p v-else-if="loading" class="shrink-0 text-sm text-muted-foreground">
       Chargement…

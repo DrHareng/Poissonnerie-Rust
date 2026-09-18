@@ -485,6 +485,7 @@ export interface TtsMapSummary {
   has_json: boolean
   json_filename?: string | null
   picture_count: number
+  pictures?: TtsMapPicture[]
   created_at: number
   updated_at: number
 }

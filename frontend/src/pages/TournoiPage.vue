@@ -272,12 +272,13 @@ const myPlayedMatches = computed(() =>
   myTournamentMatches.value.filter((match) => isMatchPlayed(match)),
 )
 
-type TournamentTabId = 'arbre' | 'poules' | 'inscriptions' | 'admin'
+type TournamentTabId = 'arbre' | 'poules' | 'inscriptions' | 'maps' | 'admin'
 
 const TAB_PRIORITY: TournamentTabId[] = [
   'arbre',
   'poules',
   'inscriptions',
+  'maps',
   'admin',
 ]
 
@@ -330,6 +331,7 @@ const tournamentTabs = computed(() => {
   if (showInscriptionsTab.value) {
     tabs.push({ id: 'inscriptions', label: 'Inscriptions' })
   }
+  tabs.push({ id: 'maps', label: 'Maps TTS' })
   if (canAccessAdminTab.value) {
     tabs.push({
       id: 'admin',
@@ -1678,12 +1680,6 @@ onMounted(refresh)
       </nav>
 
       <div class="tournament-tab-panels page-panel-scroll">
-        <TtsMapVariantsBlock
-          :tournament-id="detail.id"
-          :scenario-options="
-            tournamentScenarioOptions.length ? tournamentScenarioOptions : undefined
-          "
-        />
         <Teleport defer to="#app-side-panel">
           <Card
             v-if="showRegistrationListsSide"
@@ -2596,6 +2592,18 @@ onMounted(refresh)
               </div>
             </CardContent>
           </Card>
+        </template>
+
+        <template v-else-if="activeTab === 'maps'">
+          <TtsMapVariantsBlock
+            always-show
+            :tournament-id="detail.id"
+            :scenario-options="
+              tournamentScenarioOptions.length
+                ? tournamentScenarioOptions
+                : undefined
+            "
+          />
         </template>
 
         <template v-else-if="activeTab === 'admin'">

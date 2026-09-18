@@ -44,9 +44,11 @@ const props = withDefaults(
     scenarioId?: number | null
     tournamentId?: number | null
     scenarioOptions?: ScenarioSummary[]
+    alwaysShow?: boolean
   }>(),
   {
     title: 'Maps TTS',
+    alwaysShow: false,
   },
 )
 
@@ -258,7 +260,7 @@ watch(canEditContent, (canEdit) => {
 
 <template>
   <Card
-    v-if="variants.length > 0 || canEditContent"
+    v-if="alwaysShow || variants.length > 0 || canEditContent"
     class="neon-panel shrink-0 overflow-visible"
   >
     <CardHeader>
