@@ -675,7 +675,14 @@ watch(
               <Download class="size-4" />
               Télécharger le JSON
             </Button>
-            <p v-else class="text-sm text-muted-foreground">
+            <span
+              v-if="detail.json_url && detail.json_filename"
+              class="min-w-0 truncate font-mono text-sm text-muted-foreground"
+              :title="detail.json_filename"
+            >
+              {{ detail.json_filename }}
+            </span>
+            <p v-else-if="!detail.json_url" class="text-sm text-muted-foreground">
               Aucun JSON pour cette map.
             </p>
             <template v-if="canEditContent">
