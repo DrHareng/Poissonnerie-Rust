@@ -42,6 +42,7 @@ import type {
   Pool,
   PoolPlayer,
   RankedPlayer,
+  ScenarioSummary,
   TournamentDetail,
   TournamentMatch,
   TournamentPhase,
@@ -62,6 +63,7 @@ import PoolMatchesTable from '@/components/PoolMatchesTable.vue'
 import TournamentPoolsPreview from '@/components/TournamentPoolsPreview.vue'
 import TournamentMatchCard from '@/components/TournamentMatchCard.vue'
 import TournamentScenarioPicker from '@/components/TournamentScenarioPicker.vue'
+import TtsMapVariantsBlock from '@/components/TtsMapVariantsBlock.vue'
 import AdminContentEditor from '@/components/AdminContentEditor.vue'
 import MarkdownContent from '@/components/MarkdownContent.vue'
 import type { TournamentMatchForm } from '@/components/TournamentMatchCard.vue'
@@ -100,6 +102,26 @@ const { isOnline } = useNetworkStatus()
 
 const detail = ref<TournamentDetail | null>(null)
 const rankedPlayers = ref<RankedPlayer[]>([])
+
+const tournamentScenarioOptions = computed((): ScenarioSummary[] => {
+  const seen = new Set<number>()
+  const items: ScenarioSummary[] = []
+  for (const slot of [
+    ...(detail.value?.pool_scenarios ?? []),
+    ...(detail.value?.bracket_scenario_pool ?? []),
+    ...(detail.value?.bracket_scenarios ?? []),
+  ]) {
+    if (seen.has(slot.scenario_id)) continue
+    seen.add(slot.scenario_id)
+    items.push({
+      id: slot.scenario_id,
+      slug: slot.scenario_slug ?? '',
+      name: slot.scenario_name,
+      sort_order: items.length,
+    })
+  }
+  return items
+})
 const users = ref<User[]>([])
 const loading = ref(true)
 const registerList1 = ref('')
@@ -1654,6 +1676,14 @@ onMounted(refresh)
           {{ tab.label }}
         </button>
       </nav>
+
+      <TtsMapVariantsBlock
+        class="shrink-0"
+        :tournament-id="detail.id"
+        :scenario-options="
+          tournamentScenarioOptions.length ? tournamentScenarioOptions : undefined
+        "
+      />
 
       <div class="tournament-tab-panels page-panel-scroll">
         <Teleport defer to="#app-side-panel">

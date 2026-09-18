@@ -751,6 +751,7 @@ async fn delete_tournament(
     Path(id): Path<i64>,
 ) -> Result<StatusCode, ApiError> {
     require_admin(&state, &session).await?;
+    let _ = state.tts_maps.delete_variants_for_tournament(id);
     state
         .tournaments
         .delete(id)

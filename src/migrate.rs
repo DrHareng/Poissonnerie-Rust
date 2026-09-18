@@ -1073,6 +1073,27 @@ fn migrate_tts_maps(conn: &Connection) -> Result<()> {
             ON tts_map_reports(created_at DESC, id DESC);
         CREATE INDEX IF NOT EXISTS idx_tts_map_reports_map
             ON tts_map_reports(map_id);
+
+        CREATE TABLE IF NOT EXISTS tts_map_variants (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            map_id INTEGER NOT NULL REFERENCES tts_maps(id) ON DELETE CASCADE,
+            scenario_id INTEGER NOT NULL REFERENCES scenarios(id) ON DELETE CASCADE,
+            tournament_id INTEGER REFERENCES tournaments(id) ON DELETE CASCADE,
+            json_filename TEXT NOT NULL,
+            created_at INTEGER NOT NULL,
+            updated_at INTEGER NOT NULL
+        );
+
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_tts_map_variants_tournament
+            ON tts_map_variants(tournament_id, scenario_id)
+            WHERE tournament_id IS NOT NULL;
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_tts_map_variants_generic
+            ON tts_map_variants(map_id, scenario_id)
+            WHERE tournament_id IS NULL;
+        CREATE INDEX IF NOT EXISTS idx_tts_map_variants_map
+            ON tts_map_variants(map_id);
+        CREATE INDEX IF NOT EXISTS idx_tts_map_variants_scenario
+            ON tts_map_variants(scenario_id);
         ",
     )?;
     add_column_if_missing(

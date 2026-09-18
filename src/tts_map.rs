@@ -78,6 +78,24 @@ pub struct TtsMapReport {
     pub created_at: u64,
 }
 
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct TtsMapVariant {
+    pub id: i64,
+    pub map_id: i64,
+    pub map_name: String,
+    pub map_slug: String,
+    pub scenario_id: i64,
+    pub scenario_name: String,
+    pub scenario_slug: String,
+    pub tournament_id: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tournament_name: Option<String>,
+    pub json_filename: String,
+    pub json_url: String,
+    pub created_at: u64,
+    pub updated_at: u64,
+}
+
 pub struct TtsMapStore {
     conn: Mutex<Connection>,
     uploads_root: PathBuf,
@@ -200,13 +218,25 @@ impl TtsMapStore {
             let rows = stmt.query_map(params![id], |row| row.get(0))?;
             rows.collect::<Result<Vec<_>, _>>()?
         };
+        let variant_ids: Vec<i64> = {
+            let mut stmt = conn.prepare("SELECT id FROM tts_map_variants WHERE map_id = ?1")?;
+            let rows = stmt.query_map(params![id], |row| row.get(0))?;
+            rows.collect::<Result<Vec<_>, _>>()?
+        };
         conn.execute("DELETE FROM tts_map_reports WHERE map_id = ?1", params![id])?;
+        conn.execute("DELETE FROM tts_map_variants WHERE map_id = ?1", params![id])?;
         conn.execute("DELETE FROM tts_map_pictures WHERE map_id = ?1", params![id])?;
         let n = conn.execute("DELETE FROM tts_maps WHERE id = ?1", params![id])?;
         if n == 0 {
             bail!("map introuvable");
         }
         drop(conn);
+        for variant_id in variant_ids {
+            let dir = self.variant_dir(variant_id);
+            if dir.exists() {
+                let _ = fs::remove_dir_all(&dir);
+            }
+        }
         for report_id in report_ids {
             let report_dir = self.report_dir(report_id);
             if report_dir.exists() {
@@ -582,6 +612,244 @@ impl TtsMapStore {
         Ok(())
     }
 
+    pub fn create_variant(
+        &self,
+        map_id: i64,
+        scenario_id: i64,
+        tournament_id: Option<i64>,
+        original_name: &str,
+        bytes: &[u8],
+    ) -> Result<TtsMapVariant> {
+        let filename = validate_variant_json(original_name, bytes)?;
+        self.ensure_map_exists(map_id)?;
+        self.ensure_scenario_exists(scenario_id)?;
+        if let Some(tournament_id) = tournament_id {
+            self.ensure_tournament_exists(tournament_id)?;
+        }
+        self.ensure_variant_unique(map_id, scenario_id, tournament_id, None)?;
+
+        let now = now_unix();
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "
+            INSERT INTO tts_map_variants (
+                map_id, scenario_id, tournament_id, json_filename, created_at, updated_at
+            )
+            VALUES (?1, ?2, ?3, ?4, ?5, ?5)
+            ",
+            params![map_id, scenario_id, tournament_id, filename, now],
+        )?;
+        let id = conn.last_insert_rowid();
+        drop(conn);
+
+        let dir = self.variant_dir(id);
+        if let Err(error) = (|| -> Result<()> {
+            fs::create_dir_all(&dir)
+                .with_context(|| format!("impossible de créer {}", dir.display()))?;
+            fs::write(dir.join(&filename), bytes)
+                .with_context(|| format!("impossible d'écrire {}", dir.join(&filename).display()))?;
+            Ok(())
+        })() {
+            let conn = self.conn.lock().unwrap();
+            let _ = conn.execute("DELETE FROM tts_map_variants WHERE id = ?1", params![id]);
+            let _ = fs::remove_dir_all(&dir);
+            return Err(error);
+        }
+
+        self.get_variant(id)?
+            .with_context(|| "dérivée introuvable après création")
+    }
+
+    pub fn list_variants(
+        &self,
+        map_id: Option<i64>,
+        scenario_id: Option<i64>,
+        tournament_id: Option<i64>,
+    ) -> Result<Vec<TtsMapVariant>> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "
+            SELECT
+                v.id, v.map_id, m.name, m.slug,
+                v.scenario_id, s.name, COALESCE(s.slug, ''),
+                v.tournament_id, t.name,
+                v.json_filename, v.created_at, v.updated_at
+            FROM tts_map_variants v
+            JOIN tts_maps m ON m.id = v.map_id
+            JOIN scenarios s ON s.id = v.scenario_id
+            LEFT JOIN tournaments t ON t.id = v.tournament_id
+            WHERE (?1 IS NULL OR v.map_id = ?1)
+              AND (?2 IS NULL OR v.scenario_id = ?2)
+              AND (?3 IS NULL OR v.tournament_id = ?3)
+            ORDER BY s.sort_order ASC, s.name COLLATE NOCASE ASC,
+                     m.name COLLATE NOCASE ASC, v.id ASC
+            ",
+        )?;
+        let rows = stmt.query_map(params![map_id, scenario_id, tournament_id], row_to_variant)?;
+        rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
+    }
+
+    pub fn get_variant(&self, id: i64) -> Result<Option<TtsMapVariant>> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "
+            SELECT
+                v.id, v.map_id, m.name, m.slug,
+                v.scenario_id, s.name, COALESCE(s.slug, ''),
+                v.tournament_id, t.name,
+                v.json_filename, v.created_at, v.updated_at
+            FROM tts_map_variants v
+            JOIN tts_maps m ON m.id = v.map_id
+            JOIN scenarios s ON s.id = v.scenario_id
+            LEFT JOIN tournaments t ON t.id = v.tournament_id
+            WHERE v.id = ?1
+            ",
+        )?;
+        match stmt.query_row(params![id], row_to_variant) {
+            Ok(variant) => Ok(Some(variant)),
+            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+            Err(error) => Err(error.into()),
+        }
+    }
+
+    pub fn variant_json_path(&self, id: i64) -> Result<Option<(PathBuf, String)>> {
+        let conn = self.conn.lock().unwrap();
+        let filename: Option<String> = match conn.query_row(
+            "SELECT json_filename FROM tts_map_variants WHERE id = ?1",
+            params![id],
+            |row| row.get(0),
+        ) {
+            Ok(value) => Some(value),
+            Err(rusqlite::Error::QueryReturnedNoRows) => return Ok(None),
+            Err(error) => return Err(error.into()),
+        };
+        let Some(filename) = filename.filter(|name| !name.trim().is_empty()) else {
+            return Ok(None);
+        };
+        let filename = sanitize_existing_filename(&filename)?;
+        Ok(Some((self.variant_dir(id).join(&filename), filename)))
+    }
+
+    pub fn save_variant_json(
+        &self,
+        id: i64,
+        original_name: &str,
+        bytes: &[u8],
+    ) -> Result<TtsMapVariant> {
+        let filename = validate_variant_json(original_name, bytes)?;
+        let dir = self.variant_dir(id);
+        let conn = self.conn.lock().unwrap();
+        let exists: bool = conn.query_row(
+            "SELECT EXISTS(SELECT 1 FROM tts_map_variants WHERE id = ?1)",
+            params![id],
+            |row| row.get(0),
+        )?;
+        if !exists {
+            bail!("dérivée introuvable");
+        }
+        drop(conn);
+
+        fs::create_dir_all(&dir)
+            .with_context(|| format!("impossible de créer {}", dir.display()))?;
+        if dir.exists() {
+            for entry in fs::read_dir(&dir)? {
+                let entry = entry?;
+                if entry.path().is_file() {
+                    let _ = fs::remove_file(entry.path());
+                }
+            }
+        }
+        fs::write(dir.join(&filename), bytes)
+            .with_context(|| format!("impossible d'écrire {}", dir.join(&filename).display()))?;
+        let now = now_unix();
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "UPDATE tts_map_variants SET json_filename = ?1, updated_at = ?2 WHERE id = ?3",
+            params![filename, now, id],
+        )?;
+        drop(conn);
+        self.get_variant(id)?
+            .with_context(|| "dérivée introuvable après upload JSON")
+    }
+
+    pub fn delete_variant(&self, id: i64) -> Result<()> {
+        let dir = self.variant_dir(id);
+        let conn = self.conn.lock().unwrap();
+        let n = conn.execute("DELETE FROM tts_map_variants WHERE id = ?1", params![id])?;
+        if n == 0 {
+            bail!("dérivée introuvable");
+        }
+        drop(conn);
+        if dir.exists() {
+            let _ = fs::remove_dir_all(&dir);
+        }
+        Ok(())
+    }
+
+    pub fn delete_variants_for_tournament(&self, tournament_id: i64) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+        let ids: Vec<i64> = {
+            let mut stmt =
+                conn.prepare("SELECT id FROM tts_map_variants WHERE tournament_id = ?1")?;
+            let rows = stmt.query_map(params![tournament_id], |row| row.get(0))?;
+            rows.collect::<Result<Vec<_>, _>>()?
+        };
+        conn.execute(
+            "DELETE FROM tts_map_variants WHERE tournament_id = ?1",
+            params![tournament_id],
+        )?;
+        drop(conn);
+        for id in ids {
+            let dir = self.variant_dir(id);
+            if dir.exists() {
+                let _ = fs::remove_dir_all(&dir);
+            }
+        }
+        Ok(())
+    }
+
+    fn ensure_variant_unique(
+        &self,
+        map_id: i64,
+        scenario_id: i64,
+        tournament_id: Option<i64>,
+        ignore_id: Option<i64>,
+    ) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+        let exists: bool = if let Some(tournament_id) = tournament_id {
+            conn.query_row(
+                "
+                SELECT EXISTS(
+                    SELECT 1 FROM tts_map_variants
+                    WHERE tournament_id = ?1 AND scenario_id = ?2
+                      AND (?3 IS NULL OR id != ?3)
+                )
+                ",
+                params![tournament_id, scenario_id, ignore_id],
+                |row| row.get(0),
+            )?
+        } else {
+            conn.query_row(
+                "
+                SELECT EXISTS(
+                    SELECT 1 FROM tts_map_variants
+                    WHERE map_id = ?1 AND scenario_id = ?2 AND tournament_id IS NULL
+                      AND (?3 IS NULL OR id != ?3)
+                )
+                ",
+                params![map_id, scenario_id, ignore_id],
+                |row| row.get(0),
+            )?
+        };
+        if exists {
+            if tournament_id.is_some() {
+                bail!("ce scénario a déjà une dérivée TTS pour ce tournoi");
+            }
+            bail!("cette map a déjà une dérivée TTS pour ce scénario");
+        }
+        Ok(())
+    }
+
     fn ensure_map_exists(&self, id: i64) -> Result<()> {
         let conn = self.conn.lock().unwrap();
         let exists: bool = conn.query_row(
@@ -591,6 +859,32 @@ impl TtsMapStore {
         )?;
         if !exists {
             bail!("map introuvable");
+        }
+        Ok(())
+    }
+
+    fn ensure_scenario_exists(&self, id: i64) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+        let exists: bool = conn.query_row(
+            "SELECT EXISTS(SELECT 1 FROM scenarios WHERE id = ?1)",
+            params![id],
+            |row| row.get(0),
+        )?;
+        if !exists {
+            bail!("scénario introuvable");
+        }
+        Ok(())
+    }
+
+    fn ensure_tournament_exists(&self, id: i64) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+        let exists: bool = conn.query_row(
+            "SELECT EXISTS(SELECT 1 FROM tournaments WHERE id = ?1)",
+            params![id],
+            |row| row.get(0),
+        )?;
+        if !exists {
+            bail!("tournoi introuvable");
         }
         Ok(())
     }
@@ -667,6 +961,10 @@ impl TtsMapStore {
     fn report_dir(&self, id: i64) -> PathBuf {
         self.uploads_root.join("map-reports").join(id.to_string())
     }
+
+    fn variant_dir(&self, id: i64) -> PathBuf {
+        self.uploads_root.join("map-variants").join(id.to_string())
+    }
 }
 
 pub fn picture_url(map_id: i64, filename: &str) -> String {
@@ -732,6 +1030,19 @@ fn validate_report_description(description: &str) -> Result<String> {
         bail!("la description est trop longue");
     }
     Ok(description.to_string())
+}
+
+fn validate_variant_json(original_name: &str, bytes: &[u8]) -> Result<String> {
+    if bytes.len() > MAX_JSON_BYTES {
+        bail!("le JSON dépasse {MAX_JSON_BYTES} octets");
+    }
+    serde_json::from_slice::<serde_json::Value>(bytes)
+        .context("le fichier n'est pas un JSON valide")?;
+    let filename = sanitize_filename(original_name, "map.json")?;
+    if !filename.to_ascii_lowercase().ends_with(".json") {
+        bail!("le fichier JSON doit avoir l'extension .json");
+    }
+    Ok(filename)
 }
 
 fn slugify(name: &str) -> String {
@@ -898,6 +1209,26 @@ fn row_to_report(row: &rusqlite::Row<'_>) -> rusqlite::Result<TtsMapReport> {
     })
 }
 
+fn row_to_variant(row: &rusqlite::Row<'_>) -> rusqlite::Result<TtsMapVariant> {
+    let id: i64 = row.get(0)?;
+    let json_filename: String = row.get(9)?;
+    Ok(TtsMapVariant {
+        id,
+        map_id: row.get(1)?,
+        map_name: row.get(2)?,
+        map_slug: row.get(3)?,
+        scenario_id: row.get(4)?,
+        scenario_name: row.get(5)?,
+        scenario_slug: row.get(6)?,
+        tournament_id: row.get(7)?,
+        tournament_name: row.get(8)?,
+        json_url: format!("/api/tts-map-variants/{id}/json"),
+        json_filename,
+        created_at: row.get(10)?,
+        updated_at: row.get(11)?,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -926,6 +1257,30 @@ mod tests {
             VALUES (?1, ?2, ?3, '', ?4, ?4)
             ",
             params![format!("d-{name}-{now}"), name, name, now],
+        )
+        .unwrap();
+        conn.last_insert_rowid()
+    }
+
+    fn first_scenario(path: &Path) -> (i64, String) {
+        let conn = Connection::open(path).unwrap();
+        conn.query_row(
+            "SELECT id, name FROM scenarios ORDER BY id ASC LIMIT 1",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .unwrap()
+    }
+
+    fn insert_tournament(path: &Path, name: &str) -> i64 {
+        let conn = Connection::open(path).unwrap();
+        let now = now_unix() as i64;
+        conn.execute(
+            "
+            INSERT INTO tournaments (name, created_at)
+            VALUES (?1, ?2)
+            ",
+            params![name, now],
         )
         .unwrap();
         conn.last_insert_rowid()
@@ -1003,6 +1358,73 @@ mod tests {
         store.delete_map(map.id).unwrap();
         assert_eq!(store.count_reports().unwrap(), 0);
         assert!(!image_path.exists());
+        let _ = fs::remove_file(&path);
+    }
+
+    #[test]
+    fn variant_create_list_delete() {
+        let (store, path) = temp_store();
+        let map = store.create_map("Age de glace").unwrap();
+        let (scenario_id, scenario_name) = first_scenario(&path);
+        let tournament_id = insert_tournament(&path, "Coupe 4");
+        let json = br#"{"Tabletop":true,"variant":1}"#;
+
+        let generic = store
+            .create_variant(map.id, scenario_id, None, "frontline.json", json)
+            .unwrap();
+        assert_eq!(generic.map_name, "Age de glace");
+        assert_eq!(generic.scenario_name, scenario_name);
+        assert!(generic.tournament_id.is_none());
+        assert_eq!(generic.json_filename, "frontline.json");
+        let json_path = store.variant_json_path(generic.id).unwrap().unwrap().0;
+        assert_eq!(fs::read(&json_path).unwrap(), json);
+
+        assert!(
+            store
+                .create_variant(map.id, scenario_id, None, "dup.json", json)
+                .is_err()
+        );
+
+        let tournament_variant = store
+            .create_variant(
+                map.id,
+                scenario_id,
+                Some(tournament_id),
+                "coupe.json",
+                json,
+            )
+            .unwrap();
+        assert_eq!(tournament_variant.tournament_id, Some(tournament_id));
+        assert_eq!(
+            tournament_variant.tournament_name.as_deref(),
+            Some("Coupe 4")
+        );
+        assert_eq!(
+            store
+                .list_variants(Some(map.id), None, None)
+                .unwrap()
+                .len(),
+            2
+        );
+        assert_eq!(
+            store
+                .list_variants(None, None, Some(tournament_id))
+                .unwrap()
+                .len(),
+            1
+        );
+
+        store.delete_variants_for_tournament(tournament_id).unwrap();
+        assert!(
+            store
+                .list_variants(None, None, Some(tournament_id))
+                .unwrap()
+                .is_empty()
+        );
+
+        store.delete_map(map.id).unwrap();
+        assert!(store.list_variants(None, None, None).unwrap().is_empty());
+        assert!(!json_path.exists());
         let _ = fs::remove_file(&path);
     }
 }

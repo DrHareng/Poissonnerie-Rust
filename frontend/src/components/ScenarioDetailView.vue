@@ -17,6 +17,7 @@ import ImageViewer, {
   type ImageViewerItem,
 } from '@/components/ImageViewer.vue'
 import MarkdownContent from '@/components/MarkdownContent.vue'
+import TtsMapVariantsBlock from '@/components/TtsMapVariantsBlock.vue'
 import { useAdminEditMode } from '@/composables/useAdminEditMode'
 import { withBase } from '@/lib/basePath'
 import {
@@ -412,6 +413,8 @@ watch(
         </CardContent>
       </Card>
     </div>
+
+    <TtsMapVariantsBlock class="pb-4" :scenario-id="scenario.id" />
 
     <ImageViewer
       v-model:open="imageViewerOpen"

@@ -532,3 +532,19 @@ export interface TtsMapReport {
   image_url?: string | null
   created_at: number
 }
+
+export interface TtsMapVariant {
+  id: number
+  map_id: number
+  map_name: string
+  map_slug: string
+  scenario_id: number
+  scenario_name: string
+  scenario_slug: string
+  tournament_id?: number | null
+  tournament_name?: string | null
+  json_filename: string
+  json_url: string
+  created_at: number
+  updated_at: number
+}

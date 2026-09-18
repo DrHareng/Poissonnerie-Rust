@@ -33,6 +33,7 @@ import type {
   TtsMapDetail,
   TtsMapReport,
   TtsMapSummary,
+  TtsMapVariant,
   TtsModuleUpdate,
   User,
 } from '@/types/elo'
@@ -347,6 +348,67 @@ export function fetchTtsMapReportCount(): Promise<{ count: number }> {
 
 export function deleteTtsMapReport(id: number): Promise<void> {
   return request(`/api/tts-map-reports/${id}`, { method: 'DELETE' })
+}
+
+export function fetchTtsMapVariants(filters?: {
+  mapId?: number
+  scenarioId?: number
+  tournamentId?: number
+}): Promise<TtsMapVariant[]> {
+  const params = new URLSearchParams()
+  if (filters?.mapId != null) params.set('map_id', String(filters.mapId))
+  if (filters?.scenarioId != null) params.set('scenario_id', String(filters.scenarioId))
+  if (filters?.tournamentId != null) {
+    params.set('tournament_id', String(filters.tournamentId))
+  }
+  const query = params.toString()
+  return request(`/api/tts-map-variants${query ? `?${query}` : ''}`)
+}
+
+export async function createTtsMapVariant(payload: {
+  mapId: number
+  scenarioId: number
+  tournamentId?: number | null
+  file: File
+}): Promise<TtsMapVariant> {
+  const sessionId = getNativeSession()
+  const body = new FormData()
+  body.append('map_id', String(payload.mapId))
+  body.append('scenario_id', String(payload.scenarioId))
+  if (payload.tournamentId != null) {
+    body.append('tournament_id', String(payload.tournamentId))
+  }
+  body.append('file', payload.file)
+  const response = await fetch(withBase('/api/tts-map-variants'), {
+    ...defaultFetchOptions,
+    method: 'POST',
+    headers: {
+      ...(sessionId ? { 'X-Poissonnerie-Session': sessionId } : {}),
+    },
+    body,
+  })
+  if (!response.ok) {
+    let message = `Erreur HTTP ${response.status}`
+    try {
+      const payload = (await response.json()) as ApiError
+      if (payload.error) message = payload.error
+    } catch {
+      // ignore JSON parse errors
+    }
+    throw new Error(message)
+  }
+  return (await response.json()) as TtsMapVariant
+}
+
+export function uploadTtsMapVariantJson(
+  id: number,
+  file: File,
+): Promise<TtsMapVariant> {
+  return uploadFile(`/api/tts-map-variants/${id}/json`, file)
+}
+
+export function deleteTtsMapVariant(id: number): Promise<void> {
+  return request(`/api/tts-map-variants/${id}`, { method: 'DELETE' })
 }
 
 export function addPlayer(payload: { name: string; discord_username: string }): Promise<Player> {

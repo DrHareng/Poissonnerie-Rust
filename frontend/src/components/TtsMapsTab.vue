@@ -37,6 +37,7 @@ import ImageViewer, {
 import MarkdownContent from '@/components/MarkdownContent.vue'
 import MarkdownEditor from '@/components/MarkdownEditor.vue'
 import TtsMapReportDialog from '@/components/TtsMapReportDialog.vue'
+import TtsMapVariantsBlock from '@/components/TtsMapVariantsBlock.vue'
 import { useAdminEditMode } from '@/composables/useAdminEditMode'
 import { useAppSidePanel } from '@/composables/useAppSidePanel'
 import { useAuth } from '@/composables/useAuth'
@@ -775,6 +776,8 @@ watch(
           <p v-else class="pb-4 text-sm text-muted-foreground">
             Aucune photo pour cette map.
           </p>
+
+          <TtsMapVariantsBlock class="mb-4" :map-id="detail.id" />
 
           <div v-if="canEditContent" class="flex flex-wrap items-center gap-2 pb-6">
             <input
