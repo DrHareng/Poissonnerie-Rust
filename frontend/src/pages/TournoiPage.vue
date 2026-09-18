@@ -1677,15 +1677,13 @@ onMounted(refresh)
         </button>
       </nav>
 
-      <TtsMapVariantsBlock
-        class="shrink-0"
-        :tournament-id="detail.id"
-        :scenario-options="
-          tournamentScenarioOptions.length ? tournamentScenarioOptions : undefined
-        "
-      />
-
       <div class="tournament-tab-panels page-panel-scroll">
+        <TtsMapVariantsBlock
+          :tournament-id="detail.id"
+          :scenario-options="
+            tournamentScenarioOptions.length ? tournamentScenarioOptions : undefined
+          "
+        />
         <Teleport defer to="#app-side-panel">
           <Card
             v-if="showRegistrationListsSide"

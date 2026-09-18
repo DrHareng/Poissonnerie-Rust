@@ -516,7 +516,7 @@ watch(
 </script>
 
 <template>
-  <div class="page-panel-scroll flex min-h-0 flex-1 flex-col">
+  <div class="page-panel-scroll min-h-0 flex-1">
     <p v-if="!apiOnline" class="shrink-0 text-sm text-muted-foreground">
       Impossible de charger le module TTS.
     </p>
@@ -777,7 +777,7 @@ watch(
             Aucune photo pour cette map.
           </p>
 
-          <TtsMapVariantsBlock class="mb-4" :map-id="detail.id" />
+          <TtsMapVariantsBlock class="mb-4 shrink-0" :map-id="detail.id" />
 
           <div v-if="canEditContent" class="flex flex-wrap items-center gap-2 pb-6">
             <input

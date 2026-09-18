@@ -259,7 +259,7 @@ watch(canEditContent, (canEdit) => {
 <template>
   <Card
     v-if="variants.length > 0 || canEditContent"
-    class="neon-panel"
+    class="neon-panel shrink-0 overflow-visible"
   >
     <CardHeader>
       <CardTitle>{{ title }}</CardTitle>

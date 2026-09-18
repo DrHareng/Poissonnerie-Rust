@@ -414,7 +414,7 @@ watch(
       </Card>
     </div>
 
-    <TtsMapVariantsBlock class="pb-4" :scenario-id="scenario.id" />
+    <TtsMapVariantsBlock class="shrink-0 pb-4" :scenario-id="scenario.id" />
 
     <ImageViewer
       v-model:open="imageViewerOpen"
