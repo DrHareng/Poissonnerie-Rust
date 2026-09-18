@@ -1059,6 +1059,20 @@ fn migrate_tts_maps(conn: &Connection) -> Result<()> {
 
         CREATE INDEX IF NOT EXISTS idx_tts_module_updates_created
             ON tts_module_updates(created_at DESC, id DESC);
+
+        CREATE TABLE IF NOT EXISTS tts_map_reports (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            map_id INTEGER NOT NULL REFERENCES tts_maps(id) ON DELETE CASCADE,
+            reporter_user_id INTEGER NOT NULL REFERENCES users(id),
+            description TEXT NOT NULL,
+            image_filename TEXT,
+            created_at INTEGER NOT NULL
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_tts_map_reports_created
+            ON tts_map_reports(created_at DESC, id DESC);
+        CREATE INDEX IF NOT EXISTS idx_tts_map_reports_map
+            ON tts_map_reports(map_id);
         ",
     )?;
     add_column_if_missing(

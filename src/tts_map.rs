@@ -12,6 +12,7 @@ use crate::migrate::migrate;
 pub const MAX_JSON_BYTES: usize = 15 * 1024 * 1024;
 pub const MAX_PICTURE_BYTES: usize = 8 * 1024 * 1024;
 pub const MAX_UPDATE_CHARS: usize = 80_000;
+pub const MAX_REPORT_CHARS: usize = 8_000;
 pub const MAX_NAME_CHARS: usize = 80;
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
@@ -60,6 +61,21 @@ pub struct TtsModuleUpdate {
 pub struct TtsContentImage {
     pub label: String,
     pub path: String,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct TtsMapReport {
+    pub id: i64,
+    pub map_id: i64,
+    pub map_name: String,
+    pub map_slug: String,
+    pub reporter_user_id: i64,
+    pub reporter_display_name: String,
+    pub description: String,
+    pub image_filename: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub image_url: Option<String>,
+    pub created_at: u64,
 }
 
 pub struct TtsMapStore {
@@ -179,12 +195,24 @@ impl TtsMapStore {
     pub fn delete_map(&self, id: i64) -> Result<()> {
         let dir = self.map_dir(id);
         let conn = self.conn.lock().unwrap();
+        let report_ids: Vec<i64> = {
+            let mut stmt = conn.prepare("SELECT id FROM tts_map_reports WHERE map_id = ?1")?;
+            let rows = stmt.query_map(params![id], |row| row.get(0))?;
+            rows.collect::<Result<Vec<_>, _>>()?
+        };
+        conn.execute("DELETE FROM tts_map_reports WHERE map_id = ?1", params![id])?;
         conn.execute("DELETE FROM tts_map_pictures WHERE map_id = ?1", params![id])?;
         let n = conn.execute("DELETE FROM tts_maps WHERE id = ?1", params![id])?;
         if n == 0 {
             bail!("map introuvable");
         }
         drop(conn);
+        for report_id in report_ids {
+            let report_dir = self.report_dir(report_id);
+            if report_dir.exists() {
+                let _ = fs::remove_dir_all(&report_dir);
+            }
+        }
         if dir.exists() {
             let _ = fs::remove_dir_all(&dir);
         }
@@ -429,6 +457,131 @@ impl TtsMapStore {
         Ok(())
     }
 
+    pub fn create_report(
+        &self,
+        map_id: i64,
+        reporter_user_id: i64,
+        description: &str,
+        image: Option<(&str, &[u8])>,
+    ) -> Result<TtsMapReport> {
+        let description = validate_report_description(description)?;
+        if let Some((name, bytes)) = image {
+            if bytes.len() > MAX_PICTURE_BYTES {
+                bail!("l'image dépasse {MAX_PICTURE_BYTES} octets");
+            }
+            unique_picture_filename(name)?;
+        }
+        self.ensure_map_exists(map_id)?;
+        let now = now_unix();
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "
+            INSERT INTO tts_map_reports (map_id, reporter_user_id, description, created_at)
+            VALUES (?1, ?2, ?3, ?4)
+            ",
+            params![map_id, reporter_user_id, description, now],
+        )?;
+        let id = conn.last_insert_rowid();
+        drop(conn);
+
+        if let Some((original_name, bytes)) = image {
+            let filename = unique_picture_filename(original_name)?;
+            let dir = self.report_dir(id);
+            fs::create_dir_all(&dir)
+                .with_context(|| format!("impossible de créer {}", dir.display()))?;
+            let path = dir.join(&filename);
+            fs::write(&path, bytes)
+                .with_context(|| format!("impossible d'écrire {}", path.display()))?;
+            let conn = self.conn.lock().unwrap();
+            conn.execute(
+                "UPDATE tts_map_reports SET image_filename = ?1 WHERE id = ?2",
+                params![filename, id],
+            )?;
+        }
+
+        self.get_report(id)?
+            .with_context(|| "signalement introuvable après création")
+    }
+
+    pub fn list_reports(&self) -> Result<Vec<TtsMapReport>> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "
+            SELECT
+                r.id, r.map_id, m.name, m.slug,
+                r.reporter_user_id,
+                COALESCE(NULLIF(TRIM(u.local_display_name), ''), u.display_name, ''),
+                r.description, r.image_filename, r.created_at
+            FROM tts_map_reports r
+            JOIN tts_maps m ON m.id = r.map_id
+            LEFT JOIN users u ON u.id = r.reporter_user_id
+            ORDER BY r.created_at DESC, r.id DESC
+            ",
+        )?;
+        let rows = stmt.query_map([], row_to_report)?;
+        rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
+    }
+
+    pub fn count_reports(&self) -> Result<i64> {
+        let conn = self.conn.lock().unwrap();
+        conn.query_row("SELECT COUNT(*) FROM tts_map_reports", [], |row| row.get(0))
+            .map_err(Into::into)
+    }
+
+    pub fn get_report(&self, id: i64) -> Result<Option<TtsMapReport>> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "
+            SELECT
+                r.id, r.map_id, m.name, m.slug,
+                r.reporter_user_id,
+                COALESCE(NULLIF(TRIM(u.local_display_name), ''), u.display_name, ''),
+                r.description, r.image_filename, r.created_at
+            FROM tts_map_reports r
+            JOIN tts_maps m ON m.id = r.map_id
+            LEFT JOIN users u ON u.id = r.reporter_user_id
+            WHERE r.id = ?1
+            ",
+        )?;
+        match stmt.query_row(params![id], row_to_report) {
+            Ok(report) => Ok(Some(report)),
+            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+            Err(error) => Err(error.into()),
+        }
+    }
+
+    pub fn report_image_path(&self, id: i64) -> Result<Option<(PathBuf, String)>> {
+        let conn = self.conn.lock().unwrap();
+        let filename: Option<String> = match conn.query_row(
+            "SELECT image_filename FROM tts_map_reports WHERE id = ?1",
+            params![id],
+            |row| row.get(0),
+        ) {
+            Ok(value) => value,
+            Err(rusqlite::Error::QueryReturnedNoRows) => return Ok(None),
+            Err(error) => return Err(error.into()),
+        };
+        let Some(filename) = filename.filter(|name| !name.trim().is_empty()) else {
+            return Ok(None);
+        };
+        let filename = sanitize_existing_filename(&filename)?;
+        Ok(Some((self.report_dir(id).join(&filename), filename)))
+    }
+
+    pub fn delete_report(&self, id: i64) -> Result<()> {
+        let dir = self.report_dir(id);
+        let conn = self.conn.lock().unwrap();
+        let n = conn.execute("DELETE FROM tts_map_reports WHERE id = ?1", params![id])?;
+        if n == 0 {
+            bail!("signalement introuvable");
+        }
+        drop(conn);
+        if dir.exists() {
+            let _ = fs::remove_dir_all(&dir);
+        }
+        Ok(())
+    }
+
     fn ensure_map_exists(&self, id: i64) -> Result<()> {
         let conn = self.conn.lock().unwrap();
         let exists: bool = conn.query_row(
@@ -510,6 +663,10 @@ impl TtsMapStore {
     fn json_dir(&self, id: i64) -> PathBuf {
         self.map_dir(id).join("json")
     }
+
+    fn report_dir(&self, id: i64) -> PathBuf {
+        self.uploads_root.join("map-reports").join(id.to_string())
+    }
 }
 
 pub fn picture_url(map_id: i64, filename: &str) -> String {
@@ -564,6 +721,17 @@ fn validate_update_body(body_md: &str) -> Result<String> {
         bail!("la description est trop longue");
     }
     Ok(body_md.to_string())
+}
+
+fn validate_report_description(description: &str) -> Result<String> {
+    let description = description.trim();
+    if description.is_empty() {
+        bail!("la description est requise");
+    }
+    if description.chars().count() > MAX_REPORT_CHARS {
+        bail!("la description est trop longue");
+    }
+    Ok(description.to_string())
 }
 
 fn slugify(name: &str) -> String {
@@ -703,19 +871,64 @@ fn row_to_update(row: &rusqlite::Row<'_>) -> rusqlite::Result<TtsModuleUpdate> {
     })
 }
 
+fn row_to_report(row: &rusqlite::Row<'_>) -> rusqlite::Result<TtsMapReport> {
+    let id: i64 = row.get(0)?;
+    let reporter_user_id: i64 = row.get(4)?;
+    let reporter_name: String = row.get(5)?;
+    let image_filename: Option<String> = row.get(7)?;
+    let image_filename = image_filename.filter(|name| !name.trim().is_empty());
+    let image_url = image_filename
+        .as_ref()
+        .map(|_| format!("/api/tts-map-reports/{id}/image"));
+    Ok(TtsMapReport {
+        id,
+        map_id: row.get(1)?,
+        map_name: row.get(2)?,
+        map_slug: row.get(3)?,
+        reporter_user_id,
+        reporter_display_name: if reporter_name.trim().is_empty() {
+            format!("Utilisateur {reporter_user_id}")
+        } else {
+            reporter_name
+        },
+        description: row.get(6)?,
+        image_filename,
+        image_url,
+        created_at: row.get(8)?,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::atomic::{AtomicU64, Ordering};
+
+    static TEST_SEQ: AtomicU64 = AtomicU64::new(0);
 
     fn temp_store() -> (TtsMapStore, PathBuf) {
         let path = std::env::temp_dir().join(format!(
-            "poissonnerie-tts-maps-{}-{}",
+            "poissonnerie-tts-maps-{}-{}-{}",
             std::process::id(),
-            now_unix()
+            now_unix(),
+            TEST_SEQ.fetch_add(1, Ordering::Relaxed)
         ));
         let _ = fs::remove_file(&path);
         let store = TtsMapStore::open(&path).unwrap();
         (store, path)
+    }
+
+    fn insert_user(path: &Path, name: &str) -> i64 {
+        let conn = Connection::open(path).unwrap();
+        let now = now_unix() as i64;
+        conn.execute(
+            "
+            INSERT INTO users (discord_id, username, display_name, avatar_url, created_at, last_login_at)
+            VALUES (?1, ?2, ?3, '', ?4, ?4)
+            ",
+            params![format!("d-{name}-{now}"), name, name, now],
+        )
+        .unwrap();
+        conn.last_insert_rowid()
     }
 
     #[test]
@@ -758,6 +971,38 @@ mod tests {
         assert!(store.list_maps().unwrap().is_empty());
         assert!(!map_dir.exists());
 
+        let _ = fs::remove_file(&path);
+    }
+
+    #[test]
+    fn report_create_list_delete() {
+        let (store, path) = temp_store();
+        let user_id = insert_user(&path, "Alex");
+        let map = store.create_map("Carte bug").unwrap();
+        let png = [0x89, b'P', b'N', b'G', 0, 1, 2, 3];
+        let report = store
+            .create_report(map.id, user_id, " Texture cassée ", Some(("bug.png", &png)))
+            .unwrap();
+        assert_eq!(report.map_name, "Carte bug");
+        assert_eq!(report.reporter_display_name, "Alex");
+        assert_eq!(report.description, "Texture cassée");
+        assert_eq!(report.image_filename.as_deref(), Some("bug.png"));
+        assert_eq!(store.count_reports().unwrap(), 1);
+        assert_eq!(store.list_reports().unwrap().len(), 1);
+        let image_path = store.report_image_path(report.id).unwrap().unwrap().0;
+        assert_eq!(fs::read(&image_path).unwrap(), png);
+
+        store.delete_report(report.id).unwrap();
+        assert_eq!(store.count_reports().unwrap(), 0);
+        assert!(!image_path.exists());
+
+        let report = store
+            .create_report(map.id, user_id, "Encore cassé", Some(("bug.png", &png)))
+            .unwrap();
+        let image_path = store.report_image_path(report.id).unwrap().unwrap().0;
+        store.delete_map(map.id).unwrap();
+        assert_eq!(store.count_reports().unwrap(), 0);
+        assert!(!image_path.exists());
         let _ = fs::remove_file(&path);
     }
 }

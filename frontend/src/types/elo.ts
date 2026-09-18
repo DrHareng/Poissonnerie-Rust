@@ -519,3 +519,16 @@ export interface TtsContentImage {
   label: string
   path: string
 }
+
+export interface TtsMapReport {
+  id: number
+  map_id: number
+  map_name: string
+  map_slug: string
+  reporter_user_id: number
+  reporter_display_name: string
+  description: string
+  image_filename?: string | null
+  image_url?: string | null
+  created_at: number
+}

@@ -50,3 +50,16 @@ export const tournoisTabs: PageTitleTab[] = [
     activeNames: ['tournois-termines'],
   },
 ]
+
+export const adminTabs: PageTitleTab[] = [
+  {
+    to: { name: 'admin' },
+    label: 'Administration',
+    activeNames: ['admin'],
+  },
+  {
+    to: { name: 'admin-tts-reports' },
+    label: 'Signalements TTS',
+    activeNames: ['admin-tts-reports'],
+  },
+]

@@ -4,6 +4,7 @@ import { useRoute, useRouter, type RouteLocationRaw } from 'vue-router'
 import {
   BookOpen,
   ChevronDown,
+  CircleAlert,
   Eye,
   LogIn,
   LogOut,
@@ -28,6 +29,7 @@ import {
 import { useAuth } from '@/composables/useAuth'
 import { useAdminEditMode } from '@/composables/useAdminEditMode'
 import { useMyInProgressMatches } from '@/composables/useMyInProgressMatches'
+import { useTtsMapReportCount } from '@/composables/useTtsMapReportCount'
 import { withBase } from '@/lib/basePath'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
@@ -54,6 +56,9 @@ const {
   menuLabel: inProgressMenuLabel,
   menuRoute: inProgressRoute,
 } = useMyInProgressMatches()
+const { count: ttsReportCount } = useTtsMapReportCount()
+const reportsRoute = { name: 'admin-tts-reports' as const }
+const isReportsActive = computed(() => route.name === 'admin-tts-reports')
 
 const links: NavLink[] = [
   {
@@ -271,6 +276,21 @@ async function handleLogout() {
                 </RouterLink>
               </DropdownMenuItem>
             </template>
+            <template v-if="isAdmin">
+              <DropdownMenuSeparator class="topbar-user-menu-separator" />
+              <DropdownMenuItem as-child>
+                <RouterLink :to="reportsRoute" :class="menuItemClass">
+                  <CircleAlert class="size-4" />
+                  Signalements TTS
+                  <span
+                    v-if="ttsReportCount > 0"
+                    class="ml-auto text-xs font-semibold text-primary"
+                  >
+                    {{ ttsReportCount }}
+                  </span>
+                </RouterLink>
+              </DropdownMenuItem>
+            </template>
           </DropdownMenuContent>
         </DropdownMenuPortal>
       </DropdownMenuRoot>
@@ -368,6 +388,18 @@ async function handleLogout() {
                     {{ inProgressMenuLabel }}
                   </RouterLink>
                 </DropdownMenuItem>
+                <DropdownMenuItem v-if="isAdmin" as-child>
+                  <RouterLink :to="reportsRoute" :class="menuItemClass">
+                    <CircleAlert class="size-4" />
+                    Signalements TTS
+                    <span
+                      v-if="ttsReportCount > 0"
+                      class="ml-auto text-xs font-semibold text-primary"
+                    >
+                      {{ ttsReportCount }}
+                    </span>
+                  </RouterLink>
+                </DropdownMenuItem>
                 <DropdownMenuItem v-if="isEditMode" as-child>
                   <RouterLink :to="{ name: 'admin' }" :class="menuItemClass">
                     <Shield class="size-4" />
@@ -375,7 +407,7 @@ async function handleLogout() {
                   </RouterLink>
                 </DropdownMenuItem>
                 <DropdownMenuSeparator
-                  v-if="hasPlayer || inProgressRoute || isEditMode"
+                  v-if="hasPlayer || inProgressRoute || isAdmin || isEditMode"
                   class="topbar-user-menu-separator"
                 />
                 <DropdownMenuItem :class="menuItemClass" @select="handleLogout">
@@ -385,6 +417,31 @@ async function handleLogout() {
               </DropdownMenuContent>
             </DropdownMenuPortal>
           </DropdownMenuRoot>
+          <RouterLink
+            v-if="isAdmin"
+            :to="reportsRoute"
+            class="topbar-report"
+            :class="{
+              'topbar-report-active': isReportsActive,
+              'topbar-report--pending': ttsReportCount > 0,
+            }"
+            :aria-label="
+              ttsReportCount > 0
+                ? `Signalements TTS (${ttsReportCount})`
+                : 'Signalements TTS'
+            "
+            :title="
+              ttsReportCount > 0
+                ? `Signalements TTS (${ttsReportCount})`
+                : 'Signalements TTS'
+            "
+          >
+            <CircleAlert class="size-4" />
+            <span class="hidden md:inline">Signalements</span>
+            <span v-if="ttsReportCount > 0" class="topbar-cta-count">
+              {{ ttsReportCount }}
+            </span>
+          </RouterLink>
           <div
             v-if="isAdmin"
             class="flex items-center gap-0"

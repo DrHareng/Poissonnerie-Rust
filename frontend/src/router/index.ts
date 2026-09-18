@@ -13,6 +13,7 @@ import TournoiPage from '@/pages/TournoiPage.vue'
 import PartiePage from '@/pages/PartiePage.vue'
 import RessourcesPage from '@/pages/RessourcesPage.vue'
 import AdminPage from '@/pages/AdminPage.vue'
+import TtsMapReportsPage from '@/pages/TtsMapReportsPage.vue'
 import { pageTitle } from '@/lib/pageTitle'
 
 export const router = createRouter({
@@ -137,6 +138,12 @@ export const router = createRouter({
       name: 'admin',
       component: AdminPage,
       meta: { title: 'Administration' },
+    },
+    {
+      path: '/admin/signalements',
+      name: 'admin-tts-reports',
+      component: TtsMapReportsPage,
+      meta: { title: 'Signalements TTS' },
     },
   ],
 })

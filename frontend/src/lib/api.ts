@@ -31,6 +31,7 @@ import type {
   TournamentScenarioSlot,
   TtsContentImage,
   TtsMapDetail,
+  TtsMapReport,
   TtsMapSummary,
   TtsModuleUpdate,
   User,
@@ -304,6 +305,48 @@ export function deleteTtsMapPicture(
     `/api/tts-maps/${mapId}/pictures/${encodeURIComponent(filename)}`,
     { method: 'DELETE' },
   )
+}
+
+export async function createTtsMapReport(
+  mapId: number,
+  description: string,
+  file?: File | null,
+): Promise<TtsMapReport> {
+  const sessionId = getNativeSession()
+  const body = new FormData()
+  body.append('description', description)
+  if (file) body.append('file', file)
+  const response = await fetch(withBase(`/api/tts-maps/${mapId}/reports`), {
+    ...defaultFetchOptions,
+    method: 'POST',
+    headers: {
+      ...(sessionId ? { 'X-Poissonnerie-Session': sessionId } : {}),
+    },
+    body,
+  })
+  if (!response.ok) {
+    let message = `Erreur HTTP ${response.status}`
+    try {
+      const payload = (await response.json()) as ApiError
+      if (payload.error) message = payload.error
+    } catch {
+      // ignore JSON parse errors
+    }
+    throw new Error(message)
+  }
+  return (await response.json()) as TtsMapReport
+}
+
+export function fetchTtsMapReports(): Promise<TtsMapReport[]> {
+  return request('/api/tts-map-reports')
+}
+
+export function fetchTtsMapReportCount(): Promise<{ count: number }> {
+  return request('/api/tts-map-reports/count')
+}
+
+export function deleteTtsMapReport(id: number): Promise<void> {
+  return request(`/api/tts-map-reports/${id}`, { method: 'DELETE' })
 }
 
 export function addPlayer(payload: { name: string; discord_username: string }): Promise<Player> {

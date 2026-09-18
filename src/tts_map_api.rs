@@ -12,7 +12,7 @@ use tower_sessions::Session;
 use crate::{
     api::{ApiError, AppState},
     auth,
-    tts_map::{self, TtsMapDetail, TtsModuleUpdate},
+    tts_map::{self, TtsMapDetail, TtsMapReport, TtsModuleUpdate},
     User,
 };
 
@@ -22,6 +22,7 @@ pub fn tts_map_routes() -> Router<AppState> {
     let uploads = Router::new()
         .route("/api/tts-maps/{id}/json", post(upload_map_json))
         .route("/api/tts-maps/{id}/pictures", post(upload_map_picture))
+        .route("/api/tts-maps/{id}/reports", post(create_map_report))
         .layer(DefaultBodyLimit::max(UPLOAD_BODY_LIMIT));
 
     Router::new()
@@ -46,6 +47,19 @@ pub fn tts_map_routes() -> Router<AppState> {
         .route(
             "/api/tts-module-updates/{id}",
             axum::routing::patch(update_update).delete(delete_update),
+        )
+        .route(
+            "/api/tts-map-reports",
+            get(list_map_reports),
+        )
+        .route("/api/tts-map-reports/count", get(count_map_reports))
+        .route(
+            "/api/tts-map-reports/{id}",
+            axum::routing::delete(delete_map_report),
+        )
+        .route(
+            "/api/tts-map-reports/{id}/image",
+            get(serve_map_report_image),
         )
         .merge(uploads)
 }
@@ -273,6 +287,124 @@ async fn delete_update(
         .delete_update(id)
         .map_err(|error| ApiError::bad_request(error.to_string()))?;
     Ok(StatusCode::NO_CONTENT)
+}
+
+async fn create_map_report(
+    State(state): State<AppState>,
+    session: Session,
+    Path(id): Path<i64>,
+    multipart: Multipart,
+) -> Result<Json<TtsMapReport>, ApiError> {
+    let user = require_user(&state, &session).await?;
+    let (description, file) = read_report_upload(multipart).await?;
+    let image = file.as_ref().map(|(name, bytes)| (name.as_str(), bytes.as_slice()));
+    state
+        .tts_maps
+        .create_report(id, user.id, &description, image)
+        .map(Json)
+        .map_err(|error| ApiError::bad_request(error.to_string()))
+}
+
+async fn list_map_reports(
+    State(state): State<AppState>,
+    session: Session,
+) -> Result<Json<Vec<TtsMapReport>>, ApiError> {
+    require_admin(&state, &session).await?;
+    state
+        .tts_maps
+        .list_reports()
+        .map(Json)
+        .map_err(|error| ApiError::bad_request(error.to_string()))
+}
+
+#[derive(Debug, serde::Serialize)]
+struct ReportCountResponse {
+    count: i64,
+}
+
+async fn count_map_reports(
+    State(state): State<AppState>,
+    session: Session,
+) -> Result<Json<ReportCountResponse>, ApiError> {
+    require_admin(&state, &session).await?;
+    let count = state
+        .tts_maps
+        .count_reports()
+        .map_err(|error| ApiError::bad_request(error.to_string()))?;
+    Ok(Json(ReportCountResponse { count }))
+}
+
+async fn delete_map_report(
+    State(state): State<AppState>,
+    session: Session,
+    Path(id): Path<i64>,
+) -> Result<StatusCode, ApiError> {
+    require_admin(&state, &session).await?;
+    state
+        .tts_maps
+        .delete_report(id)
+        .map_err(|error| ApiError::bad_request(error.to_string()))?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+async fn serve_map_report_image(
+    State(state): State<AppState>,
+    session: Session,
+    Path(id): Path<i64>,
+) -> Result<Response, ApiError> {
+    require_admin(&state, &session).await?;
+    let Some((path, filename)) = state
+        .tts_maps
+        .report_image_path(id)
+        .map_err(|error| ApiError::bad_request(error.to_string()))?
+    else {
+        return Err(ApiError::bad_request("image introuvable"));
+    };
+    let bytes = std::fs::read(&path).map_err(|_| ApiError::bad_request("image introuvable"))?;
+    file_response(bytes, tts_map::mime_from_filename(&filename), None)
+}
+
+async fn read_report_upload(
+    mut multipart: Multipart,
+) -> Result<(String, Option<(String, Vec<u8>)>), ApiError> {
+    let mut description = String::new();
+    let mut file = None;
+    while let Some(field) = multipart
+        .next_field()
+        .await
+        .map_err(|error| ApiError::bad_request(error.to_string()))?
+    {
+        match field.name() {
+            Some("description") => {
+                description = field
+                    .text()
+                    .await
+                    .map_err(|error| ApiError::bad_request(error.to_string()))?;
+            }
+            Some("file") => {
+                let filename = field
+                    .file_name()
+                    .map(str::to_string)
+                    .filter(|name| !name.trim().is_empty())
+                    .unwrap_or_else(|| "image.png".to_string());
+                let bytes = field
+                    .bytes()
+                    .await
+                    .map_err(|error| ApiError::bad_request(error.to_string()))?;
+                if bytes.len() > tts_map::MAX_PICTURE_BYTES {
+                    return Err(ApiError::bad_request(format!(
+                        "fichier trop volumineux (max {} octets)",
+                        tts_map::MAX_PICTURE_BYTES
+                    )));
+                }
+                if !bytes.is_empty() {
+                    file = Some((filename, bytes.to_vec()));
+                }
+            }
+            _ => {}
+        }
+    }
+    Ok((description, file))
 }
 
 async fn read_upload(

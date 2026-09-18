@@ -10,6 +10,8 @@ import {
 } from '@/lib/api'
 import type { AdminAccounts, AdminPlayerEntry, AdminUserEntry } from '@/types/elo'
 import { useAuth } from '@/composables/useAuth'
+import { adminTabs } from '@/lib/pageTitleTabs'
+import PageTitleTabs from '@/components/PageTitleTabs.vue'
 import PlayerLink from '@/components/PlayerLink.vue'
 import PlayerPicker from '@/components/PlayerPicker.vue'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
@@ -329,13 +331,7 @@ watch(
 
 <template>
   <div class="page-stack">
-    <nav class="page-title-tabs shrink-0" aria-label="Administration">
-      <div class="page-title-tabs-list">
-        <h1 class="page-title-tab page-title-tab--active" aria-current="page">
-          Administration
-        </h1>
-      </div>
-    </nav>
+    <PageTitleTabs ariaLabel="Administration" :tabs="adminTabs" />
 
     <div v-if="authLoading || !initialized" class="text-sm text-muted-foreground">
       Chargement...

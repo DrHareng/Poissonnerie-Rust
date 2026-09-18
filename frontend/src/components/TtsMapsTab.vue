@@ -2,7 +2,7 @@
 import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import { RouterLink, useRoute, useRouter } from 'vue-router'
 import { toast } from 'vue-sonner'
-import { Copy, Dices, Download, Plus, Trash2 } from '@lucide/vue'
+import { CircleAlert, Copy, Dices, Download, Plus, Trash2 } from '@lucide/vue'
 import {
   createTtsMap,
   createTtsModuleUpdate,
@@ -22,6 +22,7 @@ import {
 } from '@/lib/api'
 import { withBase } from '@/lib/basePath'
 import { pageTitle } from '@/lib/pageTitle'
+import { copyTextToClipboard } from '@/lib/utils'
 import type {
   TtsContentImage,
   TtsMapDetail,
@@ -35,8 +36,10 @@ import ImageViewer, {
 } from '@/components/ImageViewer.vue'
 import MarkdownContent from '@/components/MarkdownContent.vue'
 import MarkdownEditor from '@/components/MarkdownEditor.vue'
+import TtsMapReportDialog from '@/components/TtsMapReportDialog.vue'
 import { useAdminEditMode } from '@/composables/useAdminEditMode'
 import { useAppSidePanel } from '@/composables/useAppSidePanel'
+import { useAuth } from '@/composables/useAuth'
 import { Button } from '@/components/ui/button'
 import {
   Card,
@@ -50,6 +53,7 @@ import { Input } from '@/components/ui/input'
 const route = useRoute()
 const router = useRouter()
 const { canEditContent } = useAdminEditMode()
+const { isAuthenticated } = useAuth()
 const { setCustomSide } = useAppSidePanel()
 
 const maps = ref<TtsMapSummary[]>([])
@@ -71,6 +75,7 @@ const jsonInput = ref<HTMLInputElement | null>(null)
 const picturesInput = ref<HTMLInputElement | null>(null)
 const imageViewerOpen = ref(false)
 const imageViewerIndex = ref(0)
+const reportOpen = ref(false)
 
 const extraImages = computed(() =>
   contentImages.value.map((image) => ({
@@ -185,7 +190,7 @@ function openPicture(index: number) {
 async function copyPictureToken(picture: TtsMapPicture) {
   const token = `[img]${picture.url}[img]`
   try {
-    await navigator.clipboard.writeText(token)
+    await copyTextToClipboard(token)
     toast.success('Lien markdown copié')
   } catch {
     toast.error('Impossible de copier le lien')
@@ -497,6 +502,13 @@ watch(
 
 watch(
   selectedSlug,
+  () => {
+    reportOpen.value = false
+  },
+)
+
+watch(
+  selectedSlug,
   () => scrollActiveIntoView(),
   { flush: 'post' },
 )
@@ -685,6 +697,16 @@ watch(
             <p v-else-if="!detail.json_url" class="text-sm text-muted-foreground">
               Aucun JSON pour cette map.
             </p>
+            <Button
+              v-if="isAuthenticated"
+              type="button"
+              variant="outline"
+              size="sm"
+              @click="reportOpen = true"
+            >
+              <CircleAlert class="size-4" />
+              Remonter un soucis
+            </Button>
             <template v-if="canEditContent">
               <input
                 ref="jsonInput"
@@ -861,6 +883,12 @@ watch(
       v-model:open="imageViewerOpen"
       v-model:index="imageViewerIndex"
       :items="viewerItems"
+    />
+    <TtsMapReportDialog
+      v-if="detail"
+      v-model:open="reportOpen"
+      :map-id="detail.id"
+      :map-name="detail.name"
     />
   </div>
 </template>
