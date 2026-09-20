@@ -4,6 +4,7 @@ import { useRouter } from 'vue-router'
 import { toast } from 'vue-sonner'
 import {
   completeTournamentRegistrationLists,
+  confirmTournamentMatch,
   startTournamentPartie,
 } from '@/lib/api'
 import { normalizeArmyListCode } from '@/lib/armyList'
@@ -16,6 +17,7 @@ import {
 import { useAuth } from '@/composables/useAuth'
 import { useAdminEditMode } from '@/composables/useAdminEditMode'
 import { useNetworkStatus } from '@/composables/useNetworkStatus'
+import { useServerConfirmAck } from '@/composables/useServerConfirmAck'
 import ArmyListQuickActions from '@/components/ArmyListQuickActions.vue'
 import TournamentMatchCard from '@/components/TournamentMatchCard.vue'
 import type { TournamentMatchForm } from '@/components/TournamentMatchCard.vue'
@@ -44,6 +46,7 @@ const router = useRouter()
 const { player } = useAuth()
 const { showAdminUi: isAdmin } = useAdminEditMode()
 const { isOnline } = useNetworkStatus()
+const confirmAck = useServerConfirmAck()
 
 const registration = computed(() => props.tournament.my_registration ?? null)
 const upcoming = computed(() => props.tournament.my_upcoming_matches ?? [])
@@ -210,6 +213,19 @@ async function resumePartie(match: TournamentMatch) {
   })
 }
 
+async function confirmMatch(match: TournamentMatch) {
+  if (!confirmAck.begin(match.id)) return
+  try {
+    await confirmTournamentMatch(match.id)
+    confirmAck.succeed(match.id)
+    toast.success(match.is_forfeit ? 'Forfait confirmé' : 'Résultat confirmé')
+    emit('refreshed')
+  } catch (error) {
+    confirmAck.fail(match.id)
+    toast.error(error instanceof Error ? error.message : 'Erreur')
+  }
+}
+
 function openTournament() {
   void router.push({ name: 'tournoi', params: { id: props.tournament.id } })
 }
@@ -338,6 +354,7 @@ function openTournament() {
           :is-online="isOnline"
           @start="startPartie(match)"
           @resume="resumePartie(match)"
+          @confirm="confirmMatch(match)"
         />
       </div>
     </CardContent>

@@ -15,7 +15,11 @@ import MatchResultBadges from '@/components/MatchResultBadges.vue'
 import PlayerLink from '@/components/PlayerLink.vue'
 import TournamentMatchScoreboard from '@/components/TournamentMatchScoreboard.vue'
 import { Button } from '@/components/ui/button'
-import { tournamentMatchScenarioPath } from '@/lib/tournamentMatchDisplay'
+import {
+  canConfirmTournamentMatch,
+  tournamentMatchScenarioPath,
+} from '@/lib/tournamentMatchDisplay'
+import { useAuth } from '@/composables/useAuth'
 import { COUPE_REQUIRES_NETWORK } from '@/lib/partieOffline'
 import {
   CONFIRMATION_RECEIVED_LABEL,
@@ -58,6 +62,7 @@ const emit = defineEmits<{
 
 const correctingMatchId = ref<number | null>(null)
 const confirmAck = useServerConfirmAck()
+const { user } = useAuth()
 
 const menuItemClass =
   'flex cursor-pointer items-center gap-2 rounded-sm px-2 py-1.5 text-sm outline-none select-none data-[highlighted]:bg-accent data-[highlighted]:text-accent-foreground'
@@ -92,7 +97,18 @@ function canResume(match: TournamentMatch) {
 }
 
 function canConfirm(match: TournamentMatch) {
-  return props.canInteract(match) && match.status === 'submitted'
+  return canConfirmTournamentMatch(match, {
+    canInteract: props.canInteract(match),
+    isAdmin: props.isAdmin,
+    currentUserId: user.value?.id,
+  })
+}
+
+function onConfirm(match: TournamentMatch) {
+  if (!canConfirm(match) || confirmPending(match) || confirmationReceived(match)) {
+    return
+  }
+  emit('confirm', match)
 }
 
 function confirmationReceived(match: TournamentMatch) {
@@ -360,7 +376,7 @@ watch(
                   :variant="confirmationReceived(match) ? 'default' : 'outline'"
                   :class="{ 'btn-confirmation-received': confirmationReceived(match) }"
                   :disabled="confirmPending(match) || confirmationReceived(match)"
-                  @click="emit('confirm', match)"
+                  @click="onConfirm(match)"
                 >
                   {{ confirmLabel(match) }}
                 </Button>

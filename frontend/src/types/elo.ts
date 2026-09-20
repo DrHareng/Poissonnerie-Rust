@@ -373,6 +373,7 @@ export interface TournamentMatch {
   forfeit_player?: string | null
   forfeit_player_display_name?: string | null
   status: TournamentMatchStatus
+  submitted_by_user_id?: number | null
   scenario_id?: number | null
   scenario_other?: string | null
   scenario_name?: string | null

@@ -15,9 +15,11 @@ import ArmyLogo from '@/components/ArmyLogo.vue'
 import PlayerLink from '@/components/PlayerLink.vue'
 import { Button } from '@/components/ui/button'
 import {
+  canConfirmTournamentMatch,
   formatMatchRecordedDate,
   tournamentMatchScenarioPath,
 } from '@/lib/tournamentMatchDisplay'
+import { useAuth } from '@/composables/useAuth'
 import { COUPE_REQUIRES_NETWORK } from '@/lib/partieOffline'
 import {
   CONFIRMATION_RECEIVED_LABEL,
@@ -79,6 +81,7 @@ const emit = defineEmits<{
 
 const correcting = ref(false)
 const confirmAck = useServerConfirmAck()
+const { user } = useAuth()
 
 const hasBothPlayers = computed(
   () => Boolean(props.match.player1 && props.match.player2),
@@ -119,8 +122,12 @@ const canResume = computed(
     && !props.match.is_unplayed,
 )
 
-const canConfirm = computed(
-  () => props.canInteract && props.match.status === 'submitted',
+const canConfirm = computed(() =>
+  canConfirmTournamentMatch(props.match, {
+    canInteract: props.canInteract,
+    isAdmin: props.isAdmin,
+    currentUserId: user.value?.id,
+  }),
 )
 
 const confirmationReceived = computed(() =>

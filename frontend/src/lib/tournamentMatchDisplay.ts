@@ -41,6 +41,23 @@ export function matchHasResult(match: TournamentMatch) {
   )
 }
 
+/** L’adversaire (ou un admin) confirme ; l’auteur de la saisie ne voit pas le bouton. */
+export function canConfirmTournamentMatch(
+  match: Pick<TournamentMatch, 'status' | 'submitted_by_user_id'>,
+  options: {
+    canInteract: boolean
+    isAdmin: boolean
+    currentUserId?: number | null
+  },
+): boolean {
+  if (!options.canInteract || match.status !== 'submitted') return false
+  if (options.isAdmin) return true
+  const submitter = match.submitted_by_user_id
+  const me = options.currentUserId
+  if (submitter != null && me != null && submitter === me) return false
+  return true
+}
+
 /** Chemin interne vers la fiche scénario (clic molette = nouvel onglet). */
 export function tournamentMatchScenarioPath(
   match: Pick<TournamentMatch, 'scenario_slug'>,
