@@ -1208,6 +1208,13 @@ fn prepare_match_for_viewer(
     mask_draft_reports(record, viewer_player);
 }
 
+fn unconfirmed_result_match_ids(state: &AppState) -> HashSet<u64> {
+    state
+        .tournaments
+        .unconfirmed_result_elo_match_ids()
+        .unwrap_or_default()
+}
+
 async fn list_matches(
     State(state): State<AppState>,
     session: Session,
@@ -1216,12 +1223,13 @@ async fn list_matches(
     let viewer = viewer_player_name(&state, &session).await;
     let limit = query.limit.clamp(1, 100);
     let offset = query.offset;
+    let hidden_ids = unconfirmed_result_match_ids(&state);
 
     let (total, mut records) = {
         let board = state.board.lock().unwrap();
-        let total = board.match_count();
+        let total = board.listed_match_count(&hidden_ids);
         let records: Vec<_> = board
-            .recent_matches_page(limit, offset)
+            .recent_matches_page(limit, offset, &hidden_ids)
             .into_iter()
             .cloned()
             .collect();
@@ -1328,10 +1336,11 @@ async fn get_player_matches(
 ) -> Result<Json<Vec<crate::display_name::EnrichedMatchRecord>>, ApiError> {
     let viewer = viewer_player_name(&state, &session).await;
     let limit = query.limit.clamp(1, 500);
+    let hidden_ids = unconfirmed_result_match_ids(&state);
     let mut records = {
         let board = state.board.lock().unwrap();
         board
-            .player_matches(&name, limit)
+            .player_matches_excluding(&name, limit, &hidden_ids)
             .map_err(|error| ApiError::bad_request(error.to_string()))?
             .into_iter()
             .cloned()
@@ -2576,10 +2585,12 @@ async fn get_army_list_matches(
         .map_err(|error| ApiError::bad_request(error.to_string()))?;
 
     let viewer = viewer_player_name(&state, &session).await;
+    let hidden_ids = unconfirmed_result_match_ids(&state);
     let mut records = {
         let board = state.board.lock().unwrap();
         match_ids
             .into_iter()
+            .filter(|match_id| !hidden_ids.contains(match_id))
             .filter_map(|match_id| board.get_match(match_id).cloned())
             .collect::<Vec<_>>()
     };

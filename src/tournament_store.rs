@@ -4514,6 +4514,21 @@ impl TournamentStore {
         Ok(())
     }
 
+    /// Parties ELO liées à un résultat tournoi encore en attente de confirmation.
+    pub fn unconfirmed_result_elo_match_ids(&self) -> Result<HashSet<u64>> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "
+            SELECT elo_match_id FROM tournament_matches
+            WHERE elo_match_id IS NOT NULL AND status = 'submitted'
+            ",
+        )?;
+        let ids = stmt
+            .query_map([], |row| row.get::<_, i64>(0).map(|id| id as u64))?
+            .collect::<rusqlite::Result<HashSet<_>>>()?;
+        Ok(ids)
+    }
+
     pub fn find_match_by_elo_match_id(&self, elo_match_id: u64) -> Result<Option<TournamentMatch>> {
         let conn = self.conn.lock().unwrap();
         let id: Option<i64> = conn

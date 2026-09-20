@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::Path;
 
@@ -686,6 +686,14 @@ impl Leaderboard {
 
     pub fn match_count(&self) -> usize {
         self.matches.len()
+    }
+
+    /// Nombre de matchs visibles publiquement (hors résultats encore à confirmer).
+    pub fn listed_match_count(&self, hidden_ids: &HashSet<u64>) -> usize {
+        self.matches
+            .iter()
+            .filter(|record| !hidden_ids.contains(&record.id))
+            .count()
     }
 
     pub fn get_match(&self, id: u64) -> Option<&MatchRecord> {
@@ -1601,15 +1609,30 @@ impl Leaderboard {
         Ok(record.clone())
     }
 
-    pub fn recent_matches_page(&self, limit: usize, offset: usize) -> Vec<&MatchRecord> {
+    pub fn recent_matches_page(
+        &self,
+        limit: usize,
+        offset: usize,
+        hidden_ids: &HashSet<u64>,
+    ) -> Vec<&MatchRecord> {
         self.matches
             .iter()
+            .filter(|record| !hidden_ids.contains(&record.id))
             .skip(offset)
             .take(limit)
             .collect()
     }
 
     pub fn player_matches(&self, name: &str, limit: usize) -> Result<Vec<&MatchRecord>> {
+        self.player_matches_excluding(name, limit, &HashSet::new())
+    }
+
+    pub fn player_matches_excluding(
+        &self,
+        name: &str,
+        limit: usize,
+        hidden_ids: &HashSet<u64>,
+    ) -> Result<Vec<&MatchRecord>> {
         let key = normalize_name(name);
         if !self.players.contains_key(&key) {
             bail!("joueur introuvable : {}", name);
@@ -1619,7 +1642,9 @@ impl Leaderboard {
             .matches
             .iter()
             .filter(|record| {
-                normalize_name(&record.player1) == key || normalize_name(&record.player2) == key
+                !hidden_ids.contains(&record.id)
+                    && (normalize_name(&record.player1) == key
+                        || normalize_name(&record.player2) == key)
             })
             .take(limit)
             .collect())
@@ -2720,6 +2745,74 @@ mod tests {
 
         let bob_matches = board.player_matches("Bob", 10).unwrap();
         assert_eq!(bob_matches.len(), 2);
+    }
+
+    #[test]
+    fn listed_matches_skip_unconfirmed_result_ids() {
+        use crate::player::MatchOutcome;
+
+        let mut board = Leaderboard::default();
+        board.add_player("Alice").unwrap();
+        board.add_player("Bob").unwrap();
+        board.add_player("Charlie").unwrap();
+
+        let first = board
+            .record_match(
+                "Alice",
+                "Bob",
+                MatchOutcome::Player1Win,
+                32.0,
+                MatchScores::default(),
+                None,
+                None,
+                None,
+                None,
+                None,
+            )
+            .unwrap();
+        let hidden = board
+            .record_match(
+                "Bob",
+                "Charlie",
+                MatchOutcome::Player2Win,
+                32.0,
+                MatchScores::default(),
+                None,
+                None,
+                None,
+                None,
+                None,
+            )
+            .unwrap();
+        let third = board
+            .record_match(
+                "Alice",
+                "Charlie",
+                MatchOutcome::Draw,
+                32.0,
+                MatchScores::default(),
+                None,
+                None,
+                None,
+                None,
+                None,
+            )
+            .unwrap();
+
+        let hidden_ids = HashSet::from([hidden.id]);
+        assert_eq!(board.match_count(), 3);
+        assert_eq!(board.listed_match_count(&hidden_ids), 2);
+
+        let page = board.recent_matches_page(10, 0, &hidden_ids);
+        assert_eq!(page.len(), 2);
+        assert_eq!(page[0].id, third.id);
+        assert_eq!(page[1].id, first.id);
+
+        let alice = board
+            .player_matches_excluding("Alice", 10, &hidden_ids)
+            .unwrap();
+        assert_eq!(alice.len(), 2);
+        assert!(alice.iter().all(|record| record.id != hidden.id));
     }
 
     #[test]
