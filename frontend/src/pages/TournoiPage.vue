@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
-import { useRoute, useRouter } from 'vue-router'
+import { RouterLink, useRoute, useRouter } from 'vue-router'
 import { Check, Trash2, X } from '@lucide/vue'
 import { toast } from 'vue-sonner'
 import { COUPE_REQUIRES_NETWORK } from '@/lib/partieOffline'
@@ -361,27 +361,24 @@ function poolMatchesForPool(poolId: number) {
   return poolMatches.value.filter((match) => match.pool_id === poolId)
 }
 
+const poulesListTo = computed(() => {
+  const query = { ...route.query }
+  delete query.poolId
+  query.tab = 'poules'
+  return { query }
+})
+
 function selectPool(poolId: number) {
-  selectedPoolId.value = poolId
   userPickedTab.value = true
   activeTab.value = 'poules'
-  void router.replace({
+  selectedPoolId.value = poolId
+  void router.push({
     query: {
       ...route.query,
       tab: 'poules',
       poolId: String(poolId),
     },
   })
-}
-
-function clearPoolSelection() {
-  selectedPoolId.value = null
-  if (route.query.poolId != null || route.query.tab === 'poules') {
-    const query = { ...route.query }
-    delete query.poolId
-    delete query.tab
-    void router.replace({ query })
-  }
 }
 
 function selectedPool() {
@@ -391,19 +388,18 @@ function selectedPool() {
 function applyPoolDeepLink() {
   if (!detail.value) return
   const poolId = Number(route.query.poolId)
-  const wantsPoules =
-    route.query.tab === 'poules'
-    || (Number.isFinite(poolId) && poolId > 0)
+  const hasPool =
+    Number.isFinite(poolId)
+    && poolId > 0
+    && detail.value.pools.some((pool) => pool.id === poolId)
+  selectedPoolId.value = hasPool ? poolId : null
+
+  const wantsPoules = route.query.tab === 'poules' || hasPool
   if (!wantsPoules) return
   if (!tournamentTabs.value.some((tab) => tab.id === 'poules')) return
 
   userPickedTab.value = true
   activeTab.value = 'poules'
-  if (Number.isFinite(poolId) && poolId > 0) {
-    if (detail.value.pools.some((pool) => pool.id === poolId)) {
-      selectedPoolId.value = poolId
-    }
-  }
 }
 
 const bracketMatches = computed(() =>
@@ -2376,9 +2372,9 @@ onMounted(refresh)
                 class="pool-breadcrumb"
                 aria-label="Navigation des poules"
               >
-                <button type="button" class="pool-breadcrumb-link" @click="clearPoolSelection">
+                <RouterLink class="pool-breadcrumb-link" :to="poulesListTo" replace>
                   Poules
-                </button>
+                </RouterLink>
                 <span class="pool-breadcrumb-sep" aria-hidden="true">›</span>
                 <span class="pool-breadcrumb-current">{{ selectedPool()!.name }}</span>
               </nav>
