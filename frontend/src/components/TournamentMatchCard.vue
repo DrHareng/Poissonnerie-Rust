@@ -19,6 +19,10 @@ import {
   tournamentMatchScenarioPath,
 } from '@/lib/tournamentMatchDisplay'
 import { COUPE_REQUIRES_NETWORK } from '@/lib/partieOffline'
+import {
+  CONFIRMATION_RECEIVED_LABEL,
+  useServerConfirmAck,
+} from '@/composables/useServerConfirmAck'
 import type { TournamentMatch } from '@/types/elo'
 
 export interface TournamentMatchForm {
@@ -74,6 +78,7 @@ const emit = defineEmits<{
 }>()
 
 const correcting = ref(false)
+const confirmAck = useServerConfirmAck()
 
 const hasBothPlayers = computed(
   () => Boolean(props.match.player1 && props.match.player2),
@@ -117,6 +122,19 @@ const canResume = computed(
 const canConfirm = computed(
   () => props.canInteract && props.match.status === 'submitted',
 )
+
+const confirmationReceived = computed(() =>
+  confirmAck.isReceived(props.match.id),
+)
+const confirmPending = computed(() => confirmAck.isPending(props.match.id))
+const showConfirmButton = computed(
+  () => canConfirm.value || confirmPending.value || confirmationReceived.value,
+)
+const confirmButtonLabel = computed(() => {
+  if (confirmationReceived.value) return CONFIRMATION_RECEIVED_LABEL
+  if (confirmPending.value) return 'Enregistrement…'
+  return props.match.is_forfeit ? 'Confirmer le forfait' : 'Confirmer'
+})
 
 const canCorrect = computed(
   () =>
@@ -190,9 +208,14 @@ const showActionsRow = computed(
   () =>
     hasBothPlayers.value
     && (correcting.value
-      || canConfirm.value
+      || showConfirmButton.value
       || (!props.listsReady && props.match.status === 'scheduled' && props.canInteract)),
 )
+
+function onConfirm() {
+  if (!canConfirm.value || confirmPending.value || confirmationReceived.value) return
+  emit('confirm')
+}
 
 const menuItemClass =
   'flex cursor-pointer items-center gap-2 rounded-sm px-2 py-1.5 text-sm outline-none select-none data-[highlighted]:bg-accent data-[highlighted]:text-accent-foreground'
@@ -561,7 +584,7 @@ function matchPlayerLabel(slot: 'player1' | 'player2') {
     <div
       v-if="showActionsRow"
       class="tournament-match-actions"
-      :class="{ 'mt-2 border-t-0 pt-0': showOpponentFocus && !correcting && !canConfirm }"
+      :class="{ 'mt-2 border-t-0 pt-0': showOpponentFocus && !correcting && !showConfirmButton }"
     >
       <template v-if="correcting">
         <TournamentMatchScoreboard
@@ -595,12 +618,14 @@ function matchPlayerLabel(slot: 'player1' | 'player2') {
         </p>
 
         <Button
-          v-if="canConfirm"
+          v-if="showConfirmButton"
           size="sm"
-          variant="outline"
-          @click="emit('confirm')"
+          :variant="confirmationReceived ? 'default' : 'outline'"
+          :class="{ 'btn-confirmation-received': confirmationReceived }"
+          :disabled="confirmPending || confirmationReceived"
+          @click="onConfirm"
         >
-          {{ match.is_forfeit ? 'Confirmer le forfait' : 'Confirmer' }}
+          {{ confirmButtonLabel }}
         </Button>
       </template>
     </div>

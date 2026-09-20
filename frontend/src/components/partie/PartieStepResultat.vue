@@ -2,9 +2,13 @@
 import { computed, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { toast } from 'vue-sonner'
-import { Swords } from '@lucide/vue'
+import { Check, Swords } from '@lucide/vue'
 import { COMBAT_ESPRIT_SLUG } from '@/lib/combatEspritDraft'
 import { completeMatch, submitTournamentFromPartie } from '@/lib/api'
+import {
+  CONFIRMATION_RECEIVED_LABEL,
+  waitConfirmationAck,
+} from '@/composables/useServerConfirmAck'
 import { COUPE_REQUIRES_NETWORK } from '@/lib/partieOffline'
 import type { PartiePlayerSlot, PartieScenario, PartieScores } from '@/composables/usePartieFlow'
 import type { MatchOutcome } from '@/types/elo'
@@ -54,12 +58,14 @@ const emit = defineEmits<{
       player2_objectives: number
       player2_survivors: number
     },
+    ack: (serverAccepted: boolean) => void,
   ]
 }>()
 
 const router = useRouter()
 const { isAuthenticated, login } = useAuth()
 const submitting = ref(false)
+const confirmed = ref(false)
 const list1 = ref<number | undefined>(undefined)
 const list2 = ref<number | undefined>(undefined)
 
@@ -102,6 +108,8 @@ const canSubmit = computed(() => {
 })
 
 const submitLabel = computed(() => {
+  if (confirmed.value) return CONFIRMATION_RECEIVED_LABEL
+  if (submitting.value) return 'Enregistrement…'
   if (isTournament.value) {
     return 'Soumettre le résultat (confirmation adverse)'
   }
@@ -134,7 +142,14 @@ function updateScore(field: keyof PartieScores, value: number) {
   emit('update:scores', { ...props.scores, [field]: value })
 }
 
+async function markServerAccepted() {
+  confirmed.value = true
+  await waitConfirmationAck()
+}
+
 async function submit() {
+  if (confirmed.value || submitting.value) return
+
   if (!isAuthenticated.value) {
     toast.error('Connectez-vous avec Discord pour enregistrer le résultat.')
     login()
@@ -163,6 +178,7 @@ async function submit() {
         player2_list_slot: list2.value!,
       })
       toast.success('Résultat soumis — en attente de confirmation')
+      await markServerAccepted()
       emit('recorded')
       if (props.tournamentId) {
         router.push(`/tournoi/${props.tournamentId}`)
@@ -181,7 +197,13 @@ async function submit() {
     }
 
     if (!props.isOnline || !props.matchId) {
-      emit('submit-local', completePayload)
+      emit('submit-local', completePayload, (serverAccepted) => {
+        if (serverAccepted) {
+          confirmed.value = true
+          return
+        }
+        submitting.value = false
+      })
       return
     }
 
@@ -194,12 +216,13 @@ async function submit() {
           `${record.player2} ${Math.round(record.player2_old)} → ${Math.round(record.player2_new)}`,
       )
     }
+    await markServerAccepted()
     emit('recorded')
     router.push(`/matchs/${record.id}`)
   } catch (error) {
     toast.error(error instanceof Error ? error.message : 'Erreur inconnue')
   } finally {
-    submitting.value = false
+    if (!confirmed.value) submitting.value = false
   }
 }
 </script>
@@ -247,6 +270,7 @@ async function submit() {
         <select
           v-if="player1HasList2"
           v-model.number="list1"
+          :disabled="submitting || confirmed"
           class="h-9 rounded-md border border-input bg-transparent px-2 text-sm"
         >
           <option :value="undefined" disabled>Choisir…</option>
@@ -262,6 +286,7 @@ async function submit() {
         <select
           v-if="player2HasList2"
           v-model.number="list2"
+          :disabled="submitting || confirmed"
           class="h-9 rounded-md border border-input bg-transparent px-2 text-sm"
         >
           <option :value="undefined" disabled>Choisir…</option>
@@ -287,6 +312,7 @@ async function submit() {
               min="0"
               max="10"
               step="1"
+              :disabled="submitting || confirmed"
               @update:model-value="
                 updateScore('player1Objectives', Number($event) || 0)
               "
@@ -301,6 +327,7 @@ async function submit() {
               min="0"
               max="300"
               step="1"
+              :disabled="submitting || confirmed"
               @update:model-value="
                 updateScore('player1Survivors', Number($event) || 0)
               "
@@ -321,6 +348,7 @@ async function submit() {
               min="0"
               max="10"
               step="1"
+              :disabled="submitting || confirmed"
               @update:model-value="
                 updateScore('player2Objectives', Number($event) || 0)
               "
@@ -335,6 +363,7 @@ async function submit() {
               min="0"
               max="300"
               step="1"
+              :disabled="submitting || confirmed"
               @update:model-value="
                 updateScore('player2Survivors', Number($event) || 0)
               "
@@ -345,17 +374,20 @@ async function submit() {
     </div>
 
     <div class="flex flex-col gap-2 sm:flex-row sm:justify-between">
-      <Button type="button" variant="outline" :disabled="submitting" @click="emit('back')">
+      <Button type="button" variant="outline" :disabled="submitting || confirmed" @click="emit('back')">
         Précédent
       </Button>
       <Button
         type="button"
-        :disabled="submitting || !canSubmit || (requireOnline && !isOnline)"
+        :class="{ 'btn-confirmation-received': confirmed }"
+        :disabled="submitting || confirmed || !canSubmit || (requireOnline && !isOnline)"
         :title="requireOnline && !isOnline ? COUPE_REQUIRES_NETWORK : undefined"
+        :aria-disabled="confirmed || undefined"
         @click="submit"
       >
-        <Swords class="size-4" />
-        {{ submitting ? 'Enregistrement…' : submitLabel }}
+        <Check v-if="confirmed" class="size-4" />
+        <Swords v-else class="size-4" />
+        {{ submitLabel }}
       </Button>
     </div>
   </div>

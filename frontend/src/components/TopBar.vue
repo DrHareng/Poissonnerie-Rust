@@ -102,7 +102,15 @@ const links: NavLink[] = [
       { to: { name: 'sectorielles' }, label: 'Sectorielles' },
     ],
   },
-  { to: '/ressources', label: 'Ressources', icon: BookOpen },
+  {
+    to: '/maps',
+    label: 'Maps & liens',
+    icon: BookOpen,
+    children: [
+      { to: { name: 'maps' }, label: 'Module TTS' },
+      { to: { name: 'links' }, label: 'Liens' },
+    ],
+  },
 ]
 
 const activePath = computed(() => route.path)
@@ -147,8 +155,8 @@ function isLinkActive(to: string) {
   if (to === '/scenarios') {
     return path.startsWith('/scenarios')
   }
-  if (to === '/ressources') {
-    return path.startsWith('/ressources')
+  if (to === '/maps') {
+    return path.startsWith('/maps') || path.startsWith('/links')
   }
   return path === to
 }

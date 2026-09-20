@@ -17,13 +17,11 @@ import {
   CardTitle,
 } from '@/components/ui/card'
 
-type RessourcesTabId = 'maps' | 'liens'
-
-const TAB_IDS: RessourcesTabId[] = ['maps', 'liens']
+type MapsLinksTabId = 'maps' | 'liens'
 
 const tabs = [
-  { id: 'maps' as const, label: 'Module TTS' },
-  { id: 'liens' as const, label: 'Liens' },
+  { id: 'maps' as const, label: 'Module TTS', routeName: 'maps' as const },
+  { id: 'liens' as const, label: 'Liens', routeName: 'links' as const },
 ]
 
 const route = useRoute()
@@ -36,14 +34,9 @@ const apiOnline = ref(true)
 const liensLoaded = ref(false)
 const currentMap = ref<{ slug: string; name: string } | null>(null)
 
-const activeTab = computed<RessourcesTabId>(() => {
-  const raw = route.query.tab
-  const value = Array.isArray(raw) ? raw[0] : raw
-  if (value && TAB_IDS.includes(value as RessourcesTabId)) {
-    return value as RessourcesTabId
-  }
-  return 'maps'
-})
+const activeTab = computed<MapsLinksTabId>(() =>
+  route.name === 'links' ? 'liens' : 'maps',
+)
 
 const activeTabLabel = computed(() => {
   if (activeTab.value === 'maps' && currentMap.value) {
@@ -52,13 +45,13 @@ const activeTabLabel = computed(() => {
   return tabs.find((tab) => tab.id === activeTab.value)?.label ?? 'Module TTS'
 })
 
-function setActiveTab(tab: RessourcesTabId) {
+function setActiveTab(tab: MapsLinksTabId) {
   if (tab === 'maps') {
-    router.replace({ name: 'ressources', query: {} })
+    router.replace({ name: 'maps', query: {} })
     return
   }
   currentMap.value = null
-  router.replace({ name: 'ressources', query: { tab: 'liens' } })
+  router.replace({ name: 'links' })
 }
 
 async function loadLiens() {
@@ -74,7 +67,7 @@ async function loadLiens() {
     toast.error(
       error instanceof Error
         ? error.message
-        : 'Impossible de charger les ressources',
+        : 'Impossible de charger les liens',
     )
   } finally {
     loading.value = false
@@ -84,7 +77,7 @@ async function loadLiens() {
 async function save(payload: { body: string }) {
   const content = await updateRessources({ body_md: payload.body })
   bodyMd.value = content.body_md
-  toast.success('Ressources enregistrées')
+  toast.success('Liens enregistrés')
 }
 
 onMounted(() => {
@@ -103,7 +96,7 @@ watch(activeTab, (tab) => {
 
 <template>
   <div class="page-stack">
-    <nav class="page-title-tabs shrink-0" aria-label="Ressources">
+    <nav class="page-title-tabs shrink-0" aria-label="Maps et liens">
       <div class="page-title-tabs-list">
         <h1 class="sr-only">{{ activeTabLabel }}</h1>
         <button
@@ -124,7 +117,7 @@ watch(activeTab, (tab) => {
         </button>
         <RouterLink
           v-if="currentMap"
-          :to="{ name: 'ressources', query: { map: currentMap.slug } }"
+          :to="{ name: 'maps', query: { map: currentMap.slug } }"
           class="page-title-tab page-title-tab--detail page-title-tab--active"
           aria-current="page"
           :title="currentMap.name"
@@ -157,7 +150,7 @@ watch(activeTab, (tab) => {
       <CardHeader class="shrink-0" :class="{ 'pr-24': canEditContent }">
         <CardTitle class="flex items-center gap-2">
           <BookOpen class="size-5 text-primary" />
-          Liens et ressources
+          Liens
         </CardTitle>
       </CardHeader>
       <CardContent class="min-h-0 flex-1 overflow-y-auto">
@@ -170,7 +163,7 @@ watch(activeTab, (tab) => {
         >
           <MarkdownContent v-if="bodyMd.trim()" :source="bodyMd" />
           <p v-else class="text-sm text-muted-foreground">
-            Aucune ressource pour l’instant.
+            Aucun lien pour l’instant.
           </p>
         </AdminContentEditor>
       </CardContent>

@@ -17,6 +17,10 @@ import TournamentMatchScoreboard from '@/components/TournamentMatchScoreboard.vu
 import { Button } from '@/components/ui/button'
 import { tournamentMatchScenarioPath } from '@/lib/tournamentMatchDisplay'
 import { COUPE_REQUIRES_NETWORK } from '@/lib/partieOffline'
+import {
+  CONFIRMATION_RECEIVED_LABEL,
+  useServerConfirmAck,
+} from '@/composables/useServerConfirmAck'
 import type { TournamentMatchForm } from '@/components/TournamentMatchCard.vue'
 import type { TournamentMatch } from '@/types/elo'
 
@@ -53,6 +57,7 @@ const emit = defineEmits<{
 }>()
 
 const correctingMatchId = ref<number | null>(null)
+const confirmAck = useServerConfirmAck()
 
 const menuItemClass =
   'flex cursor-pointer items-center gap-2 rounded-sm px-2 py-1.5 text-sm outline-none select-none data-[highlighted]:bg-accent data-[highlighted]:text-accent-foreground'
@@ -90,6 +95,24 @@ function canConfirm(match: TournamentMatch) {
   return props.canInteract(match) && match.status === 'submitted'
 }
 
+function confirmationReceived(match: TournamentMatch) {
+  return confirmAck.isReceived(match.id)
+}
+
+function confirmPending(match: TournamentMatch) {
+  return confirmAck.isPending(match.id)
+}
+
+function showConfirmButton(match: TournamentMatch) {
+  return canConfirm(match) || confirmationReceived(match) || confirmPending(match)
+}
+
+function confirmLabel(match: TournamentMatch) {
+  if (confirmationReceived(match)) return CONFIRMATION_RECEIVED_LABEL
+  if (confirmPending(match)) return 'Enregistrement…'
+  return match.is_forfeit ? 'Confirmer FF' : 'Confirmer'
+}
+
 function canCorrect(match: TournamentMatch) {
   return (
     props.isAdmin
@@ -121,7 +144,7 @@ function showPrimaryAction(match: TournamentMatch) {
   return (
     canStart(match)
     || canResume(match)
-    || canConfirm(match)
+    || showConfirmButton(match)
     || canCorrect(match)
     || (props.isAdmin && match.is_forfeit)
   )
@@ -332,12 +355,14 @@ watch(
                   Reprendre
                 </Button>
                 <Button
-                  v-else-if="canConfirm(match)"
+                  v-else-if="showConfirmButton(match)"
                   size="sm"
-                  variant="outline"
+                  :variant="confirmationReceived(match) ? 'default' : 'outline'"
+                  :class="{ 'btn-confirmation-received': confirmationReceived(match) }"
+                  :disabled="confirmPending(match) || confirmationReceived(match)"
                   @click="emit('confirm', match)"
                 >
-                  {{ match.is_forfeit ? 'Confirmer FF' : 'Confirmer' }}
+                  {{ confirmLabel(match) }}
                 </Button>
                 <Button
                   v-else-if="canCorrect(match)"

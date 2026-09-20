@@ -54,6 +54,7 @@ import { useAuth } from '@/composables/useAuth'
 import { useAdminEditMode } from '@/composables/useAdminEditMode'
 import { useAppSidePanel } from '@/composables/useAppSidePanel'
 import { useNetworkStatus } from '@/composables/useNetworkStatus'
+import { useServerConfirmAck } from '@/composables/useServerConfirmAck'
 import ArmyLogo from '@/components/ArmyLogo.vue'
 import ArmyListQuickActions from '@/components/ArmyListQuickActions.vue'
 import BracketTree from '@/components/BracketTree.vue'
@@ -99,6 +100,7 @@ const { isAdmin: isAdminAccount, hasPlayer, player, isAuthenticated, user, refre
 const { showAdminUi: isAdmin } = useAdminEditMode()
 const { setCustomSide } = useAppSidePanel()
 const { isOnline } = useNetworkStatus()
+const confirmAck = useServerConfirmAck()
 
 const detail = ref<TournamentDetail | null>(null)
 const rankedPlayers = ref<RankedPlayer[]>([])
@@ -1523,10 +1525,16 @@ async function resumePartie(match: TournamentMatch) {
 }
 
 async function confirmMatch(match: TournamentMatch) {
-  await act(
-    () => confirmTournamentMatch(match.id),
-    match.is_forfeit ? 'Forfait confirmé' : 'Résultat confirmé',
-  )
+  if (!confirmAck.begin(match.id)) return
+  try {
+    await confirmTournamentMatch(match.id)
+    confirmAck.succeed(match.id)
+    toast.success(match.is_forfeit ? 'Forfait confirmé' : 'Résultat confirmé')
+    await refresh()
+  } catch (error) {
+    confirmAck.fail(match.id)
+    toast.error(error instanceof Error ? error.message : 'Erreur')
+  }
 }
 
 async function correctMatch(match: TournamentMatch, form: TournamentMatchForm) {

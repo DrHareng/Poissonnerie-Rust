@@ -106,11 +106,11 @@ const viewerItems = computed((): ImageViewerItem[] => {
 })
 
 function updatesTo() {
-  return { name: 'ressources' as const, query: {} }
+  return { name: 'maps' as const, query: {} }
 }
 
 function mapTo(slug: string) {
-  return { name: 'ressources' as const, query: { map: slug } }
+  return { name: 'maps' as const, query: { map: slug } }
 }
 
 function persistMapSlug(slug: string | null) {

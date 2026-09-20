@@ -640,6 +640,15 @@
     @apply h-6 px-2 text-[11px];
   }
 
+  .btn-confirmation-received {
+    pointer-events: none;
+    cursor: default;
+    border-color: transparent !important;
+    background-color: #16a34a !important;
+    color: #fff !important;
+    opacity: 1 !important;
+  }
+
   .tournament-match-options-trigger {
     @apply size-7 shrink-0 px-0;
   }
@@ -1233,11 +1242,49 @@
   }
 
   .tts-map-tile-media {
-    @apply absolute inset-0 bg-muted/30;
+    @apply absolute inset-0 overflow-hidden bg-black;
+    container-type: size;
   }
 
-  .tts-map-tile-media img {
-    @apply size-full object-cover;
+  .tts-map-tile-photo {
+    @apply absolute top-0 left-0 size-full max-w-none object-cover;
+    animation-duration: 8s;
+    animation-timing-function: linear;
+    animation-iteration-count: infinite;
+    animation-direction: alternate;
+  }
+
+  .tts-map-tile-photo--x {
+    width: auto;
+    height: 100%;
+    animation-name: tts-map-slide-x;
+  }
+
+  .tts-map-tile-photo--y {
+    width: 100%;
+    height: auto;
+    animation-name: tts-map-slide-y;
+  }
+
+  .tts-map-tile-photo--zoom {
+    animation-name: tts-map-slide-zoom;
+  }
+
+  .tts-map-tile-photo--reverse {
+    animation-direction: alternate-reverse;
+  }
+
+  .tts-map-tile:hover .tts-map-tile-photo {
+    animation-play-state: paused;
+  }
+
+  .tts-map-tile-fade {
+    @apply pointer-events-none absolute inset-0 z-[1] bg-black opacity-0;
+    transition: opacity 0.5s ease-in-out;
+  }
+
+  .tts-map-tile-fade--on {
+    opacity: 1;
   }
 
   .tts-map-tile-empty {
@@ -1245,7 +1292,44 @@
   }
 
   .tts-map-tile-name {
-    @apply absolute inset-x-0 bottom-0 truncate bg-gradient-to-t from-black/80 via-black/45 to-transparent px-3 pb-2.5 pt-8 text-sm font-medium text-white;
+    @apply absolute inset-x-0 bottom-0 z-[2] truncate bg-gradient-to-t from-black/80 via-black/45 to-transparent px-3 pb-2.5 pt-8 text-sm font-medium text-white;
+  }
+
+  @keyframes tts-map-slide-x {
+    from {
+      transform: translateX(0);
+    }
+    to {
+      transform: translateX(calc(100cqw - 100%));
+    }
+  }
+
+  @keyframes tts-map-slide-y {
+    from {
+      transform: translateY(0);
+    }
+    to {
+      transform: translateY(calc(100cqh - 100%));
+    }
+  }
+
+  @keyframes tts-map-slide-zoom {
+    from {
+      transform: scale(1.22) translate(-4%, -4%);
+    }
+    to {
+      transform: scale(1.22) translate(4%, 4%);
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .tts-map-tile-photo {
+      animation: none;
+    }
+
+    .tts-map-tile-fade {
+      transition: none;
+    }
   }
 
   .secondary-card-grid {
@@ -1499,7 +1583,7 @@
   }
 
   .md-content .md-rule-ref {
-    @apply cursor-help border-b border-dotted border-muted-foreground/50 bg-transparent p-0 font-semibold text-muted-foreground;
+    @apply cursor-pointer border-b border-dotted border-muted-foreground/50 bg-transparent p-0 font-semibold text-muted-foreground;
   }
 
   .md-content .md-rule-ref:hover,
@@ -1511,8 +1595,20 @@
     @apply fixed z-50 max-h-[min(50vh,24rem)] overflow-y-auto rounded-lg p-3 text-sm shadow-lg;
   }
 
+  .md-rule-tooltip-header {
+    @apply mb-2 flex items-start justify-between gap-2;
+  }
+
   .md-rule-tooltip-title {
     @apply mb-2 font-semibold;
+  }
+
+  .md-rule-tooltip-header .md-rule-tooltip-title {
+    @apply mb-0 min-w-0 flex-1;
+  }
+
+  .md-rule-tooltip-close {
+    @apply -mr-1.5 -mt-1.5 text-muted-foreground;
   }
 
   .md-rule-tooltip-body {

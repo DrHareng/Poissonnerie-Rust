@@ -130,7 +130,7 @@ watch([initialized, isAdmin], ([ready, admin]) => {
               <CardTitle class="flex items-center gap-2 text-base">
                 <CircleAlert class="size-4 shrink-0 text-primary" />
                 <RouterLink
-                  :to="{ name: 'ressources', query: { map: report.map_slug } }"
+                  :to="{ name: 'maps', query: { map: report.map_slug } }"
                   class="truncate text-primary hover:underline"
                 >
                   {{ report.map_name }}

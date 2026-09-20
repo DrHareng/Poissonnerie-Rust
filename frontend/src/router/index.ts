@@ -56,10 +56,27 @@ export const router = createRouter({
       meta: { title: 'Scénarios' },
     },
     {
-      path: '/ressources',
-      name: 'ressources',
+      path: '/maps',
+      name: 'maps',
       component: RessourcesPage,
-      meta: { title: 'Ressources' },
+      meta: { title: 'Maps', tab: 'maps' },
+    },
+    {
+      path: '/links',
+      name: 'links',
+      component: RessourcesPage,
+      meta: { title: 'Liens', tab: 'liens' },
+    },
+    {
+      path: '/ressources',
+      redirect: (to) => {
+        const tab = String(to.query.tab ?? '')
+        if (tab === 'liens') {
+          return { name: 'links' }
+        }
+        const { tab: _tab, ...query } = to.query
+        return { name: 'maps', query }
+      },
     },
     {
       path: '/scenarios/secondaires',

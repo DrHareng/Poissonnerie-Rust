@@ -57,6 +57,7 @@ import {
   upsertLocalPartie,
   type LocalPartieDraft,
 } from '@/lib/partieOffline'
+import { waitConfirmationAck } from '@/composables/useServerConfirmAck'
 import { secondaryImageSrc } from '@/lib/secondaryImages'
 import { shufflePick } from '@/lib/shufflePick'
 import { formatPartieMatchup } from '@/lib/tournamentMatchDisplay'
@@ -788,30 +789,36 @@ function onRecorded() {
   reset()
 }
 
-async function onCompleteLocal(complete: {
-  outcome: MatchOutcome
-  player1_objectives: number
-  player1_survivors: number
-  player2_objectives: number
-  player2_survivors: number
-}) {
+async function onCompleteLocal(
+  complete: {
+    outcome: MatchOutcome
+    player1_objectives: number
+    player1_survivors: number
+    player2_objectives: number
+    player2_survivors: number
+  },
+  ack?: (serverAccepted: boolean) => void,
+) {
   persistDraft({ complete, partie_step: 'resultat' })
   saving.value = true
   try {
     if (isOnline.value) {
       const record = await syncLocalDraft()
       if (record && record.status === 'completed' && record.id > 0) {
+        ack?.(true)
         toast.success(
           record.counts_for_elo === false
             ? 'Résultat enregistré'
             : `${record.player1} ${Math.round(record.player1_old)} → ${Math.round(record.player1_new)} | ${record.player2} ${Math.round(record.player2_old)} → ${Math.round(record.player2_new)}`,
         )
+        await waitConfirmationAck()
         if (clientUuid.value) removeLocalPartie(clientUuid.value)
         reset()
         await router.push(`/matchs/${record.id}`)
         return
       }
     }
+    ack?.(false)
     toast.success(
       'Résultat enregistré localement. L’ELO sera calculé par le serveur à la synchro.',
     )
@@ -819,6 +826,7 @@ async function onCompleteLocal(complete: {
     await router.push('/matchs')
   } catch (error) {
     if (error instanceof TypeError || !isOnline.value) {
+      ack?.(false)
       toast.success(
         'Résultat enregistré localement. L’ELO sera calculé par le serveur à la synchro.',
       )
@@ -826,6 +834,7 @@ async function onCompleteLocal(complete: {
       await router.push('/matchs')
       return
     }
+    ack?.(false)
     toast.error(error instanceof Error ? error.message : 'Impossible d’enregistrer le résultat')
   } finally {
     saving.value = false

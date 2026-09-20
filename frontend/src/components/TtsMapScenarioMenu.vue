@@ -84,7 +84,7 @@ watch(
           />
           <DropdownMenuItem as-child>
             <RouterLink
-              :to="{ name: 'ressources', query: { map: variant.map_slug } }"
+              :to="{ name: 'maps', query: { map: variant.map_slug } }"
               :class="menuItemClass"
             >
               <Map class="size-4" />

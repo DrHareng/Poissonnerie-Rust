@@ -298,7 +298,7 @@ watch(canEditContent, (canEdit) => {
               <template v-if="showScenarioSelect && showMapSelect"> · </template>
               <RouterLink
                 v-if="showMapSelect"
-                :to="{ name: 'ressources', query: { map: variant.map_slug } }"
+                :to="{ name: 'maps', query: { map: variant.map_slug } }"
                 class="text-primary hover:underline"
               >
                 {{ variant.map_name }}
