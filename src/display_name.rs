@@ -37,6 +37,18 @@ impl<'a> PlayerDisplayResolver<'a> {
         self.resolve(&player.name)
     }
 
+    pub fn resolve_avatar_url(&self, player_name: &str) -> Option<String> {
+        let player = self.board.get_player(player_name).ok()?;
+        let username = player.discord_username.as_deref()?;
+        let user = self.users.get_by_username(username).ok().flatten()?;
+        let url = user.effective_avatar_url().trim();
+        if url.is_empty() {
+            None
+        } else {
+            Some(url.to_string())
+        }
+    }
+
     fn resolve_uncached(
         board: &Leaderboard,
         users: &UserStore,
@@ -87,6 +99,10 @@ impl<'a> PlayerDisplayResolver<'a> {
                 player.player_display_name = Some(self.resolve(&player.player_name));
                 player.army_id = registration_army_id(&detail.registrations, &player.player_name)
                     .or(player.army_id);
+                player.avatar_url = self.resolve_avatar_url(&player.player_name);
+                player.army_matches = player
+                    .army_id
+                    .map(|army_id| self.board.player_army_match_count(&player.player_name, army_id));
             }
         }
 
@@ -179,6 +195,10 @@ mod tests {
 
         let resolver = PlayerDisplayResolver::new(&board, &users);
         assert_eq!(resolver.resolve("Dr Hareng"), "Capitaine Hareng");
+        assert_eq!(
+            resolver.resolve_avatar_url("Dr Hareng").as_deref(),
+            Some("https://example.test/a.png")
+        );
 
         let _ = std::fs::remove_file(path);
     }

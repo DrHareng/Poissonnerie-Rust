@@ -1699,6 +1699,26 @@ impl Leaderboard {
         Ok(top)
     }
 
+    pub fn player_army_match_count(&self, name: &str, army_id: u32) -> u32 {
+        let key = normalize_name(name);
+        self.matches
+            .iter()
+            .filter(|record| {
+                if record.status != MatchStatus::Completed || !record.counts_for_elo {
+                    return false;
+                }
+                let player_army = if normalize_name(&record.player1) == key {
+                    record.player1_army_id
+                } else if normalize_name(&record.player2) == key {
+                    record.player2_army_id
+                } else {
+                    None
+                };
+                player_army == Some(army_id)
+            })
+            .count() as u32
+    }
+
     pub fn player_army_stats(&self, name: &str) -> Result<Vec<PlayerArmyStats>> {
         let key = normalize_name(name);
         if !self.players.contains_key(&key) {
@@ -2872,6 +2892,9 @@ mod tests {
         assert_eq!(top[0].matches, 2);
         assert_eq!(top[1].army_id, 102);
         assert_eq!(top[1].matches, 1);
+        assert_eq!(board.player_army_match_count("Alice", 101), 2);
+        assert_eq!(board.player_army_match_count("Alice", 102), 1);
+        assert_eq!(board.player_army_match_count("Alice", 999), 0);
     }
 
     #[test]

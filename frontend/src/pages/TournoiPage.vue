@@ -61,6 +61,7 @@ import BracketTree from '@/components/BracketTree.vue'
 import PlayerLink from '@/components/PlayerLink.vue'
 import PlayerPicker from '@/components/PlayerPicker.vue'
 import PoolMatchesTable from '@/components/PoolMatchesTable.vue'
+import PoolPlayerCards from '@/components/PoolPlayerCards.vue'
 import TournamentPoolsPreview from '@/components/TournamentPoolsPreview.vue'
 import TournamentMatchCard from '@/components/TournamentMatchCard.vue'
 import TournamentScenarioPicker from '@/components/TournamentScenarioPicker.vue'
@@ -327,7 +328,7 @@ const tournamentTabs = computed(() => {
   if (showPoulesTab.value) {
     tabs.push({
       id: 'poules',
-      label: tournamentStructure.value === 'swiss' ? 'Rondes suisses' : 'Phase de poules',
+      label: tournamentStructure.value === 'swiss' ? 'Rondes suisses' : 'Poules',
     })
   }
   if (showInscriptionsTab.value) {
@@ -348,6 +349,17 @@ const tournamentTabs = computed(() => {
 function setActiveTab(tab: TournamentTabId) {
   userPickedTab.value = true
   activeTab.value = tab
+  const query = { ...route.query, tab }
+  if (tab === 'poules' && selectedPoolId.value != null) {
+    query.poolId = String(selectedPoolId.value)
+  } else {
+    delete query.poolId
+  }
+  const sameTab = String(route.query.tab ?? '') === String(query.tab ?? '')
+  const samePool = String(route.query.poolId ?? '') === String(query.poolId ?? '')
+  if (!sameTab || !samePool) {
+    void router.replace({ query })
+  }
 }
 
 function defaultTournamentTab(tabs: { id: TournamentTabId }[]): TournamentTabId {
@@ -361,24 +373,33 @@ function poolMatchesForPool(poolId: number) {
   return poolMatches.value.filter((match) => match.pool_id === poolId)
 }
 
-const poulesListTo = computed(() => {
-  const query = { ...route.query }
+function showPoolsOverview() {
+  userPickedTab.value = true
+  activeTab.value = 'poules'
+  selectedPoolId.value = null
+  const query = { ...route.query, tab: 'poules' }
   delete query.poolId
-  query.tab = 'poules'
-  return { query }
-})
+  const sameTab = String(route.query.tab ?? '') === 'poules'
+  const samePool = route.query.poolId == null
+  if (!sameTab || !samePool) {
+    void router.replace({ query })
+  }
+}
 
 function selectPool(poolId: number) {
   userPickedTab.value = true
   activeTab.value = 'poules'
   selectedPoolId.value = poolId
-  void router.push({
-    query: {
-      ...route.query,
-      tab: 'poules',
-      poolId: String(poolId),
-    },
-  })
+  const query = {
+    ...route.query,
+    tab: 'poules',
+    poolId: String(poolId),
+  }
+  const sameTab = String(route.query.tab ?? '') === 'poules'
+  const samePool = String(route.query.poolId ?? '') === String(poolId)
+  if (!sameTab || !samePool) {
+    void router.replace({ query })
+  }
 }
 
 function selectedPool() {
@@ -392,7 +413,9 @@ function applyPoolDeepLink() {
     Number.isFinite(poolId)
     && poolId > 0
     && detail.value.pools.some((pool) => pool.id === poolId)
-  selectedPoolId.value = hasPool ? poolId : null
+  if (hasPool) {
+    selectedPoolId.value = poolId
+  }
 
   const wantsPoules = route.query.tab === 'poules' || hasPool
   if (!wantsPoules) return
@@ -400,6 +423,9 @@ function applyPoolDeepLink() {
 
   userPickedTab.value = true
   activeTab.value = 'poules'
+  if (!hasPool) {
+    selectedPoolId.value = null
+  }
 }
 
 const bracketMatches = computed(() =>
@@ -2367,23 +2393,28 @@ onMounted(refresh)
             class="neon-panel"
           >
             <CardHeader>
-              <nav
-                v-if="selectedPoolId && selectedPool()"
-                class="pool-breadcrumb"
-                aria-label="Navigation des poules"
-              >
-                <RouterLink class="pool-breadcrumb-link" :to="poulesListTo" replace>
+              <nav class="pool-tabs" aria-label="Poules">
+                <button
+                  type="button"
+                  class="pool-tab"
+                  :class="{ 'pool-tab--active': !selectedPoolId }"
+                  :aria-current="!selectedPoolId ? 'page' : undefined"
+                  @click="showPoolsOverview"
+                >
                   Poules
-                </RouterLink>
-                <span class="pool-breadcrumb-sep" aria-hidden="true">›</span>
-                <span class="pool-breadcrumb-current">{{ selectedPool()!.name }}</span>
+                </button>
+                <button
+                  v-for="pool in sortedPools"
+                  :key="pool.id"
+                  type="button"
+                  class="pool-tab"
+                  :class="{ 'pool-tab--active': selectedPoolId === pool.id }"
+                  :aria-current="selectedPoolId === pool.id ? 'page' : undefined"
+                  @click="selectPool(pool.id)"
+                >
+                  {{ pool.name }}
+                </button>
               </nav>
-              <CardTitle v-else>
-                Poules
-              </CardTitle>
-              <CardDescription v-if="!selectedPoolId">
-                Cliquez sur une poule pour afficher ses matchs.
-              </CardDescription>
             </CardHeader>
             <CardContent class="grid gap-3">
               <TournamentPoolsPreview
@@ -2400,6 +2431,10 @@ onMounted(refresh)
                 v-else-if="selectedPool()"
                 class="pool-detail"
               >
+                <PoolPlayerCards
+                  v-if="selectedPool()!.players.length > 0"
+                  :players="selectedPool()!.players"
+                />
                 <PoolMatchesTable
                   v-if="poolMatchesForPool(selectedPoolId!).length > 0"
                   :matches="poolMatchesForPool(selectedPoolId!)"

@@ -455,6 +455,10 @@ pub struct PoolPlayer {
     pub losses: u32,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub rating: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub avatar_url: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub army_matches: Option<u32>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1305,6 +1309,8 @@ mod tests {
                 draws: 0,
                 losses: 0,
                 rating: None,
+                avatar_url: None,
+                army_matches: None,
             }
         }
 

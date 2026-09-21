@@ -729,22 +729,6 @@
     @apply border-primary/30 bg-primary/5;
   }
 
-  .pool-breadcrumb {
-    @apply flex items-center gap-1.5 text-sm;
-  }
-
-  .pool-breadcrumb-link {
-    @apply border-0 bg-transparent p-0 font-medium text-primary transition hover:underline;
-  }
-
-  .pool-breadcrumb-sep {
-    @apply text-muted-foreground;
-  }
-
-  .pool-breadcrumb-current {
-    @apply font-semibold text-foreground;
-  }
-
   .pool-standings-table {
     @apply w-full text-sm;
   }
@@ -834,6 +818,69 @@
 
   .pool-detail-header {
     @apply flex items-center justify-between gap-3 border-b border-border pb-3;
+  }
+
+  .pool-tabs {
+    @apply flex min-w-0 gap-1 overflow-x-auto;
+  }
+
+  .pool-tab {
+    @apply shrink-0 rounded-md px-3 py-1.5 text-sm font-medium text-muted-foreground transition hover:text-foreground;
+  }
+
+  .pool-tab--active {
+    @apply bg-primary/15 text-primary shadow-sm;
+  }
+
+  .pool-player-cards {
+    @apply grid grid-cols-3 gap-2;
+  }
+
+  .pool-player-card {
+    @apply min-w-0 overflow-visible;
+  }
+
+  .pool-player-card-row {
+    @apply flex min-w-0 items-center gap-1.5;
+  }
+
+  .pool-player-card-row--army {
+    padding-left: 30px;
+  }
+
+  .pool-player-card-avatar {
+    @apply size-7 shrink-0 rounded-full object-cover;
+  }
+
+  .pool-player-card-avatar-fallback {
+    @apply flex size-7 shrink-0 items-center justify-center rounded-full bg-muted text-[11px] font-semibold text-muted-foreground;
+  }
+
+  .pool-player-card-name {
+    @apply min-w-0 flex-1;
+  }
+
+  .pool-player-card-army-logo {
+    @apply flex size-5 shrink-0 items-center justify-center;
+  }
+
+  .pool-player-card-army {
+    @apply min-w-0 flex-1 truncate whitespace-nowrap text-muted-foreground;
+  }
+
+  .pool-player-card-army:hover,
+  .pool-player-card-army:focus-visible {
+    overflow: visible;
+    text-overflow: unset;
+    position: relative;
+    z-index: 8;
+    background-color: var(--popover);
+    box-shadow: 0 0 0 4px var(--popover);
+    border-radius: 0.2rem;
+  }
+
+  .pool-player-card-stat {
+    @apply shrink-0 text-xs tabular-nums text-muted-foreground;
   }
 
   .pool-matches-table {

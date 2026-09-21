@@ -4119,6 +4119,8 @@ impl TournamentStore {
                 draws: 0,
                 losses: 0,
                 rating: None,
+                avatar_url: None,
+                army_matches: None,
             });
         }
 
@@ -4422,6 +4424,8 @@ impl TournamentStore {
                 draws: 0,
                 losses: 0,
                 rating: row.get(6)?,
+                avatar_url: None,
+                army_matches: None,
             })
         })?;
         rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)

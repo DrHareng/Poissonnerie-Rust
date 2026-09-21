@@ -342,6 +342,8 @@ export interface PoolPlayer {
   draws: number
   losses: number
   rating?: number | null
+  avatar_url?: string | null
+  army_matches?: number | null
 }
 
 export interface Pool {
