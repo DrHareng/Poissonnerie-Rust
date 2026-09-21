@@ -308,7 +308,7 @@ onMounted(async () => {
     toast.error(
       error instanceof Error
         ? error.message
-        : 'Impossible de charger le module TTS',
+        : 'Impossible de charger Map TTS',
     )
   } finally {
     loading.value = false
@@ -322,7 +322,7 @@ watch(
     if (!slug) {
       detail.value = null
       emit('mapChange', null)
-      document.title = pageTitle('Module TTS')
+      document.title = pageTitle('Map TTS')
       return
     }
     const summary = maps.value.find((map) => map.slug === slug)
@@ -352,7 +352,7 @@ watch(selectedSlug, () => {
   <div ref="scrollEl" class="page-panel-scroll min-h-0 flex-1">
     <TtsModuleUpdatesPanel v-if="apiOnline" :mobile="!selectedSlug" />
     <p v-if="!apiOnline" class="shrink-0 text-sm text-muted-foreground">
-      Impossible de charger le module TTS.
+      Impossible de charger Map TTS.
     </p>
     <p v-else-if="loading" class="shrink-0 text-sm text-muted-foreground">
       Chargement…

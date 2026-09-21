@@ -107,7 +107,7 @@ const links: NavLink[] = [
     label: 'Maps & liens',
     icon: BookOpen,
     children: [
-      { to: { name: 'maps' }, label: 'Module TTS' },
+      { to: { name: 'maps' }, label: 'Map TTS' },
       { to: { name: 'links' }, label: 'Liens' },
     ],
   },

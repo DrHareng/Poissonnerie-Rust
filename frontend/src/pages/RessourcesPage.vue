@@ -20,7 +20,7 @@ import {
 type MapsLinksTabId = 'maps' | 'liens'
 
 const tabs = [
-  { id: 'maps' as const, label: 'Module TTS', routeName: 'maps' as const },
+  { id: 'maps' as const, label: 'Map TTS', routeName: 'maps' as const },
   { id: 'liens' as const, label: 'Liens', routeName: 'links' as const },
 ]
 
@@ -42,7 +42,7 @@ const activeTabLabel = computed(() => {
   if (activeTab.value === 'maps' && currentMap.value) {
     return currentMap.value.name
   }
-  return tabs.find((tab) => tab.id === activeTab.value)?.label ?? 'Module TTS'
+  return tabs.find((tab) => tab.id === activeTab.value)?.label ?? 'Map TTS'
 })
 
 function setActiveTab(tab: MapsLinksTabId) {
@@ -87,7 +87,7 @@ onMounted(() => {
 })
 
 watch(activeTab, (tab) => {
-  document.title = pageTitle(tab === 'liens' ? 'Liens' : 'Module TTS')
+  document.title = pageTitle(tab === 'liens' ? 'Liens' : 'Map TTS')
   if (tab === 'liens') {
     void loadLiens()
   }
