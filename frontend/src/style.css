@@ -791,13 +791,17 @@
   }
 
   .pool-col-player {
-    @apply relative z-0 min-w-0 overflow-hidden text-left;
+    @apply min-w-0 text-left;
+  }
+
+  .pool-standings-table .pool-col-player {
+    @apply relative z-0 overflow-hidden;
     max-width: 0;
     width: 100%;
   }
 
-  .pool-col-player:hover,
-  .pool-col-player:focus-within {
+  .pool-standings-table .pool-col-player:hover,
+  .pool-standings-table .pool-col-player:focus-within {
     overflow: visible;
     z-index: 8;
   }
