@@ -5,17 +5,12 @@ import { toast } from 'vue-sonner'
 import { CircleAlert, Copy, Dices, Download, Plus, Trash2 } from '@lucide/vue'
 import {
   createTtsMap,
-  createTtsModuleUpdate,
   deleteTtsMap,
   deleteTtsMapPicture,
-  deleteTtsModuleUpdate,
-  fetchTtsContentImages,
   fetchTtsMap,
   fetchTtsMaps,
-  fetchTtsModuleUpdates,
   renameTtsMap,
   updatePrefs,
-  updateTtsModuleUpdate,
   uploadTtsMapJson,
   uploadTtsMapPicture,
 } from '@/lib/api'
@@ -23,31 +18,21 @@ import { withBase } from '@/lib/basePath'
 import { pageTitle } from '@/lib/pageTitle'
 import { copyTextToClipboard } from '@/lib/utils'
 import type {
-  TtsContentImage,
   TtsMapDetail,
   TtsMapPicture,
   TtsMapSummary,
-  TtsModuleUpdate,
 } from '@/types/elo'
-import AdminContentEditor from '@/components/AdminContentEditor.vue'
 import ImageViewer, {
   type ImageViewerItem,
 } from '@/components/ImageViewer.vue'
-import MarkdownContent from '@/components/MarkdownContent.vue'
-import MarkdownEditor from '@/components/MarkdownEditor.vue'
 import TtsMapReportDialog from '@/components/TtsMapReportDialog.vue'
 import TtsMapTile from '@/components/TtsMapTile.vue'
 import TtsMapVariantsBlock from '@/components/TtsMapVariantsBlock.vue'
+import TtsModuleUpdatesPanel from '@/components/TtsModuleUpdatesPanel.vue'
 import { useAdminEditMode } from '@/composables/useAdminEditMode'
 import { useAuth } from '@/composables/useAuth'
+import { useVirtualGrid } from '@/composables/useVirtualGrid'
 import { Button } from '@/components/ui/button'
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 
 const emit = defineEmits<{
@@ -60,16 +45,12 @@ const { canEditContent } = useAdminEditMode()
 const { isAuthenticated } = useAuth()
 
 const maps = ref<TtsMapSummary[]>([])
-const updates = ref<TtsModuleUpdate[]>([])
 const detail = ref<TtsMapDetail | null>(null)
-const contentImages = ref<TtsContentImage[]>([])
 const loading = ref(true)
 const detailLoading = ref(false)
 const apiOnline = ref(true)
 const newMapName = ref('')
 const creatingMap = ref(false)
-const newUpdateBody = ref('')
-const creatingUpdate = ref(false)
 const renaming = ref(false)
 const renameDraft = ref('')
 const uploadingJson = ref(false)
@@ -79,13 +60,14 @@ const picturesInput = ref<HTMLInputElement | null>(null)
 const imageViewerOpen = ref(false)
 const imageViewerIndex = ref(0)
 const reportOpen = ref(false)
+const scrollEl = ref<HTMLElement | null>(null)
+const gridEl = ref<HTMLElement | null>(null)
 
-const extraImages = computed(() =>
-  contentImages.value.map((image) => ({
-    label: image.label,
-    value: image.path,
-  })),
-)
+const { visibleItems, paddingTop, paddingBottom } = useVirtualGrid({
+  items: maps,
+  scrollEl,
+  gridEl,
+})
 
 const selectedSlug = computed(() => {
   const raw = route.query.map
@@ -130,16 +112,6 @@ function drawMap() {
   selectMap(pick.slug)
 }
 
-function formatUpdateDate(timestamp: number) {
-  return new Intl.DateTimeFormat('fr-FR', {
-    day: 'numeric',
-    month: 'long',
-    year: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-  }).format(new Date(timestamp * 1000))
-}
-
 function openPicture(index: number) {
   if (!viewerItems.value.length) return
   imageViewerIndex.value = index
@@ -156,22 +128,8 @@ async function copyPictureToken(picture: TtsMapPicture) {
   }
 }
 
-async function loadContentImages() {
-  if (!canEditContent.value) return
-  try {
-    contentImages.value = await fetchTtsContentImages()
-  } catch {
-    contentImages.value = []
-  }
-}
-
 async function loadLists() {
-  const [mapList, updateList] = await Promise.all([
-    fetchTtsMaps(),
-    fetchTtsModuleUpdates(),
-  ])
-  maps.value = mapList
-  updates.value = updateList
+  maps.value = await fetchTtsMaps()
 }
 
 async function loadDetail(id: number) {
@@ -260,7 +218,6 @@ async function removeMap() {
     toast.success('Map supprimée')
     selectMap(null)
     detail.value = null
-    await loadContentImages()
   } catch (error) {
     toast.error(
       error instanceof Error ? error.message : 'Impossible de supprimer la map',
@@ -314,7 +271,6 @@ async function onPicturesSelected(event: Event) {
     toast.success(
       files.length > 1 ? 'Photos enregistrées' : 'Photo enregistrée',
     )
-    await loadContentImages()
   } catch (error) {
     toast.error(
       error instanceof Error ? error.message : 'Impossible d’envoyer les photos',
@@ -335,56 +291,9 @@ async function removePicture(picture: TtsMapPicture) {
       map.id === detail.value?.id ? summaryFromDetail(detail.value) : map,
     )
     toast.success('Photo supprimée')
-    await loadContentImages()
   } catch (error) {
     toast.error(
       error instanceof Error ? error.message : 'Impossible de supprimer la photo',
-    )
-  }
-}
-
-async function createUpdate() {
-  const body = newUpdateBody.value.trim()
-  if (!body) {
-    toast.error('La description est requise')
-    return
-  }
-  creatingUpdate.value = true
-  try {
-    const created = await createTtsModuleUpdate(body)
-    updates.value = [created, ...updates.value]
-    newUpdateBody.value = ''
-    toast.success('Mise à jour publiée')
-  } catch (error) {
-    toast.error(
-      error instanceof Error
-        ? error.message
-        : 'Impossible de publier la mise à jour',
-    )
-  } finally {
-    creatingUpdate.value = false
-  }
-}
-
-async function saveUpdate(id: number, payload: { body: string }) {
-  const updated = await updateTtsModuleUpdate(id, payload.body)
-  updates.value = updates.value.map((item) =>
-    item.id === id ? updated : item,
-  )
-  toast.success('Mise à jour enregistrée')
-}
-
-async function removeUpdate(update: TtsModuleUpdate) {
-  if (!window.confirm('Supprimer cette mise à jour ?')) return
-  try {
-    await deleteTtsModuleUpdate(update.id)
-    updates.value = updates.value.filter((item) => item.id !== update.id)
-    toast.success('Mise à jour supprimée')
-  } catch (error) {
-    toast.error(
-      error instanceof Error
-        ? error.message
-        : 'Impossible de supprimer la mise à jour',
     )
   }
 }
@@ -404,11 +313,6 @@ onMounted(async () => {
   } finally {
     loading.value = false
   }
-  await loadContentImages()
-})
-
-watch(canEditContent, (canEdit) => {
-  if (canEdit) void loadContentImages()
 })
 
 watch(
@@ -445,7 +349,8 @@ watch(selectedSlug, () => {
 </script>
 
 <template>
-  <div class="page-panel-scroll min-h-0 flex-1">
+  <div ref="scrollEl" class="page-panel-scroll min-h-0 flex-1">
+    <TtsModuleUpdatesPanel v-if="apiOnline" :mobile="!selectedSlug" />
     <p v-if="!apiOnline" class="shrink-0 text-sm text-muted-foreground">
       Impossible de charger le module TTS.
     </p>
@@ -543,6 +448,8 @@ watch(selectedSlug, () => {
                   :src="withBase(picture.url)"
                   :alt="picture.original_name"
                   class="max-h-80 w-full object-contain"
+                  loading="lazy"
+                  decoding="async"
                 />
               </button>
               <figcaption
@@ -645,78 +552,17 @@ watch(selectedSlug, () => {
         <p v-if="maps.length === 0" class="text-sm text-muted-foreground">
           Aucune map pour l’instant.
         </p>
-        <div v-else class="tts-map-grid">
-          <TtsMapTile v-for="map in maps" :key="map.id" :map="map" />
+        <div
+          v-else
+          ref="gridEl"
+          class="tts-map-grid"
+          :style="{
+            paddingTop: `${paddingTop}px`,
+            paddingBottom: `${paddingBottom}px`,
+          }"
+        >
+          <TtsMapTile v-for="map in visibleItems" :key="map.id" :map="map" />
         </div>
-
-        <section class="grid gap-3">
-          <h2 class="page-title text-xl">Mises à jour</h2>
-          <Card v-if="canEditContent" class="neon-panel shrink-0">
-            <CardHeader>
-              <CardTitle>Nouvelle mise à jour</CardTitle>
-            </CardHeader>
-            <CardContent class="space-y-3">
-              <MarkdownEditor
-                v-model="newUpdateBody"
-                :rows="8"
-                simple
-                :extra-images="extraImages"
-              />
-              <div class="flex justify-end">
-                <Button
-                  type="button"
-                  size="sm"
-                  :disabled="creatingUpdate"
-                  @click="createUpdate"
-                >
-                  {{ creatingUpdate ? 'Publication…' : 'Publier' }}
-                </Button>
-              </div>
-            </CardContent>
-          </Card>
-
-          <p v-if="updates.length === 0" class="text-sm text-muted-foreground">
-            Aucune mise à jour pour l’instant.
-          </p>
-
-          <Card
-            v-for="update in updates"
-            :key="update.id"
-            class="neon-panel relative shrink-0"
-          >
-            <CardHeader :class="{ 'pr-28': canEditContent }">
-              <CardTitle class="text-base font-medium">
-                {{ formatUpdateDate(update.created_at) }}
-              </CardTitle>
-              <CardDescription v-if="update.updated_at !== update.created_at">
-                Modifié le {{ formatUpdateDate(update.updated_at) }}
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              <AdminContentEditor
-                :can-edit="canEditContent"
-                :body="update.body_md"
-                :rows="8"
-                simple-markdown
-                :extra-images="extraImages"
-                :persist="(payload) => saveUpdate(update.id, payload)"
-              >
-                <MarkdownContent :source="update.body_md" />
-              </AdminContentEditor>
-              <Button
-                v-if="canEditContent"
-                type="button"
-                variant="ghost"
-                size="sm"
-                class="absolute top-3 right-20 z-10"
-                @click="removeUpdate(update)"
-              >
-                <Trash2 class="size-3.5" />
-                Supprimer
-              </Button>
-            </CardContent>
-          </Card>
-        </section>
       </div>
     </template>
 

@@ -15,6 +15,8 @@ pub const MAX_PICTURE_BYTES: usize = 8 * 1024 * 1024;
 pub const MAX_UPDATE_CHARS: usize = 80_000;
 pub const MAX_REPORT_CHARS: usize = 8_000;
 pub const MAX_NAME_CHARS: usize = 80;
+pub const THUMB_MAX_PX: u32 = 512;
+const THUMB_JPEG_QUALITY: u8 = 72;
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub struct TtsMapSummary {
@@ -36,6 +38,7 @@ pub struct TtsMapPicture {
     pub filename: String,
     pub original_name: String,
     pub url: String,
+    pub thumb_url: String,
     pub created_at: u64,
 }
 
@@ -169,13 +172,13 @@ impl TtsMapStore {
             let filename: String = row.get(2)?;
             Ok((
                 map_id,
-                TtsMapPicture {
-                    id: row.get(1)?,
-                    url: picture_url(map_id, &filename),
+                map_picture(
+                    map_id,
+                    row.get(1)?,
                     filename,
-                    original_name: row.get(3)?,
-                    created_at: row.get(4)?,
-                },
+                    row.get(3)?,
+                    row.get(4)?,
+                ),
             ))
         })?;
         for item in pictures {
@@ -370,6 +373,7 @@ impl TtsMapStore {
         let path = dir.join(&stored);
         fs::write(&path, bytes)
             .with_context(|| format!("impossible d'écrire {}", path.display()))?;
+        let _ = ensure_thumbnail(&path);
         let now = now_unix();
         let conn = self.conn.lock().unwrap();
         let original = Path::new(original_name)
@@ -430,7 +434,9 @@ impl TtsMapStore {
             .get_map_in_conn(&conn, map_id)?
             .with_context(|| "map introuvable")?;
         drop(conn);
-        let _ = fs::remove_file(path);
+        let thumb = thumbnail_file_path(&path);
+        let _ = fs::remove_file(&path);
+        let _ = fs::remove_file(thumb);
         Ok(detail)
     }
 
@@ -969,13 +975,13 @@ impl TtsMapStore {
         let pictures = pic_stmt
             .query_map(params![id], |row| {
                 let filename: String = row.get(1)?;
-                Ok(TtsMapPicture {
-                    id: row.get(0)?,
-                    url: picture_url(id, &filename),
+                Ok(map_picture(
+                    id,
+                    row.get(0)?,
                     filename,
-                    original_name: row.get(2)?,
-                    created_at: row.get(3)?,
-                })
+                    row.get(2)?,
+                    row.get(3)?,
+                ))
             })?
             .collect::<Result<Vec<_>, _>>()?;
 
@@ -1011,6 +1017,79 @@ pub fn picture_url(map_id: i64, filename: &str) -> String {
         "/api/tts-maps/{map_id}/pictures/{}",
         urlencoding::encode(filename)
     )
+}
+
+fn map_picture(
+    map_id: i64,
+    id: i64,
+    filename: String,
+    original_name: String,
+    created_at: u64,
+) -> TtsMapPicture {
+    let url = picture_url(map_id, &filename);
+    TtsMapPicture {
+        id,
+        thumb_url: format!("{url}?thumb=1"),
+        filename,
+        original_name,
+        url,
+        created_at,
+    }
+}
+
+pub fn thumbnail_file_path(original: &Path) -> PathBuf {
+    let stem = original
+        .file_stem()
+        .and_then(|name| name.to_str())
+        .unwrap_or("thumb");
+    original
+        .parent()
+        .unwrap_or_else(|| Path::new("."))
+        .join("thumbs")
+        .join(format!("{stem}.jpg"))
+}
+
+fn should_reuse_thumb(original: &Path, thumb: &Path) -> bool {
+    let Ok(thumb_meta) = thumb.metadata() else {
+        return false;
+    };
+    let Ok(orig_meta) = original.metadata() else {
+        return true;
+    };
+    match (thumb_meta.modified(), orig_meta.modified()) {
+        (Ok(thumb_mtime), Ok(orig_mtime)) => thumb_mtime >= orig_mtime,
+        _ => true,
+    }
+}
+
+pub fn ensure_thumbnail(original: &Path) -> Result<PathBuf> {
+    let thumb = thumbnail_file_path(original);
+    if should_reuse_thumb(original, &thumb) {
+        return Ok(thumb);
+    }
+    if let Some(parent) = thumb.parent() {
+        fs::create_dir_all(parent)
+            .with_context(|| format!("impossible de créer {}", parent.display()))?;
+    }
+    let bytes = fs::read(original)
+        .with_context(|| format!("impossible de lire {}", original.display()))?;
+    let img = image::load_from_memory(&bytes)
+        .with_context(|| format!("image illisible: {}", original.display()))?;
+    let rgb = img.thumbnail(THUMB_MAX_PX, THUMB_MAX_PX).into_rgb8();
+    let mut out = Vec::new();
+    let mut encoder =
+        image::codecs::jpeg::JpegEncoder::new_with_quality(&mut out, THUMB_JPEG_QUALITY);
+    encoder
+        .encode(
+            rgb.as_raw(),
+            rgb.width(),
+            rgb.height(),
+            image::ExtendedColorType::Rgb8,
+        )
+        .context("impossible d'encoder la miniature")?;
+    fs::write(&thumb, out)
+        .with_context(|| format!("impossible d'écrire {}", thumb.display()))?;
+    Ok(thumb)
 }
 
 pub fn mime_from_filename(name: &str) -> &'static str {
@@ -1355,6 +1434,7 @@ mod tests {
         assert_eq!(listed.len(), 1);
         assert_eq!(listed[0].pictures.len(), 1);
         assert_eq!(listed[0].pictures[0].filename, "Vue_nord.png");
+        assert!(listed[0].pictures[0].thumb_url.ends_with("?thumb=1"));
 
         let update = store.create_update("Nouveau pack TTS").unwrap();
         assert_eq!(store.list_updates().unwrap().len(), 1);
@@ -1469,5 +1549,26 @@ mod tests {
         assert!(store.list_variants(None, None, None).unwrap().is_empty());
         assert!(!json_path.exists());
         let _ = fs::remove_file(&path);
+    }
+
+    #[test]
+    fn generates_jpeg_thumbnail() {
+        let dir = std::env::temp_dir().join(format!(
+            "poissonnerie-tts-thumb-{}-{}",
+            std::process::id(),
+            TEST_SEQ.fetch_add(1, Ordering::Relaxed)
+        ));
+        fs::create_dir_all(&dir).unwrap();
+        let original = dir.join("photo.png");
+        image::RgbImage::from_pixel(64, 48, image::Rgb([12, 34, 56]))
+            .save(&original)
+            .unwrap();
+        let thumb = ensure_thumbnail(&original).unwrap();
+        assert!(thumb.exists());
+        assert_eq!(thumb.extension().and_then(|ext| ext.to_str()), Some("jpg"));
+        let decoded = image::open(&thumb).unwrap();
+        assert!(decoded.width() <= THUMB_MAX_PX);
+        assert!(decoded.height() <= THUMB_MAX_PX);
+        let _ = fs::remove_dir_all(&dir);
     }
 }

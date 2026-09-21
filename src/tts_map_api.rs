@@ -208,9 +208,25 @@ async fn upload_map_picture(
         .map_err(|error| ApiError::bad_request(error.to_string()))
 }
 
+#[derive(Debug, Deserialize)]
+struct PictureQuery {
+    #[serde(default)]
+    thumb: Option<String>,
+}
+
+impl PictureQuery {
+    fn wants_thumb(&self) -> bool {
+        matches!(
+            self.thumb.as_deref(),
+            Some("1") | Some("true") | Some("yes") | Some("")
+        )
+    }
+}
+
 async fn serve_map_picture(
     State(state): State<AppState>,
     Path((id, filename)): Path<(i64, String)>,
+    Query(query): Query<PictureQuery>,
 ) -> Result<Response, ApiError> {
     let Some(path) = state
         .tts_maps
@@ -219,6 +235,13 @@ async fn serve_map_picture(
     else {
         return Err(ApiError::bad_request("image introuvable"));
     };
+    if query.wants_thumb() {
+        if let Ok(thumb) = tts_map::ensure_thumbnail(&path) {
+            let bytes =
+                std::fs::read(&thumb).map_err(|_| ApiError::bad_request("image introuvable"))?;
+            return file_response(bytes, "image/jpeg", None);
+        }
+    }
     let bytes = std::fs::read(&path).map_err(|_| ApiError::bad_request("image introuvable"))?;
     file_response(bytes, tts_map::mime_from_filename(&filename), None)
 }

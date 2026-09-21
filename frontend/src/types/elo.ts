@@ -496,6 +496,7 @@ export interface TtsMapPicture {
   filename: string
   original_name: string
   url: string
+  thumb_url?: string
   created_at: number
 }
 

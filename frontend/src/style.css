@@ -1235,6 +1235,7 @@
 
   .tts-map-grid {
     @apply grid grid-cols-2 gap-3 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4;
+    align-content: start;
   }
 
   .tts-map-tile {

@@ -228,6 +228,23 @@ function reportFor(playerName: string) {
   return null
 }
 
+function reportHasVisibleText(playerName: string): boolean {
+  return Boolean(reportFor(playerName)?.body_md?.trim())
+}
+
+function showReportCard(playerName: string): boolean {
+  return canEditReport(playerName) || reportHasVisibleText(playerName)
+}
+
+const showBothReportCards = computed(
+  () =>
+    Boolean(
+      match.value
+      && showReportCard(match.value.player1)
+      && showReportCard(match.value.player2),
+    ),
+)
+
 function crButtonLabel(playerName: string): string {
   const report = reportFor(playerName)
   if (report?.status === 'draft') return 'Continuer le rapport'
@@ -798,8 +815,16 @@ onMounted(loadMatch)
         </CardContent>
       </Card>
 
-      <div class="grid grid-cols-1 gap-4 lg:grid-cols-2">
-        <Card id="cr-player1" class="neon-panel relative scroll-mt-24">
+      <div
+        v-if="showReportCard(match.player1) || showReportCard(match.player2)"
+        class="grid grid-cols-1 gap-4"
+        :class="{ 'lg:grid-cols-2': showBothReportCards }"
+      >
+        <Card
+          v-if="showReportCard(match.player1)"
+          id="cr-player1"
+          class="neon-panel relative scroll-mt-24"
+        >
           <CardHeader>
             <div class="flex items-start justify-between gap-3">
               <div class="space-y-1">
@@ -841,7 +866,11 @@ onMounted(loadMatch)
           </CardContent>
         </Card>
 
-        <Card id="cr-player2" class="neon-panel relative scroll-mt-24">
+        <Card
+          v-if="showReportCard(match.player2)"
+          id="cr-player2"
+          class="neon-panel relative scroll-mt-24"
+        >
           <CardHeader>
             <div class="flex items-start justify-between gap-3">
               <div class="space-y-1">
