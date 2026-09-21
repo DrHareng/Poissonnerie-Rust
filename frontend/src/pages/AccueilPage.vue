@@ -333,7 +333,7 @@ onMounted(async () => {
                 :registrations="tournament.registrations ?? []"
                 :matches="tournament.pool_matches ?? []"
                 :qualified-per-pool="tournament.qualified_per_pool ?? 0"
-                hide-tiebreakers
+                stacked
                 selectable
                 @click.stop
                 @select-pool="openTournamentPool"

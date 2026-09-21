@@ -4118,6 +4118,7 @@ impl TournamentStore {
                 wins: 0,
                 draws: 0,
                 losses: 0,
+                rating: None,
             });
         }
 
@@ -4397,7 +4398,8 @@ impl TournamentStore {
                    COALESCE(tp.pool_points, 0),
                    COALESCE(tp.pool_objectives, 0),
                    COALESCE(tp.pool_survivors, 0),
-                   tr.army_id
+                   tr.army_id,
+                   tp.start_rating
             FROM pool_players pp
             LEFT JOIN tournament_players tp
                 ON tp.tournament_id = ?2 AND tp.player_name_key = pp.player_name_key
@@ -4419,6 +4421,7 @@ impl TournamentStore {
                 wins: 0,
                 draws: 0,
                 losses: 0,
+                rating: row.get(6)?,
             })
         })?;
         rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)

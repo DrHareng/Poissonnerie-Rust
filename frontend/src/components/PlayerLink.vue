@@ -11,6 +11,11 @@ const props = withDefaults(
   { linked: true },
 )
 
+const label = computed(() => {
+  const shown = props.displayName?.trim()
+  return shown || props.name
+})
+
 const isLinked = computed(() => {
   if (!props.linked) return false
   const guest = props.adversaire?.trim().toLowerCase()
@@ -20,13 +25,18 @@ const isLinked = computed(() => {
 </script>
 
 <template>
-  <span v-if="!isLinked" class="font-medium">{{ displayName || name }}</span>
+  <span
+    v-if="!isLinked"
+    class="player-link font-medium"
+    :title="label"
+  >{{ label }}</span>
   <RouterLink
     v-else
     :to="{ name: 'joueur', params: { name } }"
     class="player-link font-medium text-primary hover:underline"
+    :title="label"
     @click.stop
   >
-    {{ displayName || name }}
+    {{ label }}
   </RouterLink>
 </template>

@@ -30,6 +30,8 @@ const props = withDefaults(
     qualifiedPerPool?: number
     /** Masque les colonnes PO / PS (aperçu compressé, ex. accueil). */
     hideTiebreakers?: boolean
+    /** Une poule par ligne au lieu de deux colonnes. */
+    stacked?: boolean
   }>(),
   {
     registrations: () => [],
@@ -37,6 +39,7 @@ const props = withDefaults(
     selectable: false,
     qualifiedPerPool: 0,
     hideTiebreakers: false,
+    stacked: false,
   },
 )
 
@@ -125,6 +128,11 @@ function onSelectPool(poolId: number) {
   emit('selectPool', poolId)
 }
 
+function playerRatingLabel(pp: PoolPlayer) {
+  if (pp.rating == null || Number.isNaN(pp.rating)) return null
+  return String(Math.round(pp.rating))
+}
+
 function isQualifiedRank(rankIndex: number) {
   const n = props.qualifiedPerPool
   return n > 0 && rankIndex < n
@@ -132,7 +140,7 @@ function isQualifiedRank(rankIndex: number) {
 </script>
 
 <template>
-  <div class="grid gap-3 md:grid-cols-2">
+  <div class="grid gap-3" :class="{ 'md:grid-cols-2': !stacked }">
     <div
       v-for="pool in sortedPools"
       :key="pool.id"
@@ -152,7 +160,8 @@ function isQualifiedRank(rankIndex: number) {
           <tr>
             <th class="pool-col-rank"></th>
             <th class="pool-col-player">Joueur</th>
-            <th class="pool-col-played">jouée</th>
+            <th class="pool-col-elo">ELO</th>
+            <th class="pool-col-played">Jouées</th>
             <th class="pool-col-stat">PT</th>
             <th v-if="!hideTiebreakers" class="pool-col-stat">PO</th>
             <th v-if="!hideTiebreakers" class="pool-col-stat">PS</th>
@@ -189,12 +198,14 @@ function isQualifiedRank(rankIndex: number) {
                   {{ playerPendingStatus(pp) }}
                 </Badge>
                 <PlayerLink
+                  class="min-w-0 flex-1"
                   :name="pp.player_name"
                   :display-name="pp.player_display_name"
                   @click.stop
                 />
               </span>
             </td>
+            <td class="pool-col-elo">{{ playerRatingLabel(pp) }}</td>
             <td class="pool-col-played">
               {{ playerGamesLabel(pool, pp.player_name) }}
             </td>

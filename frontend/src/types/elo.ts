@@ -341,6 +341,7 @@ export interface PoolPlayer {
   wins: number
   draws: number
   losses: number
+  rating?: number | null
 }
 
 export interface Pool {

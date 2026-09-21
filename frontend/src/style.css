@@ -791,7 +791,19 @@
   }
 
   .pool-col-player {
-    @apply min-w-0 text-left;
+    @apply relative z-0 min-w-0 overflow-hidden text-left;
+    max-width: 0;
+    width: 100%;
+  }
+
+  .pool-col-player:hover,
+  .pool-col-player:focus-within {
+    overflow: visible;
+    z-index: 8;
+  }
+
+  .pool-col-elo {
+    @apply w-12 text-left tabular-nums text-muted-foreground;
   }
 
   .pool-col-played {
@@ -807,7 +819,8 @@
     @apply text-right;
   }
 
-  .pool-standings-table th.pool-col-player {
+  .pool-standings-table th.pool-col-player,
+  .pool-standings-table th.pool-col-elo {
     @apply text-left;
   }
 
@@ -1181,6 +1194,21 @@
 
   .scenario-detail-cell {
     @apply min-w-0;
+  }
+
+  .player-link {
+    @apply block min-w-0 max-w-full truncate;
+  }
+
+  .player-link:hover,
+  .player-link:focus-visible {
+    overflow: visible;
+    text-overflow: unset;
+    position: relative;
+    z-index: 8;
+    background-color: var(--popover);
+    box-shadow: 0 0 0 4px var(--popover);
+    border-radius: 0.2rem;
   }
 
   .registration-list-item--waiting-lists .player-link {

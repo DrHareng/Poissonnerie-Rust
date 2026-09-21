@@ -453,6 +453,8 @@ pub struct PoolPlayer {
     pub wins: u32,
     pub draws: u32,
     pub losses: u32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rating: Option<f64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1302,6 +1304,7 @@ mod tests {
                 wins: 0,
                 draws: 0,
                 losses: 0,
+                rating: None,
             }
         }
 
