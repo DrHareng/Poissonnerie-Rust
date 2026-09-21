@@ -2,6 +2,7 @@ use anyhow::Result;
 use rusqlite::{params, Connection};
 use serde::{Deserialize, Serialize};
 
+use crate::migrate::row_text;
 use crate::store::normalize_name;
 
 pub const DEFAULT_PACK_SLUG: &str = "poissonnerie-v2";
@@ -251,7 +252,7 @@ pub fn get_pack_page(conn: &Connection, slug: &str) -> Result<Option<ScenarioPac
         .query_map(params![pack.id], |row| {
             Ok(ScenarioSummary {
                 id: row.get(0)?,
-                slug: row.get::<_, Option<String>>(1)?.unwrap_or_default(),
+                slug: row_text(row, 1)?,
                 name: row.get(2)?,
                 flavor_text: row.get(3)?,
                 map_filename: row.get(4)?,
@@ -275,7 +276,7 @@ pub fn get_pack(conn: &Connection, slug: &str) -> Result<Option<ScenarioPack>> {
     if let Some(row) = rows.next()? {
         return Ok(Some(ScenarioPack {
             id: row.get(0)?,
-            slug: row.get(1)?,
+            slug: row_text(row, 1)?,
             name: row.get(2)?,
             version: row.get(3)?,
             preamble_md: row.get(4)?,
@@ -297,7 +298,7 @@ pub fn list_secondaries(conn: &Connection, pack_slug: &str) -> Result<Vec<Second
     let rows = stmt.query_map(params![pack_slug], |row| {
         Ok(SecondaryObjective {
             id: row.get(0)?,
-            slug: row.get(1)?,
+            slug: row_text(row, 1)?,
             name: row.get(2)?,
             body_md: row.get(3)?,
         })
@@ -318,7 +319,7 @@ pub fn list_common_rules(conn: &Connection, pack_slug: &str) -> Result<Vec<Commo
     let rows = stmt.query_map(params![pack_slug], |row| {
         Ok(CommonRule {
             id: row.get(0)?,
-            slug: row.get(1)?,
+            slug: row_text(row, 1)?,
             name: row.get(2)?,
             body_md: row.get(3)?,
         })
@@ -346,7 +347,7 @@ pub fn get_scenario_detail(conn: &Connection, slug: &str) -> Result<Option<Scena
     let pack_id: Option<i64> = row.get(12)?;
     let mut detail = ScenarioDetail {
         id: scenario_id,
-        slug: row.get::<_, Option<String>>(1)?.unwrap_or_default(),
+        slug: row_text(row, 1)?,
         name: row.get(2)?,
         flavor_text: row.get(3)?,
         map_filename: row.get(4)?,
@@ -375,7 +376,7 @@ pub fn get_scenario_detail(conn: &Connection, slug: &str) -> Result<Option<Scena
             if let Some(rule_row) = rule_rows.next()? {
                 detail.exclusion_rule = Some(CommonRule {
                     id: rule_row.get(0)?,
-                    slug: rule_row.get(1)?,
+                    slug: row_text(rule_row, 1)?,
                     name: rule_row.get(2)?,
                     body_md: rule_row.get(3)?,
                 });
@@ -397,7 +398,7 @@ pub fn get_scenario_detail(conn: &Connection, slug: &str) -> Result<Option<Scena
         .query_map(params![scenario_id], |row| {
             Ok(CommonRule {
                 id: row.get(0)?,
-                slug: row.get(1)?,
+                slug: row_text(row, 1)?,
                 name: row.get(2)?,
                 body_md: row.get(3)?,
             })
@@ -475,7 +476,7 @@ pub fn update_secondary(
     if let Some(row) = rows.next()? {
         return Ok(Some(SecondaryObjective {
             id: row.get(0)?,
-            slug: row.get(1)?,
+            slug: row_text(row, 1)?,
             name: row.get(2)?,
             body_md: row.get(3)?,
         }));
@@ -514,7 +515,7 @@ pub fn update_common_rule(
     if let Some(row) = rows.next()? {
         return Ok(Some(CommonRule {
             id: row.get(0)?,
-            slug: row.get(1)?,
+            slug: row_text(row, 1)?,
             name: row.get(2)?,
             body_md: row.get(3)?,
         }));

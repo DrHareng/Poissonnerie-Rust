@@ -9,7 +9,7 @@ use serde::Deserialize;
 use crate::army_list::require_lists;
 use crate::army_list_store::get_or_create_in_conn;
 use crate::match_record::now_unix;
-use crate::migrate::migrate;
+use crate::migrate::{migrate, row_opt_text, row_text};
 use crate::player::MatchOutcome;
 use crate::store::normalize_name;
 use crate::tournament::{
@@ -4224,7 +4224,7 @@ impl TournamentStore {
                 slot: row.get(1)?,
                 scenario_id: row.get(2)?,
                 scenario_name: row.get(3)?,
-                scenario_slug: row.get(4)?,
+                scenario_slug: row_text(row, 4)?,
             })
         })?;
         rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
@@ -4888,7 +4888,7 @@ fn row_to_tournament_match(row: &rusqlite::Row<'_>) -> rusqlite::Result<Tourname
         scenario_id: row.get(26)?,
         scenario_other: row.get(27)?,
         scenario_name: row.get(28)?,
-        scenario_slug: row.get(29)?,
+        scenario_slug: row_opt_text(row, 29)?,
         player1_army_id: row.get(30)?,
         player2_army_id: row.get(31)?,
         played_at: row.get(32)?,

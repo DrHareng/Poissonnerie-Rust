@@ -6,7 +6,7 @@ use anyhow::{Context, Result};
 use rusqlite::{params, Connection};
 use serde::Deserialize;
 
-use crate::migrate::migrate;
+use crate::migrate::{migrate, row_text};
 
 const METADATA_URL: &str = "https://api.corvusbelli.com/army/infinity/fr/metadata";
 const ORIGIN: &str = "https://infinityuniverse.com";
@@ -241,7 +241,7 @@ fn row_to_army(row: &rusqlite::Row<'_>) -> rusqlite::Result<Army> {
         id: row.get(0)?,
         parent_id: row.get(1)?,
         name: row.get(2)?,
-        slug: row.get(3)?,
+        slug: row_text(row, 3)?,
         logo_url: row.get(4)?,
         discontinued: row.get::<_, i32>(5)? != 0,
         short_name: row.get(6)?,

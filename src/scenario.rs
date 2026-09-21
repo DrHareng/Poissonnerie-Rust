@@ -5,7 +5,7 @@ use anyhow::{Context, Result};
 use rusqlite::{params, Connection};
 use serde::Serialize;
 
-use crate::migrate::migrate;
+use crate::migrate::{migrate, row_opt_text};
 use crate::store::normalize_name;
 
 pub fn strip_scenario_prefix(name: &str) -> String {
@@ -242,7 +242,7 @@ fn row_to_scenario(row: &rusqlite::Row<'_>) -> rusqlite::Result<Scenario> {
         id: row.get(0)?,
         name: row.get(1)?,
         usage_count: row.get(2)?,
-        slug: row.get(3)?,
+        slug: row_opt_text(row, 3)?,
         map_filename: row.get(4)?,
         pack_id: row.get(5)?,
     })

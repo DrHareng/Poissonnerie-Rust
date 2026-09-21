@@ -6,7 +6,7 @@ use rusqlite::{params, Connection};
 use serde::Serialize;
 
 use crate::match_record::now_unix;
-use crate::migrate::migrate;
+use crate::migrate::{migrate, row_opt_text};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct User {
@@ -379,8 +379,8 @@ fn row_to_user(row: &rusqlite::Row<'_>) -> rusqlite::Result<User> {
         local_display_name: row.get(5)?,
         local_avatar_url: row.get(6)?,
         secondary_view_mode: row.get(7)?,
-        scenario_slug: row.get(8)?,
-        tts_map_slug: row.get(9)?,
+        scenario_slug: row_opt_text(row, 8)?,
+        tts_map_slug: row_opt_text(row, 9)?,
         army_sort_mode: row.get(10)?,
         player_sort_mode: row.get(11)?,
         tournament_completed_view_mode: row.get(12)?,

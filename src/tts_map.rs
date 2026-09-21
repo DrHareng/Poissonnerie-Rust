@@ -8,7 +8,7 @@ use rusqlite::{params, Connection, OptionalExtension};
 use serde::Serialize;
 
 use crate::match_record::now_unix;
-use crate::migrate::migrate;
+use crate::migrate::{migrate, row_text};
 
 pub const MAX_JSON_BYTES: usize = 15 * 1024 * 1024;
 pub const MAX_PICTURE_BYTES: usize = 8 * 1024 * 1024;
@@ -133,7 +133,7 @@ impl TtsMapStore {
                 (SELECT COUNT(*) FROM tts_map_pictures p WHERE p.map_id = m.id),
                 m.created_at, m.updated_at
             FROM tts_maps m
-            ORDER BY m.sort_order ASC, m.name COLLATE NOCASE ASC
+            ORDER BY m.name COLLATE NOCASE ASC, m.id ASC
             ",
         )?;
         let mut maps = stmt
@@ -141,7 +141,7 @@ impl TtsMapStore {
                 let json_filename: Option<String> = row.get(3)?;
                 Ok(TtsMapSummary {
                     id: row.get(0)?,
-                    slug: row.get(1)?,
+                    slug: row_text(row, 1)?,
                     name: row.get(2)?,
                     has_json: json_filename
                         .as_deref()
@@ -950,7 +950,7 @@ impl TtsMapStore {
                 .map(|_| format!("/api/tts-maps/{id}/json"));
             Ok(TtsMapDetail {
                 id: row.get(0)?,
-                slug: row.get(1)?,
+                slug: row_text(row, 1)?,
                 name: row.get(2)?,
                 json_filename,
                 json_url,
@@ -1313,7 +1313,7 @@ fn row_to_report(row: &rusqlite::Row<'_>) -> rusqlite::Result<TtsMapReport> {
         id,
         map_id: row.get(1)?,
         map_name: row.get(2)?,
-        map_slug: row.get(3)?,
+        map_slug: row_text(row, 3)?,
         reporter_user_id,
         reporter_display_name: if reporter_name.trim().is_empty() {
             format!("Utilisateur {reporter_user_id}")
@@ -1334,10 +1334,10 @@ fn row_to_variant(row: &rusqlite::Row<'_>) -> rusqlite::Result<TtsMapVariant> {
         id,
         map_id: row.get(1)?,
         map_name: row.get(2)?,
-        map_slug: row.get(3)?,
+        map_slug: row_text(row, 3)?,
         scenario_id: row.get(4)?,
         scenario_name: row.get(5)?,
-        scenario_slug: row.get(6)?,
+        scenario_slug: row_text(row, 6)?,
         tournament_id: row.get(7)?,
         tournament_name: row.get(8)?,
         json_url: format!("/api/tts-map-variants/{id}/json"),
@@ -1408,6 +1408,25 @@ mod tests {
     fn slugify_french_name() {
         assert_eq!(slugify("Âge de glace"), "age-de-glace");
         assert_eq!(slugify("  "), "map");
+    }
+
+    #[test]
+    fn list_maps_is_alphabetical() {
+        let (store, path) = temp_store();
+        store.create_map("Yujing Mall").unwrap();
+        store.create_map("Abandoned Factory").unwrap();
+        store.create_map("beach resort").unwrap();
+        let names: Vec<String> = store
+            .list_maps()
+            .unwrap()
+            .into_iter()
+            .map(|map| map.name)
+            .collect();
+        assert_eq!(
+            names,
+            vec!["Abandoned Factory", "beach resort", "Yujing Mall"]
+        );
+        let _ = fs::remove_file(&path);
     }
 
     #[test]
@@ -1570,5 +1589,25 @@ mod tests {
         assert!(decoded.width() <= THUMB_MAX_PX);
         assert!(decoded.height() <= THUMB_MAX_PX);
         let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn list_maps_reads_integer_stored_slug() {
+        let (store, path) = temp_store();
+        let created = store.create_map("Carte entière").unwrap();
+        {
+            let conn = Connection::open(&path).unwrap();
+            conn.execute(
+                "UPDATE tts_maps SET slug = 42 WHERE id = ?1",
+                params![created.id],
+            )
+            .unwrap();
+        }
+        let maps = store.list_maps().unwrap();
+        assert_eq!(maps.len(), 1);
+        assert_eq!(maps[0].slug, "42");
+        let detail = store.get_map(created.id).unwrap().unwrap();
+        assert_eq!(detail.slug, "42");
+        let _ = fs::remove_file(&path);
     }
 }

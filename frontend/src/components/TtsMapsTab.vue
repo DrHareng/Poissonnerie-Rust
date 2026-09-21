@@ -45,6 +45,12 @@ const { canEditContent } = useAdminEditMode()
 const { isAuthenticated } = useAuth()
 
 const maps = ref<TtsMapSummary[]>([])
+
+function sortMaps(items: TtsMapSummary[]): TtsMapSummary[] {
+  return [...items].sort((a, b) =>
+    a.name.localeCompare(b.name, 'fr', { sensitivity: 'base' }),
+  )
+}
 const detail = ref<TtsMapDetail | null>(null)
 const loading = ref(true)
 const detailLoading = ref(false)
@@ -129,7 +135,7 @@ async function copyPictureToken(picture: TtsMapPicture) {
 }
 
 async function loadLists() {
-  maps.value = await fetchTtsMaps()
+  maps.value = sortMaps(await fetchTtsMaps())
 }
 
 async function loadDetail(id: number) {
@@ -171,7 +177,7 @@ async function createMap() {
   try {
     const created = await createTtsMap(name)
     newMapName.value = ''
-    maps.value = [...maps.value, summaryFromDetail(created)]
+    maps.value = sortMaps([...maps.value, summaryFromDetail(created)])
     toast.success('Map créée')
     selectMap(created.slug)
   } catch (error) {
@@ -193,10 +199,12 @@ async function saveRename() {
   renaming.value = true
   try {
     detail.value = await renameTtsMap(detail.value.id, name)
-    maps.value = maps.value.map((map) =>
-      map.id === detail.value?.id
-        ? { ...map, name: detail.value.name, updated_at: detail.value.updated_at }
-        : map,
+    maps.value = sortMaps(
+      maps.value.map((map) =>
+        map.id === detail.value?.id
+          ? { ...map, name: detail.value.name, updated_at: detail.value.updated_at }
+          : map,
+      ),
     )
     toast.success('Map enregistrée')
   } catch (error) {

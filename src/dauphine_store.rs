@@ -5,7 +5,7 @@ use anyhow::{Context, Result};
 use rusqlite::Connection;
 
 use crate::dauphine::{DauphineEdition, EditionStatus};
-use crate::migrate::migrate;
+use crate::migrate::{migrate, row_text};
 
 pub struct DauphineStore {
     conn: Mutex<Connection>,
@@ -40,7 +40,7 @@ impl DauphineStore {
             let status_raw: String = row.get(4)?;
             Ok(DauphineEdition {
                 id: row.get(0)?,
-                slug: row.get(1)?,
+                slug: row_text(row, 1)?,
                 title: row.get(2)?,
                 year: row.get(3)?,
                 status: EditionStatus::parse(&status_raw).unwrap_or(EditionStatus::Draft),

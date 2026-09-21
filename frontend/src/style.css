@@ -761,20 +761,33 @@
     @apply border-b-0;
   }
 
-  .pool-standings-table tbody tr.pool-standings-row--qualified td {
-    @apply bg-muted/35;
+  .pool-col-rank {
+    @apply w-7 p-0 text-center;
+  }
+
+  .pool-standings-table th.pool-col-rank {
+    @apply px-0;
+  }
+
+  .pool-standings-table tbody tr.pool-standings-row--qualified td.pool-col-rank {
+    background-color: var(--primary);
+    padding: 0;
   }
 
   .pool-standings-table
     tbody
-    tr.pool-standings-row--qualified
-    + tr:not(.pool-standings-row--qualified)
-    td {
-    @apply border-t border-border/60;
+    tr.pool-standings-row--qualified:has(+ tr:not(.pool-standings-row--qualified))
+    td,
+  .pool-standings-table tbody tr.pool-standings-row--qualified:last-child td {
+    border-bottom: 2px solid var(--primary);
   }
 
-  .pool-col-rank {
-    @apply w-8 text-right tabular-nums;
+  .pool-standings-qualified-mark {
+    @apply flex h-full min-h-8 w-full items-center justify-center text-black;
+  }
+
+  .pool-standings-qualified-mark svg {
+    @apply size-3.5 stroke-[2.75];
   }
 
   .pool-col-player {
@@ -790,7 +803,6 @@
   }
 
   .pool-standings-table th.pool-col-stat,
-  .pool-standings-table th.pool-col-rank,
   .pool-standings-table th.pool-col-played {
     @apply text-right;
   }

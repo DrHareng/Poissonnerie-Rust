@@ -1,5 +1,6 @@
 use anyhow::Result;
-use rusqlite::Connection;
+use rusqlite::types::ValueRef;
+use rusqlite::{Connection, Row};
 
 pub fn migrate(conn: &Connection) -> Result<()> {
     conn.execute_batch(
@@ -672,6 +673,7 @@ pub fn migrate(conn: &Connection) -> Result<()> {
     backfill_matches_from_tournaments(conn)?;
 
     normalize_stored_army_list_urls(conn)?;
+    normalize_stored_text_slugs(conn)?;
 
     conn.execute_batch(
         "
@@ -1179,4 +1181,64 @@ fn add_column_if_missing(
         Err(error) if error.to_string().contains("duplicate column name") => Ok(false),
         Err(error) => Err(error.into()),
     }
+}
+
+/// SQLite can store INTEGER in a TEXT `slug` column. rusqlite `String` rejects that.
+pub(crate) fn row_text(row: &Row<'_>, idx: usize) -> rusqlite::Result<String> {
+    Ok(match row.get_ref(idx)? {
+        ValueRef::Null => String::new(),
+        ValueRef::Integer(value) => value.to_string(),
+        ValueRef::Real(value) => {
+            if value.fract() == 0.0 && value >= i64::MIN as f64 && value <= i64::MAX as f64 {
+                format!("{}", value as i64)
+            } else {
+                value.to_string()
+            }
+        }
+        ValueRef::Text(value) => std::str::from_utf8(value)
+            .map_err(rusqlite::Error::Utf8Error)?
+            .to_owned(),
+        ValueRef::Blob(value) => String::from_utf8_lossy(value).into_owned(),
+    })
+}
+
+pub(crate) fn row_opt_text(row: &Row<'_>, idx: usize) -> rusqlite::Result<Option<String>> {
+    match row.get_ref(idx)? {
+        ValueRef::Null => Ok(None),
+        _ => {
+            let value = row_text(row, idx)?;
+            if value.trim().is_empty() {
+                Ok(None)
+            } else {
+                Ok(Some(value))
+            }
+        }
+    }
+}
+
+fn normalize_stored_text_slugs(conn: &Connection) -> Result<()> {
+    let updates = [
+        ("tts_maps", "slug"),
+        ("scenarios", "slug"),
+        ("scenario_packs", "slug"),
+        ("common_rules", "slug"),
+        ("secondary_objectives", "slug"),
+        ("dauphine_editions", "slug"),
+        ("armies", "slug"),
+        ("users", "scenario_slug"),
+        ("users", "tts_map_slug"),
+    ];
+    for (table, column) in updates {
+        if !column_exists(conn, table, column)? {
+            continue;
+        }
+        conn.execute(
+            &format!(
+                "UPDATE {table} SET {column} = CAST({column} AS TEXT)
+                 WHERE {column} IS NOT NULL AND typeof({column}) != 'text'"
+            ),
+            [],
+        )?;
+    }
+    Ok(())
 }

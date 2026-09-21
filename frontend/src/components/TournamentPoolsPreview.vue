@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue'
+import { ArrowUp } from '@lucide/vue'
 import ArmyLogo from '@/components/ArmyLogo.vue'
 import PlayerLink from '@/components/PlayerLink.vue'
 import { Badge } from '@/components/ui/badge'
@@ -25,7 +26,7 @@ const props = withDefaults(
     matches?: TournamentMatch[]
     /** Si true, la carte poule est cliquable. */
     selectable?: boolean
-    /** Nombre de premiers du classement qualifiés (surbrillance discrète). */
+    /** Nombre de premiers du classement qualifiés. */
     qualifiedPerPool?: number
     /** Masque les colonnes PO / PS (aperçu compressé, ex. accueil). */
     hideTiebreakers?: boolean
@@ -149,7 +150,7 @@ function isQualifiedRank(rankIndex: number) {
       <table class="pool-standings-table">
         <thead>
           <tr>
-            <th class="pool-col-rank">#</th>
+            <th class="pool-col-rank"></th>
             <th class="pool-col-player">Joueur</th>
             <th class="pool-col-played">jouée</th>
             <th class="pool-col-stat">PT</th>
@@ -163,7 +164,16 @@ function isQualifiedRank(rankIndex: number) {
             :key="pp.player_name"
             :class="{ 'pool-standings-row--qualified': isQualifiedRank(idx) }"
           >
-            <td class="pool-col-rank text-muted-foreground">{{ idx + 1 }}</td>
+            <td class="pool-col-rank">
+              <span
+                v-if="isQualifiedRank(idx)"
+                class="pool-standings-qualified-mark"
+                title="Qualifié"
+                aria-label="Qualifié"
+              >
+                <ArrowUp aria-hidden="true" />
+              </span>
+            </td>
             <td class="pool-col-player">
               <span class="flex min-w-0 items-center gap-2">
                 <ArmyLogo
