@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
-import { RouterLink, useRoute, useRouter } from 'vue-router'
+import { useRoute, useRouter, type LocationQuery } from 'vue-router'
 import { Check, Trash2, X } from '@lucide/vue'
 import { toast } from 'vue-sonner'
 import { COUPE_REQUIRES_NETWORK } from '@/lib/partieOffline'
@@ -346,20 +346,30 @@ const tournamentTabs = computed(() => {
   return tabs
 })
 
-function setActiveTab(tab: TournamentTabId) {
-  userPickedTab.value = true
-  activeTab.value = tab
-  const query = { ...route.query, tab }
-  if (tab === 'poules' && selectedPoolId.value != null) {
-    query.poolId = String(selectedPoolId.value)
+function tournamentQuery(tab: TournamentTabId, poolId: number | null = null): LocationQuery {
+  const query: LocationQuery = { ...route.query, tab }
+  if (tab === 'poules' && poolId != null) {
+    query.poolId = String(poolId)
   } else {
     delete query.poolId
   }
+  return query
+}
+
+function replaceTournamentQuery(query: LocationQuery) {
   const sameTab = String(route.query.tab ?? '') === String(query.tab ?? '')
   const samePool = String(route.query.poolId ?? '') === String(query.poolId ?? '')
   if (!sameTab || !samePool) {
     void router.replace({ query })
   }
+}
+
+function setActiveTab(tab: TournamentTabId) {
+  userPickedTab.value = true
+  activeTab.value = tab
+  replaceTournamentQuery(
+    tournamentQuery(tab, tab === 'poules' ? selectedPoolId.value : null),
+  )
 }
 
 function defaultTournamentTab(tabs: { id: TournamentTabId }[]): TournamentTabId {
@@ -377,29 +387,14 @@ function showPoolsOverview() {
   userPickedTab.value = true
   activeTab.value = 'poules'
   selectedPoolId.value = null
-  const query = { ...route.query, tab: 'poules' }
-  delete query.poolId
-  const sameTab = String(route.query.tab ?? '') === 'poules'
-  const samePool = route.query.poolId == null
-  if (!sameTab || !samePool) {
-    void router.replace({ query })
-  }
+  replaceTournamentQuery(tournamentQuery('poules'))
 }
 
 function selectPool(poolId: number) {
   userPickedTab.value = true
   activeTab.value = 'poules'
   selectedPoolId.value = poolId
-  const query = {
-    ...route.query,
-    tab: 'poules',
-    poolId: String(poolId),
-  }
-  const sameTab = String(route.query.tab ?? '') === 'poules'
-  const samePool = String(route.query.poolId ?? '') === String(poolId)
-  if (!sameTab || !samePool) {
-    void router.replace({ query })
-  }
+  replaceTournamentQuery(tournamentQuery('poules', poolId))
 }
 
 function selectedPool() {
