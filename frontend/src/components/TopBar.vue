@@ -58,7 +58,10 @@ const {
 } = useMyInProgressMatches()
 const { count: ttsReportCount } = useTtsMapReportCount()
 const reportsRoute = { name: 'admin-tts-reports' as const }
-const isReportsActive = computed(() => route.name === 'admin-tts-reports')
+
+const profileBadgeCount = computed(
+  () => inProgressCount.value + ttsReportCount.value,
+)
 
 const links: NavLink[] = [
   {
@@ -284,21 +287,6 @@ async function handleLogout() {
                 </RouterLink>
               </DropdownMenuItem>
             </template>
-            <template v-if="isAdmin">
-              <DropdownMenuSeparator class="topbar-user-menu-separator" />
-              <DropdownMenuItem as-child>
-                <RouterLink :to="reportsRoute" :class="menuItemClass">
-                  <CircleAlert class="size-4" />
-                  Signalements TTS
-                  <span
-                    v-if="ttsReportCount > 0"
-                    class="ml-auto text-xs font-semibold text-primary"
-                  >
-                    {{ ttsReportCount }}
-                  </span>
-                </RouterLink>
-              </DropdownMenuItem>
-            </template>
           </DropdownMenuContent>
         </DropdownMenuPortal>
       </DropdownMenuRoot>
@@ -366,7 +354,11 @@ async function handleLogout() {
           <DropdownMenuRoot>
             <DropdownMenuTrigger
               class="topbar-user-trigger"
-              aria-label="Menu compte"
+              :aria-label="
+                profileBadgeCount > 0
+                  ? `Menu compte (${profileBadgeCount})`
+                  : 'Menu compte'
+              "
             >
               <img
                 :src="user.effective_avatar_url"
@@ -377,6 +369,12 @@ async function handleLogout() {
                 user.effective_display_name
               }}</span>
               <ChevronDown class="hidden size-4 shrink-0 opacity-60 md:block" />
+              <span
+                v-if="profileBadgeCount > 0"
+                class="topbar-cta-count"
+              >
+                {{ profileBadgeCount }}
+              </span>
             </DropdownMenuTrigger>
             <DropdownMenuPortal>
               <DropdownMenuContent
@@ -425,31 +423,6 @@ async function handleLogout() {
               </DropdownMenuContent>
             </DropdownMenuPortal>
           </DropdownMenuRoot>
-          <RouterLink
-            v-if="isAdmin"
-            :to="reportsRoute"
-            class="topbar-report"
-            :class="{
-              'topbar-report-active': isReportsActive,
-              'topbar-report--pending': ttsReportCount > 0,
-            }"
-            :aria-label="
-              ttsReportCount > 0
-                ? `Signalements TTS (${ttsReportCount})`
-                : 'Signalements TTS'
-            "
-            :title="
-              ttsReportCount > 0
-                ? `Signalements TTS (${ttsReportCount})`
-                : 'Signalements TTS'
-            "
-          >
-            <CircleAlert class="size-4" />
-            <span class="hidden md:inline">Signalements</span>
-            <span v-if="ttsReportCount > 0" class="topbar-cta-count">
-              {{ ttsReportCount }}
-            </span>
-          </RouterLink>
           <div
             v-if="isAdmin"
             class="flex items-center gap-0"
