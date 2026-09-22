@@ -4536,6 +4536,33 @@ impl TournamentStore {
         Ok(ids)
     }
 
+    pub fn pool_name(&self, pool_id: i64) -> Result<Option<String>> {
+        let conn = self.conn.lock().unwrap();
+        conn.query_row(
+            "SELECT name FROM pools WHERE id = ?1",
+            params![pool_id],
+            |row| row.get(0),
+        )
+        .optional()
+        .map_err(Into::into)
+    }
+
+    pub fn elo_match_pool_name(&self, elo_match_id: u64) -> Result<Option<String>> {
+        let conn = self.conn.lock().unwrap();
+        conn.query_row(
+            "
+            SELECT p.name
+            FROM tournament_matches tm
+            JOIN pools p ON p.id = tm.pool_id
+            WHERE tm.elo_match_id = ?1
+            ",
+            params![elo_match_id as i64],
+            |row| row.get(0),
+        )
+        .optional()
+        .map_err(Into::into)
+    }
+
     pub fn find_match_by_elo_match_id(&self, elo_match_id: u64) -> Result<Option<TournamentMatch>> {
         let conn = self.conn.lock().unwrap();
         let id: Option<i64> = conn

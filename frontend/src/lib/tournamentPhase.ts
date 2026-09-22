@@ -12,3 +12,13 @@ export function phaseLabel(phase?: string | null) {
   if (!phase) return null
   return phaseLabels[phase as TournamentPhase] ?? phase
 }
+
+/** Poule nommée (Poule C) si connue, sinon le libellé de phase. */
+export function tournamentPhaseDisplay(match: {
+  tournament_phase?: string | null
+  tournament_pool_name?: string | null
+}): string | null {
+  const poolName = match.tournament_pool_name?.trim()
+  if (poolName) return poolName
+  return phaseLabel(match.tournament_phase)
+}

@@ -28,12 +28,14 @@ import ContentHoverTip from '@/components/ContentHoverTip.vue'
 import CombatEspritPlayerHand from '@/components/partie/CombatEspritPlayerHand.vue'
 import { useAuth } from '@/composables/useAuth'
 import { useAdminEditMode } from '@/composables/useAdminEditMode'
+import { PARTIE_STEP_LABELS, type PartieStep } from '@/composables/usePartieFlow'
 import { COMBAT_ESPRIT_SLUG, draftStepBadges } from '@/lib/combatEspritDraft'
 import { secondaryImageSrc } from '@/lib/secondaryImages'
 import { choiceLabel } from '@/lib/lieutenantRoll'
 import { casualMatchContextLabel, matchCountsForElo } from '@/lib/matchElo'
+import { canResumePartie } from '@/lib/matchParticipant'
 import { formatMatchRecordedDate } from '@/lib/tournamentMatchDisplay'
-import { phaseLabel } from '@/lib/tournamentPhase'
+import { tournamentPhaseDisplay } from '@/lib/tournamentPhase'
 import { matchsTabs } from '@/lib/pageTitleTabs'
 import { externalHref } from '@/lib/utils'
 import PageTitleTabs from '@/components/PageTitleTabs.vue'
@@ -53,7 +55,7 @@ import {
 const route = useRoute()
 const router = useRouter()
 const { player: currentPlayer, isAuthenticated, login } = useAuth()
-const { showAdminUi: isAdmin } = useAdminEditMode()
+const { showAdminUi: isAdmin, isEditMode } = useAdminEditMode()
 
 const match = ref<MatchRecord | null>(null)
 const armies = ref<Army[]>([])
@@ -99,16 +101,14 @@ const scenarioLabel = computed(() => {
   )
 })
 
-const canResume = computed(() => {
-  if (!match.value || match.value.status !== 'in_progress') return false
-  if (!currentPlayer.value) return false
-  const me = currentPlayer.value.name
-  return (
-    match.value.created_by === me ||
-    match.value.player1 === me ||
-    match.value.player2 === me
-  )
-})
+const canResume = computed(() =>
+  match.value
+    ? canResumePartie(match.value, {
+        playerName: currentPlayer.value?.name,
+        isEditMode: isEditMode.value,
+      })
+    : false,
+)
 
 const matchupLabel = computed(() => {
   if (!match.value) return ''
@@ -121,7 +121,9 @@ const matchDateLabel = computed(
   () => formatMatchRecordedDate(match.value?.recorded_at ?? 0) ?? 'Date inconnue',
 )
 
-const tournamentPhaseText = computed(() => phaseLabel(match.value?.tournament_phase))
+const tournamentPhaseText = computed(() =>
+  tournamentPhaseDisplay(match.value ?? {}),
+)
 
 const showsElo = computed(() => matchCountsForElo(match.value?.counts_for_elo))
 
@@ -157,8 +159,15 @@ const lieutenantLines = computed(() => {
 
 const outcomeLine = computed(() => {
   if (!match.value) return null
+  if (match.value.awaiting_confirmation) {
+    return 'À confirmer'
+  }
   if (match.value.status === 'in_progress' || !match.value.outcome) {
-    return 'Partie en cours'
+    const step = match.value.partie_step
+    const stepText = step
+      ? (PARTIE_STEP_LABELS[step as PartieStep] ?? step)
+      : null
+    return stepText ? `Partie en cours — ${stepText}` : 'Partie en cours'
   }
   if (match.value.outcome === 'draw') return 'Match nul'
   const winner =
@@ -533,7 +542,7 @@ onMounted(loadMatch)
         <CardHeader>
           <CardTitle class="flex items-center gap-2">
             <Swords class="size-5 text-primary" />
-            Résultat
+            {{ match.status === 'in_progress' ? 'Partie' : 'Résultat' }}
           </CardTitle>
           <CardDescription class="flex flex-wrap items-center gap-x-1.5 gap-y-1">
             <span>{{ matchDateLabel }}</span>

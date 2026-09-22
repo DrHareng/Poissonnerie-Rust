@@ -334,6 +334,7 @@ fn rebuild_leaderboard_from_matches(db_path: &Path) -> Result<()> {
             tournament_id: row.get(16)?,
             tournament_phase: row.get(17)?,
             tournament_name: None,
+            tournament_pool_name: None,
             player1_report: None,
             player2_report: None,
             player1_army_list_code: None,

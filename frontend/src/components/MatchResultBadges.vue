@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { Badge } from '@/components/ui/badge'
+import { matchScoreLabel } from '@/lib/matchResultBadges'
 
 /** Champs minimaux pour les pastilles (match Elo ou tournoi). */
 export type MatchResultBadgeSource = {
@@ -10,6 +11,7 @@ export type MatchResultBadgeSource = {
   player2_survivors: number
   outcome?: string | null
   status?: string
+  awaiting_confirmation?: boolean
 }
 
 const props = defineProps<{
@@ -33,7 +35,9 @@ const badgePairGapRem = 0.5
 const pairStyle = computed(() =>
   props.badgeMinCh != null
     ? {
-        width: `calc(${props.badgeMinCh * 2}ch + ${badgePairGapRem}rem)`,
+        // minWidth (pas width) : les badges peuvent dépasser badgeMinCh
+        // (ex. « 10 - 10 ») sans se compresser / se superposer.
+        minWidth: `calc(${props.badgeMinCh * 2}ch + ${badgePairGapRem}rem)`,
       }
     : undefined,
 )
@@ -47,14 +51,23 @@ const inProgressStyle = computed(() =>
 )
 
 const showPending = computed(
-  () => props.match.status === 'in_progress' || !props.match.outcome,
+  () =>
+    props.match.awaiting_confirmation
+    || props.match.status === 'in_progress'
+    || !props.match.outcome,
 )
+
+const pendingText = computed(() => {
+  if (props.pendingLabel) return props.pendingLabel
+  if (props.match.awaiting_confirmation) return 'À confirmer'
+  return 'En cours'
+})
 
 function badgeVariant(
   match: MatchResultBadgeSource,
   player: 'player1' | 'player2',
 ): 'default' | 'secondary' | 'outline' | 'destructive' {
-  if (!match.outcome || match.status === 'in_progress') {
+  if (!match.outcome || match.status === 'in_progress' || match.awaiting_confirmation) {
     return 'secondary'
   }
   if (match.outcome === 'draw') {
@@ -81,7 +94,7 @@ function badgeClass(match: MatchResultBadgeSource, player: 'player1' | 'player2'
 }
 
 function scoreLabel(objectives: number, survivors: number) {
-  return `${objectives} - ${survivors}`
+  return matchScoreLabel(objectives, survivors)
 }
 </script>
 
@@ -96,21 +109,21 @@ function scoreLabel(objectives: number, survivors: number) {
       class="justify-center tabular-nums"
       :style="inProgressStyle"
     >
-      {{ pendingLabel ?? 'En cours' }}
+      {{ pendingText }}
     </Badge>
   </div>
   <div
     v-else
-    class="mx-auto grid grid-cols-2 gap-2"
+    class="mx-auto flex items-center justify-center gap-2"
     :class="badgeMinCh == null ? 'w-36' : undefined"
     :style="pairStyle"
   >
     <Badge
       :variant="badgeVariant(match, 'player1')"
       :class="[
-        'justify-center tabular-nums',
+        'shrink-0 justify-center tabular-nums',
         badgeClass(match, 'player1'),
-        badgeMinCh == null ? 'justify-self-end' : undefined,
+        badgeMinCh == null ? 'ml-auto' : undefined,
       ]"
       :style="badgeStyle"
     >
@@ -119,9 +132,9 @@ function scoreLabel(objectives: number, survivors: number) {
     <Badge
       :variant="badgeVariant(match, 'player2')"
       :class="[
-        'justify-center tabular-nums',
+        'shrink-0 justify-center tabular-nums',
         badgeClass(match, 'player2'),
-        badgeMinCh == null ? 'justify-self-start' : undefined,
+        badgeMinCh == null ? 'mr-auto' : undefined,
       ]"
       :style="badgeStyle"
     >

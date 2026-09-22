@@ -3,7 +3,7 @@ import { computed } from 'vue'
 import { RouterLink } from 'vue-router'
 import type { MatchRecord } from '@/types/elo'
 import { casualMatchContextLabel } from '@/lib/matchElo'
-import { phaseLabel } from '@/lib/tournamentPhase'
+import { tournamentPhaseDisplay } from '@/lib/tournamentPhase'
 
 const props = defineProps<{
   match: Pick<
@@ -11,6 +11,7 @@ const props = defineProps<{
     | 'tournament_id'
     | 'tournament_name'
     | 'tournament_phase'
+    | 'tournament_pool_name'
     | 'scenario_name'
     | 'counts_for_elo'
     | 'sync_pending'
@@ -21,7 +22,7 @@ const isTournamentMatch = computed(
   () => props.match.tournament_id != null && props.match.tournament_phase,
 )
 
-const phaseText = computed(() => phaseLabel(props.match.tournament_phase))
+const phaseText = computed(() => tournamentPhaseDisplay(props.match))
 
 const contextLine = computed(() => {
   const parts: string[] = []

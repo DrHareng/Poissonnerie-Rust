@@ -29,6 +29,7 @@ import { matchsTabs } from '@/lib/pageTitleTabs'
 import { isListableArmy } from '@/lib/army'
 import { formatMatchRecordedDate } from '@/lib/tournamentMatchDisplay'
 import { partieResumeParam } from '@/lib/partieOffline'
+import { canResumePartie } from '@/lib/matchParticipant'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -55,8 +56,8 @@ const LEGACY_ARMY_FILTER_STORAGE_KEY = 'poissonnerie.army-lists-filter'
 
 const router = useRouter()
 const route = useRoute()
-const { isAuthenticated } = useAuth()
-const { showAdminUi: isAdmin } = useAdminEditMode()
+const { isAuthenticated, player } = useAuth()
+const { showAdminUi: isAdmin, isEditMode } = useAdminEditMode()
 const { setCustomSide } = useAppSidePanel()
 const { armies, ensureLoaded } = useArmies()
 const {
@@ -366,6 +367,13 @@ function resumePartie(match: MatchRecord) {
   router.push({ name: 'partie-resume', params: { id: partieResumeParam(match) } })
 }
 
+function canResumeListedPartie(match: MatchRecord) {
+  return canResumePartie(match, {
+    playerName: player.value?.name,
+    isEditMode: isEditMode.value,
+  })
+}
+
 async function onDeleteInProgress(id: number) {
   if (!isAdmin.value) return
   if (!window.confirm('Supprimer cette partie en cours ?')) return
@@ -598,6 +606,7 @@ onMounted(async () => {
               <TableCell class="text-right">
                 <div class="inline-flex gap-1">
                   <Button
+                    v-if="canResumeListedPartie(item)"
                     type="button"
                     size="icon"
                     variant="outline"

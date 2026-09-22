@@ -173,6 +173,7 @@ export interface MatchRecord extends RatingUpdate, MatchScores {
   tournament_id?: number | null
   tournament_phase?: string | null
   tournament_name?: string | null
+  tournament_pool_name?: string | null
   player1_report?: MatchReport | null
   player2_report?: MatchReport | null
   player1_army_list_code?: string | null
@@ -191,6 +192,8 @@ export interface MatchRecord extends RatingUpdate, MatchScores {
   created_by?: string | null
   /** false = match amical (pas d'impact ELO). Défaut true pour l'historique. */
   counts_for_elo?: boolean
+  /** Résultat tournoi saisi, en attente de confirmation adverse. */
+  awaiting_confirmation?: boolean
   /** Pseudo libre si l’adversaire n’est pas un joueur inscrit. */
   adversaire?: string | null
   client_uuid?: string | null

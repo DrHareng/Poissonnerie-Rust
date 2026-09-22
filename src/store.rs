@@ -180,10 +180,13 @@ impl Leaderboard {
                        m.counts_for_elo,
                        m.scenario_url,
                        m.adversaire,
-                       m.client_uuid
+                       m.client_uuid,
+                       p.name
                 FROM matches m
                 LEFT JOIN scenarios s ON s.id = m.scenario_id
                 LEFT JOIN tournaments t ON t.id = m.tournament_id
+                LEFT JOIN tournament_matches tm ON tm.elo_match_id = m.id
+                LEFT JOIN pools p ON p.id = tm.pool_id
                 ORDER BY m.recorded_at DESC, m.id DESC
                 ",
             )?;
@@ -688,7 +691,7 @@ impl Leaderboard {
         self.matches.len()
     }
 
-    /// Nombre de matchs visibles publiquement (hors résultats encore à confirmer).
+    /// Nombre de matchs visibles publiquement.
     pub fn listed_match_count(&self, hidden_ids: &HashSet<u64>) -> usize {
         self.matches
             .iter()
@@ -914,6 +917,7 @@ impl Leaderboard {
             tournament_id,
             tournament_phase,
             tournament_name: None,
+            tournament_pool_name: None,
             player1_report: None,
             player2_report: None,
             player1_army_list_code: None,
@@ -950,6 +954,29 @@ impl Leaderboard {
 
         self.matches.insert(0, record.clone());
         Ok(record)
+    }
+
+    pub fn set_match_tournament_context(
+        &mut self,
+        match_id: u64,
+        tournament_name: Option<String>,
+        tournament_pool_name: Option<String>,
+    ) {
+        let Some(record) = self.matches.iter_mut().find(|record| record.id == match_id) else {
+            return;
+        };
+        if tournament_name
+            .as_ref()
+            .is_some_and(|name| !name.trim().is_empty())
+        {
+            record.tournament_name = tournament_name;
+        }
+        if tournament_pool_name
+            .as_ref()
+            .is_some_and(|name| !name.trim().is_empty())
+        {
+            record.tournament_pool_name = tournament_pool_name;
+        }
     }
 
     pub fn update_in_progress_match(
@@ -1983,6 +2010,7 @@ fn row_to_match(row: &rusqlite::Row<'_>) -> rusqlite::Result<MatchRecord> {
         tournament_id: row.get(17)?,
         tournament_phase: row.get(18)?,
         tournament_name: row.get(19)?,
+        tournament_pool_name: row.get(40)?,
         player1_report: None,
         player2_report: None,
         player1_secondary_slugs: decode_slug_list(row.get(21)?),

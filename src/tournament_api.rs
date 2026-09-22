@@ -1634,6 +1634,16 @@ async fn start_tournament_partie(
         .clone()
         .unwrap_or_else(|| p1.clone());
 
+    let tournament_name = state
+        .tournaments
+        .get(tm.tournament_id)
+        .ok()
+        .flatten()
+        .map(|tournament| tournament.name);
+    let pool_name = tm
+        .pool_id
+        .and_then(|pool_id| state.tournaments.pool_name(pool_id).ok().flatten());
+
     let record = {
         let mut board = state.board.lock().unwrap();
         let record = board
@@ -1654,6 +1664,11 @@ async fn start_tournament_partie(
                 None,
             )
             .map_err(|error| ApiError::bad_request(error.to_string()))?;
+        board.set_match_tournament_context(record.id, tournament_name, pool_name);
+        let record = board
+            .get_match(record.id)
+            .cloned()
+            .unwrap_or(record);
         board
             .save(&state.db_path)
             .map_err(|error| ApiError::bad_request(error.to_string()))?;

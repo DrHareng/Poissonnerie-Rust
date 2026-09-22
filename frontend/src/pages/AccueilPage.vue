@@ -25,10 +25,11 @@ import MarkdownContent from '@/components/MarkdownContent.vue'
 import TournamentPoolScenarioLinks from '@/components/TournamentPoolScenarioLinks.vue'
 import { useArmies } from '@/composables/useArmies'
 import { casualMatchContextLabel } from '@/lib/matchElo'
+import { scoreBadgeMinCh as computeScoreBadgeMinCh } from '@/lib/matchResultBadges'
 import { formatRegistrationSummary, isTournamentPoolsPhase, isTournamentRegistrationPhase, tournamentRegistrationCapacity } from '@/lib/tournamentDisplay'
 import TournamentDescriptionWithRegistrants from '@/components/TournamentDescriptionWithRegistrants.vue'
 import TournamentPoolsPreview from '@/components/TournamentPoolsPreview.vue'
-import { phaseLabel } from '@/lib/tournamentPhase'
+import { tournamentPhaseDisplay } from '@/lib/tournamentPhase'
 import { Badge } from '@/components/ui/badge'
 import {
   Card,
@@ -59,26 +60,8 @@ const topPlayers = computed(() =>
     .map((player, index) => ({ ...player, rank: index + 1 })),
 )
 
-function scoreLabel(objectives: number, survivors: number) {
-  return `${objectives} - ${survivors}`
-}
-
 /** Largeur commune des badges score (max sur les 5 parties). */
-const scoreBadgeMinCh = computed(() => {
-  let max = 0
-  for (const match of matches.value) {
-    if (match.status === 'in_progress' || !match.outcome) {
-      max = Math.max(max, Math.ceil('En cours'.length / 2))
-      continue
-    }
-    max = Math.max(
-      max,
-      scoreLabel(match.player1_objectives, match.player1_survivors).length,
-      scoreLabel(match.player2_objectives, match.player2_survivors).length,
-    )
-  }
-  return Math.max(max, 1)
-})
+const scoreBadgeMinCh = computed(() => computeScoreBadgeMinCh(matches.value))
 
 function rankBadgeClass(rank: number) {
   if (rank === 1) return 'rank-badge-gold tabular-nums font-semibold'
@@ -103,10 +86,6 @@ function openPlayer(player: RankedPlayer) {
 }
 
 function openMatch(id: number) {
-  if (matches.value.find((match) => match.id === id)?.status === 'in_progress') {
-    router.push({ name: 'partie-resume', params: { id: String(id) } })
-    return
-  }
   router.push({ name: 'match', params: { id: String(id) } })
 }
 
@@ -135,7 +114,7 @@ function openTournamentPool(poolId: number) {
 function matchContextLabel(match: MatchRecord) {
   const parts: string[] = []
   if (match.tournament_id != null && match.tournament_phase) {
-    const phase = phaseLabel(match.tournament_phase)
+    const phase = tournamentPhaseDisplay(match)
     if (phase) parts.push(phase)
   } else {
     parts.push(casualMatchContextLabel(match.counts_for_elo))

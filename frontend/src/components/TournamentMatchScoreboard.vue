@@ -1,13 +1,15 @@
 <script setup lang="ts">
+import { computed } from 'vue'
 import ArmyLogo from '@/components/ArmyLogo.vue'
 import MatchResultBadges from '@/components/MatchResultBadges.vue'
 import PlayerLink from '@/components/PlayerLink.vue'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { scoreBadgeMinCh } from '@/lib/matchResultBadges'
 import type { TournamentMatchForm } from '@/components/TournamentMatchCard.vue'
 import type { TournamentMatch } from '@/types/elo'
 
-withDefaults(
+const props = withDefaults(
   defineProps<{
     match: TournamentMatch
     mode: 'scores' | 'form' | 'players'
@@ -23,6 +25,8 @@ withDefaults(
     player2HasList2: false,
   },
 )
+
+const badgeMinCh = computed(() => scoreBadgeMinCh([props.match]))
 </script>
 
 <template>
@@ -56,7 +60,7 @@ withDefaults(
           outcome: null,
         }"
         pending-label="Non joué"
-        :badge-min-ch="5"
+        :badge-min-ch="badgeMinCh"
       />
       <MatchResultBadges
         v-else-if="match.is_forfeit && !match.outcome"
@@ -68,12 +72,24 @@ withDefaults(
           outcome: null,
         }"
         pending-label="Forfait"
-        :badge-min-ch="5"
+        :badge-min-ch="badgeMinCh"
+      />
+      <MatchResultBadges
+        v-else-if="match.status === 'submitted'"
+        :match="{
+          player1_objectives: 0,
+          player2_objectives: 0,
+          player1_survivors: 0,
+          player2_survivors: 0,
+          outcome: null,
+        }"
+        pending-label="À confirmer"
+        :badge-min-ch="badgeMinCh"
       />
       <MatchResultBadges
         v-else
         :match="match"
-        :badge-min-ch="5"
+        :badge-min-ch="badgeMinCh"
       />
     </div>
     <div class="flex min-w-0 items-center gap-1">

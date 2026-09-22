@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, watch } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { Settings2 } from '@lucide/vue'
 import {
   DropdownMenuContent,
@@ -19,6 +19,7 @@ import {
   canConfirmTournamentMatch,
   tournamentMatchScenarioPath,
 } from '@/lib/tournamentMatchDisplay'
+import { scoreBadgeMinCh } from '@/lib/matchResultBadges'
 import { useAuth } from '@/composables/useAuth'
 import { COUPE_REQUIRES_NETWORK } from '@/lib/partieOffline'
 import {
@@ -63,6 +64,8 @@ const emit = defineEmits<{
 const correctingMatchId = ref<number | null>(null)
 const confirmAck = useServerConfirmAck()
 const { user } = useAuth()
+
+const badgeMinCh = computed(() => scoreBadgeMinCh(props.matches))
 
 const menuItemClass =
   'flex cursor-pointer items-center gap-2 rounded-sm px-2 py-1.5 text-sm outline-none select-none data-[highlighted]:bg-accent data-[highlighted]:text-accent-foreground'
@@ -183,13 +186,25 @@ function hasScores(match: TournamentMatch) {
     || match.status === 'submitted'
     || match.is_forfeit
     || match.is_unplayed
+    || (match.status === 'scheduled' && Boolean(match.elo_match_id))
   )
 }
 
 function scoreColumnPendingLabel(match: TournamentMatch) {
   if (match.is_unplayed) return 'Non joué'
   if (match.is_forfeit) return 'Forfait'
+  if (match.status === 'submitted') return 'À confirmer'
+  if (match.status === 'scheduled' && match.elo_match_id) return 'En cours'
   return '—'
+}
+
+function showPendingScore(match: TournamentMatch) {
+  return (
+    match.is_unplayed
+    || (match.is_forfeit && !match.outcome)
+    || match.status === 'submitted'
+    || (match.status === 'scheduled' && Boolean(match.elo_match_id))
+  )
 }
 
 function scenarioLabel(match: TournamentMatch) {
@@ -293,7 +308,7 @@ watch(
               class="pool-match-result-badges"
             >
               <MatchResultBadges
-                v-if="match.is_unplayed || (match.is_forfeit && !match.outcome)"
+                v-if="showPendingScore(match)"
                 :match="{
                   player1_objectives: 0,
                   player2_objectives: 0,
@@ -302,12 +317,12 @@ watch(
                   outcome: null,
                 }"
                 :pending-label="scoreColumnPendingLabel(match)"
-                :badge-min-ch="5"
+                :badge-min-ch="badgeMinCh"
               />
               <MatchResultBadges
                 v-else
                 :match="match"
-                :badge-min-ch="5"
+                :badge-min-ch="badgeMinCh"
               />
             </div>
             <span v-else class="text-muted-foreground">—</span>

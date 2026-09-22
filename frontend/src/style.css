@@ -901,11 +901,11 @@
   }
 
   .pool-col-score {
-    @apply min-w-0 text-center;
+    @apply min-w-0 whitespace-nowrap text-center;
   }
 
   .pool-match-result-badges {
-    @apply flex justify-center [&_.mx-auto]:mx-0 [&_[data-slot=badge]]:h-5 [&_[data-slot=badge]]:px-1.5 [&_[data-slot=badge]]:text-[10px] [&_[data-slot=badge]]:leading-none;
+    @apply flex justify-center overflow-visible [&_.mx-auto]:mx-0 [&_[data-slot=badge]]:h-5 [&_[data-slot=badge]]:px-1.5 [&_[data-slot=badge]]:text-[10px] [&_[data-slot=badge]]:leading-none;
   }
 
   .pool-col-scenario {

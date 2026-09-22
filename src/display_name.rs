@@ -68,6 +68,14 @@ impl<'a> PlayerDisplayResolver<'a> {
     }
 
     pub fn enrich_match(&self, record: MatchRecord) -> EnrichedMatchRecord {
+        self.enrich_match_with_flags(record, false)
+    }
+
+    pub fn enrich_match_with_flags(
+        &self,
+        record: MatchRecord,
+        awaiting_confirmation: bool,
+    ) -> EnrichedMatchRecord {
         let player2_display_name = if record.is_guest_opponent() {
             record
                 .adversaire
@@ -82,6 +90,7 @@ impl<'a> PlayerDisplayResolver<'a> {
         EnrichedMatchRecord {
             player1_display_name: self.resolve(&record.player1),
             player2_display_name,
+            awaiting_confirmation,
             record,
         }
     }
@@ -154,6 +163,8 @@ pub struct EnrichedMatchRecord {
     pub record: MatchRecord,
     pub player1_display_name: String,
     pub player2_display_name: String,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub awaiting_confirmation: bool,
 }
 
 #[cfg(test)]

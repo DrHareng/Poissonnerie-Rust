@@ -1122,11 +1122,12 @@ async fn get_army_matches(
     for record in &mut records {
         prepare_match_for_viewer(&state, record, viewer.as_deref());
     }
+    let unconfirmed = unconfirmed_result_match_ids(&state);
     let board = state.board.lock().unwrap();
     let resolver = crate::display_name::PlayerDisplayResolver::new(&board, state.users.as_ref());
     let matches = records
         .into_iter()
-        .map(|record| resolver.enrich_match(record))
+        .map(|record| enrich_listed_match(&resolver, record, &unconfirmed))
         .collect();
     Ok(Json(matches))
 }
@@ -1206,6 +1207,39 @@ fn prepare_match_for_viewer(
 ) {
     mask_tournament_elo_lists(state, record, viewer_player);
     mask_draft_reports(record, viewer_player);
+    enrich_tournament_context(state, record);
+}
+
+fn enrich_tournament_context(state: &AppState, record: &mut MatchRecord) {
+    let Some(tournament_id) = record.tournament_id else {
+        return;
+    };
+    if record
+        .tournament_name
+        .as_ref()
+        .is_none_or(|name| name.trim().is_empty())
+    {
+        record.tournament_name = state
+            .tournaments
+            .get(tournament_id)
+            .ok()
+            .flatten()
+            .map(|tournament| tournament.name);
+    }
+    if record.tournament_phase.as_deref() != Some("pool") {
+        return;
+    }
+    if record
+        .tournament_pool_name
+        .as_ref()
+        .is_none_or(|name| name.trim().is_empty())
+    {
+        record.tournament_pool_name = state
+            .tournaments
+            .elo_match_pool_name(record.id)
+            .ok()
+            .flatten();
+    }
 }
 
 fn unconfirmed_result_match_ids(state: &AppState) -> HashSet<u64> {
@@ -1213,6 +1247,15 @@ fn unconfirmed_result_match_ids(state: &AppState) -> HashSet<u64> {
         .tournaments
         .unconfirmed_result_elo_match_ids()
         .unwrap_or_default()
+}
+
+fn enrich_listed_match(
+    resolver: &crate::display_name::PlayerDisplayResolver<'_>,
+    record: MatchRecord,
+    unconfirmed: &HashSet<u64>,
+) -> crate::display_name::EnrichedMatchRecord {
+    let awaiting = unconfirmed.contains(&record.id);
+    resolver.enrich_match_with_flags(record, awaiting)
 }
 
 async fn list_matches(
@@ -1223,13 +1266,14 @@ async fn list_matches(
     let viewer = viewer_player_name(&state, &session).await;
     let limit = query.limit.clamp(1, 100);
     let offset = query.offset;
-    let hidden_ids = unconfirmed_result_match_ids(&state);
+    let unconfirmed = unconfirmed_result_match_ids(&state);
+    let none_hidden = HashSet::new();
 
     let (total, mut records) = {
         let board = state.board.lock().unwrap();
-        let total = board.listed_match_count(&hidden_ids);
+        let total = board.listed_match_count(&none_hidden);
         let records: Vec<_> = board
-            .recent_matches_page(limit, offset, &hidden_ids)
+            .recent_matches_page(limit, offset, &none_hidden)
             .into_iter()
             .cloned()
             .collect();
@@ -1244,7 +1288,7 @@ async fn list_matches(
     let resolver = crate::display_name::PlayerDisplayResolver::new(&board, state.users.as_ref());
     let matches = records
         .into_iter()
-        .map(|record| resolver.enrich_match(record))
+        .map(|record| enrich_listed_match(&resolver, record, &unconfirmed))
         .collect();
     Json(MatchListResponse {
         items: matches,
@@ -1336,11 +1380,12 @@ async fn get_player_matches(
 ) -> Result<Json<Vec<crate::display_name::EnrichedMatchRecord>>, ApiError> {
     let viewer = viewer_player_name(&state, &session).await;
     let limit = query.limit.clamp(1, 500);
-    let hidden_ids = unconfirmed_result_match_ids(&state);
+    let unconfirmed = unconfirmed_result_match_ids(&state);
+    let none_hidden = HashSet::new();
     let mut records = {
         let board = state.board.lock().unwrap();
         board
-            .player_matches_excluding(&name, limit, &hidden_ids)
+            .player_matches_excluding(&name, limit, &none_hidden)
             .map_err(|error| ApiError::bad_request(error.to_string()))?
             .into_iter()
             .cloned()
@@ -1353,7 +1398,7 @@ async fn get_player_matches(
     let resolver = crate::display_name::PlayerDisplayResolver::new(&board, state.users.as_ref());
     let matches = records
         .into_iter()
-        .map(|record| resolver.enrich_match(record))
+        .map(|record| enrich_listed_match(&resolver, record, &unconfirmed))
         .collect();
     Ok(Json(matches))
 }
@@ -1724,9 +1769,10 @@ async fn get_match(
             .clone()
     };
     prepare_match_for_viewer(&state, &mut record, viewer.as_deref());
+    let unconfirmed = unconfirmed_result_match_ids(&state);
     let board = state.board.lock().unwrap();
     let resolver = crate::display_name::PlayerDisplayResolver::new(&board, state.users.as_ref());
-    Ok(Json(resolver.enrich_match(record)))
+    Ok(Json(enrich_listed_match(&resolver, record, &unconfirmed)))
 }
 
 async fn start_match(
@@ -2585,12 +2631,11 @@ async fn get_army_list_matches(
         .map_err(|error| ApiError::bad_request(error.to_string()))?;
 
     let viewer = viewer_player_name(&state, &session).await;
-    let hidden_ids = unconfirmed_result_match_ids(&state);
+    let unconfirmed = unconfirmed_result_match_ids(&state);
     let mut records = {
         let board = state.board.lock().unwrap();
         match_ids
             .into_iter()
-            .filter(|match_id| !hidden_ids.contains(match_id))
             .filter_map(|match_id| board.get_match(match_id).cloned())
             .collect::<Vec<_>>()
     };
@@ -2601,7 +2646,7 @@ async fn get_army_list_matches(
     let resolver = crate::display_name::PlayerDisplayResolver::new(&board, state.users.as_ref());
     let matches = records
         .into_iter()
-        .map(|record| resolver.enrich_match(record))
+        .map(|record| enrich_listed_match(&resolver, record, &unconfirmed))
         .collect();
     Ok(Json(matches))
 }

@@ -61,6 +61,7 @@ import { waitConfirmationAck } from '@/composables/useServerConfirmAck'
 import { secondaryImageSrc } from '@/lib/secondaryImages'
 import { shufflePick } from '@/lib/shufflePick'
 import { formatPartieMatchup } from '@/lib/tournamentMatchDisplay'
+import { canResumePartie } from '@/lib/matchParticipant'
 import { externalHref } from '@/lib/utils'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
@@ -74,8 +75,8 @@ import {
 
 const route = useRoute()
 const router = useRouter()
-const { player: currentPlayer, isAuthenticated, login } = useAuth()
-const { showAdminUi: isAdmin } = useAdminEditMode()
+const { player: currentPlayer, isAuthenticated, login, initialized: authInitialized } = useAuth()
+const { showAdminUi: isAdmin, isEditMode } = useAdminEditMode()
 const { setCustomSide } = useAppSidePanel()
 const { isOnline } = useNetworkStatus()
 
@@ -355,6 +356,21 @@ function openMissionSecondaryViewer(slug: string) {
   missionImageViewerOpen.value = true
 }
 
+function redirectSpectatorToMatchPage(record: MatchRecord) {
+  if (record.id <= 0) return false
+  if (!authInitialized.value) return false
+  if (
+    canResumePartie(record, {
+      playerName: currentPlayer.value?.name,
+      isEditMode: isEditMode.value,
+    })
+  ) {
+    return false
+  }
+  void router.replace({ name: 'match', params: { id: String(record.id) } })
+  return true
+}
+
 function hydrateFromMatch(record: MatchRecord) {
   setMatchId(record.id)
   if (record.client_uuid) setClientUuid(record.client_uuid)
@@ -482,6 +498,7 @@ async function loadData() {
             router.replace(`/matchs/${record.id}`)
             return
           }
+          if (redirectSpectatorToMatchPage(record)) return
           hydrateFromMatch(record)
         } catch {
           /* conserver le brouillon local */
@@ -498,6 +515,7 @@ async function loadData() {
         router.replace(`/matchs/${resumeId}`)
         return
       }
+      if (redirectSpectatorToMatchPage(record)) return
       hydrateFromMatch(record)
 
       let tmId = tournamentMatchId.value
@@ -881,6 +899,29 @@ watch(
   () => String(route.params.id ?? ''),
   (next, prev) => {
     if (next !== prev) void loadData()
+  },
+)
+
+watch(
+  [authInitialized, isEditMode, () => currentPlayer.value?.name, matchId],
+  () => {
+    if (!authInitialized.value || !matchId.value) return
+    if (
+      canResumePartie(
+        {
+          player1: player1.value?.name ?? '',
+          player2: player2.value?.name ?? '',
+          status: 'in_progress',
+        },
+        {
+          playerName: currentPlayer.value?.name,
+          isEditMode: isEditMode.value,
+        },
+      )
+    ) {
+      return
+    }
+    void router.replace({ name: 'match', params: { id: String(matchId.value) } })
   },
 )
 
