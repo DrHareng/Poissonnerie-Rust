@@ -1,7 +1,7 @@
 use axum::{
     body::Body,
     extract::{DefaultBodyLimit, Multipart, Path, Query, State},
-    http::{header, HeaderValue, StatusCode},
+    http::{header, HeaderMap, HeaderValue, StatusCode},
     response::Response,
     routing::{get, post},
     Json, Router,
@@ -34,6 +34,7 @@ pub fn tts_map_routes() -> Router<AppState> {
         .layer(DefaultBodyLimit::max(UPLOAD_BODY_LIMIT));
 
     Router::new()
+        .route("/api/maps", get(list_map_catalog))
         .route("/api/tts-maps", get(list_maps).post(create_map))
         .route(
             "/api/tts-maps/{id}",
@@ -89,6 +90,46 @@ async fn require_admin(state: &AppState, session: &Session) -> Result<User, ApiE
         return Err(ApiError::unauthorized("droits administrateur requis"));
     }
     Ok(user)
+}
+
+async fn list_map_catalog(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> Result<Json<Vec<tts_map::PublicMap>>, ApiError> {
+    let base = public_infinity_base(&headers);
+    state
+        .tts_maps
+        .list_public_maps(&base)
+        .map(Json)
+        .map_err(|error| ApiError::bad_request(error.to_string()))
+}
+
+fn public_infinity_base(headers: &HeaderMap) -> String {
+    let host = headers
+        .get(header::HOST)
+        .and_then(|value| value.to_str().ok())
+        .map(str::trim)
+        .filter(|host| {
+            !host.is_empty()
+                && host.len() <= 255
+                && host.bytes().all(|byte| {
+                    byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b':' | b'-' | b'[' | b']')
+                })
+        });
+    if let Some(host) = host {
+        let proto = headers
+            .get("x-forwarded-proto")
+            .and_then(|value| value.to_str().ok())
+            .and_then(|value| value.split(',').next())
+            .map(str::trim)
+            .filter(|proto| *proto == "http" || *proto == "https")
+            .unwrap_or("http");
+        return format!("{proto}://{host}/infinity");
+    }
+    std::env::var("FRONTEND_URL")
+        .unwrap_or_else(|_| "http://127.0.0.1:5173/infinity".into())
+        .trim_end_matches('/')
+        .to_string()
 }
 
 async fn list_maps(

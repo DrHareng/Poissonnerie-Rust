@@ -32,6 +32,15 @@ pub struct TtsMapSummary {
     pub updated_at: u64,
 }
 
+#[derive(Debug, Clone, Serialize, PartialEq)]
+pub struct PublicMap {
+    pub id: i64,
+    pub name: String,
+    pub created_at: String,
+    pub json: Option<serde_json::Value>,
+    pub images: Vec<String>,
+}
+
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub struct TtsMapPicture {
     pub id: i64,
@@ -188,6 +197,31 @@ impl TtsMapStore {
             }
         }
         Ok(maps)
+    }
+
+    pub fn list_public_maps(&self, public_base: &str) -> Result<Vec<PublicMap>> {
+        let maps = self.list_maps()?;
+        let base = public_base.trim_end_matches('/');
+        let mut catalog = Vec::with_capacity(maps.len());
+        for map in maps {
+            let json = match self.json_file_path(map.id)? {
+                Some((path, _)) => read_json_value(&path),
+                None => None,
+            };
+            let images = map
+                .pictures
+                .iter()
+                .map(|picture| format!("{base}{}", picture.url))
+                .collect();
+            catalog.push(PublicMap {
+                id: map.id,
+                name: map.name,
+                created_at: format_created_at(map.created_at),
+                json,
+                images,
+            });
+        }
+        Ok(catalog)
     }
 
     pub fn get_map(&self, id: i64) -> Result<Option<TtsMapDetail>> {
@@ -1012,6 +1046,31 @@ impl TtsMapStore {
     }
 }
 
+fn read_json_value(path: &Path) -> Option<serde_json::Value> {
+    let bytes = fs::read(path).ok()?;
+    let bytes = bytes
+        .strip_prefix(b"\xEF\xBB\xBF")
+        .unwrap_or(bytes.as_slice());
+    serde_json::from_slice(bytes).ok()
+}
+
+fn format_created_at(unix: u64) -> String {
+    let Ok(dt) = time::OffsetDateTime::from_unix_timestamp(unix as i64) else {
+        return unix.to_string();
+    };
+    let date = dt.date();
+    let clock = dt.time();
+    format!(
+        "{:04}-{:02}-{:02}T{:02}:{:02}:{:02}Z",
+        date.year(),
+        u8::from(date.month()),
+        date.day(),
+        clock.hour(),
+        clock.minute(),
+        clock.second()
+    )
+}
+
 pub fn picture_url(map_id: i64, filename: &str) -> String {
     format!(
         "/api/tts-maps/{map_id}/pictures/{}",
@@ -1468,6 +1527,41 @@ mod tests {
         assert!(store.list_maps().unwrap().is_empty());
         assert!(!map_dir.exists());
 
+        let _ = fs::remove_file(&path);
+    }
+
+    #[test]
+    fn public_catalog_embeds_json_and_absolute_image_urls() {
+        let (store, path) = temp_store();
+        let created = store.create_map("Plage").unwrap();
+        store
+            .save_json(created.id, "table.json", br#"{"Tabletop":true,"n":2}"#)
+            .unwrap();
+        store
+            .add_picture(created.id, "Vue nord.png", &[0x89, b'P', b'N', b'G'])
+            .unwrap();
+        let empty = store.create_map("Vide").unwrap();
+
+        let catalog = store
+            .list_public_maps("http://example.test/infinity/")
+            .unwrap();
+        let plage = catalog.iter().find(|map| map.id == created.id).unwrap();
+        assert_eq!(plage.name, "Plage");
+        assert!(plage.created_at.ends_with('Z'));
+        assert!(plage.created_at.contains('T'));
+        assert_eq!(plage.json.as_ref().unwrap()["Tabletop"], true);
+        assert_eq!(plage.json.as_ref().unwrap()["n"], 2);
+        assert_eq!(
+            plage.images,
+            vec![format!(
+                "http://example.test/infinity/api/tts-maps/{}/pictures/Vue_nord.png",
+                created.id
+            )]
+        );
+
+        let vide = catalog.iter().find(|map| map.id == empty.id).unwrap();
+        assert!(vide.json.is_none());
+        assert!(vide.images.is_empty());
         let _ = fs::remove_file(&path);
     }
 
