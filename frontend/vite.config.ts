@@ -21,6 +21,12 @@ export default defineConfig({
         target: 'http://127.0.0.1:3000',
         rewrite: (p) => p.replace(/^\/infinity/, ''),
       },
+      // Même entrée locale que la prod (Nginx) : /dauphine → SPA Dauphiné (port 5174).
+      '/dauphine': {
+        target: 'http://127.0.0.1:5174',
+        changeOrigin: true,
+        ws: true,
+      },
     },
   },
 })

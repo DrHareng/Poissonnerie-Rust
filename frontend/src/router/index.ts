@@ -14,6 +14,7 @@ import PartiePage from '@/pages/PartiePage.vue'
 import RessourcesPage from '@/pages/RessourcesPage.vue'
 import AdminPage from '@/pages/AdminPage.vue'
 import TtsMapReportsPage from '@/pages/TtsMapReportsPage.vue'
+import NotFoundPage from '@/pages/NotFoundPage.vue'
 import { pageTitle } from '@/lib/pageTitle'
 
 export const router = createRouter({
@@ -161,6 +162,12 @@ export const router = createRouter({
       name: 'admin-tts-reports',
       component: TtsMapReportsPage,
       meta: { title: 'Signalements TTS' },
+    },
+    {
+      path: '/:pathMatch(.*)*',
+      name: 'not-found',
+      component: NotFoundPage,
+      meta: { title: '404' },
     },
   ],
 })

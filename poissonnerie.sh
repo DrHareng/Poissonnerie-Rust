@@ -403,7 +403,7 @@ cmd_start() {
         stop_dauphine
         exit 1
     fi
-    log "Tout est prêt. Infinity : http://$FRONTEND_ADDR/infinity/ — Dauphiné : http://$DAUPHINE_ADDR/dauphine/"
+    log "Tout est prêt. Infinity : http://$FRONTEND_ADDR/infinity/ — Dauphiné : http://$FRONTEND_ADDR/dauphine/"
     log "Logs : $LOG_DIR"
 }
 
@@ -447,9 +447,9 @@ cmd_status() {
 
     if pid_is_running "$dauphine_pid" || port_is_open "$DAUPHINE_ADDR"; then
         if pid_is_running "$dauphine_pid"; then
-            printf 'Dauphiné  : en cours (PID %s, http://%s/dauphine/)\n' "$dauphine_pid" "$DAUPHINE_ADDR"
+            printf 'Dauphiné  : en cours (PID %s, http://%s/dauphine/ via %s)\n' "$dauphine_pid" "$FRONTEND_ADDR" "$DAUPHINE_ADDR"
         else
-            printf 'Dauphiné  : port %s ouvert (PID inconnu)\n' "$DAUPHINE_ADDR"
+            printf 'Dauphiné  : port %s ouvert (PID inconnu) — entrée http://%s/dauphine/\n' "$DAUPHINE_ADDR" "$FRONTEND_ADDR"
         fi
     else
         printf 'Dauphiné  : arrêté\n'
