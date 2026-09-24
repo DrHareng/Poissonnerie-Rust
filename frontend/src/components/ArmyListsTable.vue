@@ -2,10 +2,12 @@
 import { computed, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { List } from '@lucide/vue'
-import type { ArmyListStatsEntry } from '@/types/elo'
+import type { Army, ArmyListStatsEntry } from '@/types/elo'
 import ArmyLogo from '@/components/ArmyLogo.vue'
 import ArmyListMatchesPanel from '@/components/ArmyListMatchesPanel.vue'
 import ArmyListQuickActions from '@/components/ArmyListQuickActions.vue'
+import PlayerLink from '@/components/PlayerLink.vue'
+import SectorialPicker from '@/components/SectorialPicker.vue'
 import WinDrawLossBar from '@/components/WinDrawLossBar.vue'
 import { useArmies } from '@/composables/useArmies'
 import { formatMatchRecordedDate } from '@/lib/tournamentMatchDisplay'
@@ -30,7 +32,13 @@ import {
 const props = defineProps<{
   armyId: number | null
   lists: ArmyListStatsEntry[]
+  armies: Army[]
   loading?: boolean
+  armiesLoading?: boolean
+}>()
+
+const emit = defineEmits<{
+  'update:armyId': [value: number | null]
 }>()
 
 const router = useRouter()
@@ -42,6 +50,20 @@ void ensureLoaded()
 const armyName = computed(() => {
   if (!props.armyId) return null
   return getArmy(props.armyId)?.name ?? `Sectorielle #${props.armyId}`
+})
+
+const pickerValue = computed({
+  get() {
+    return props.armyId != null ? String(props.armyId) : undefined
+  },
+  set(value: string | undefined) {
+    if (value == null || value === '') {
+      emit('update:armyId', null)
+      return
+    }
+    const id = Number(value)
+    emit('update:armyId', Number.isFinite(id) ? id : null)
+  },
 })
 
 function formatWinRate(winRate: number) {
@@ -69,21 +91,36 @@ function toggleDetail(listId: number) {
 <template>
   <Card class="neon-panel">
     <CardHeader>
-      <CardTitle class="flex items-center gap-2">
-        <button
-          v-if="armyId"
-          type="button"
-          class="inline-flex items-center gap-2 text-left hover:underline"
-          @click="openSectorielle"
-        >
-          <ArmyLogo :army-id="armyId" />
-          {{ armyName }}
-        </button>
-        <span v-else>Listes d'armée</span>
-      </CardTitle>
-      <CardDescription>
-        Statistiques issues des matchs enregistrés (hors tournois en cours).
-      </CardDescription>
+      <div class="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div class="min-w-0 space-y-1.5">
+          <CardTitle class="flex items-center gap-2">
+            <button
+              v-if="armyId"
+              type="button"
+              class="inline-flex items-center gap-2 text-left hover:underline"
+              @click="openSectorielle"
+            >
+              <ArmyLogo :army-id="armyId" />
+              {{ armyName }}
+            </button>
+            <span v-else>Listes d'armée</span>
+          </CardTitle>
+          <CardDescription>
+            Statistiques issues des matchs enregistrés (hors tournois en cours).
+          </CardDescription>
+        </div>
+        <SectorialPicker
+          v-model="pickerValue"
+          class="w-full shrink-0 sm:w-64"
+          :armies="armies"
+          :disabled="armiesLoading || armies.length === 0"
+          :placeholder="
+            armiesLoading
+              ? 'Chargement…'
+              : 'Tapez pour chercher une armée'
+          "
+        />
+      </div>
     </CardHeader>
     <CardContent>
       <div
@@ -111,6 +148,7 @@ function toggleDetail(listId: number) {
         <TableHeader>
           <TableRow>
             <TableHead>Liste</TableHead>
+            <TableHead>Joueur</TableHead>
             <TableHead class="text-right">Win rate</TableHead>
             <TableHead class="text-right">Parties</TableHead>
             <TableHead>Bilan</TableHead>
@@ -123,6 +161,14 @@ function toggleDetail(listId: number) {
             <TableRow>
               <TableCell class="max-w-[14rem] truncate text-sm" :title="entry.code">
                 {{ listLabel(entry) }}
+              </TableCell>
+              <TableCell class="max-w-[10rem] truncate text-sm">
+                <PlayerLink
+                  v-if="entry.origin_player"
+                  :name="entry.origin_player"
+                  :display-name="entry.origin_player_display_name"
+                />
+                <span v-else class="text-muted-foreground">—</span>
               </TableCell>
               <TableCell class="text-right font-semibold tabular-nums elo-score">
                 {{ formatWinRate(entry.win_rate) }}
@@ -161,7 +207,7 @@ function toggleDetail(listId: number) {
               </TableCell>
             </TableRow>
             <TableRow v-if="expandedListId === entry.id">
-              <TableCell colspan="6" class="p-0">
+              <TableCell colspan="7" class="p-0">
                 <ArmyListMatchesPanel :list-id="entry.id" />
               </TableCell>
             </TableRow>

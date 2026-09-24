@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, ref, watch } from 'vue'
-import { RouterLink, useRoute, useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { toast } from 'vue-sonner'
 import { Play, Trash2 } from '@lucide/vue'
 import {
@@ -20,7 +20,6 @@ import MatchContextCell from '@/components/MatchContextCell.vue'
 import PageTitleTabs from '@/components/PageTitleTabs.vue'
 import { useAuth } from '@/composables/useAuth'
 import { useAdminEditMode } from '@/composables/useAdminEditMode'
-import { useAppSidePanel } from '@/composables/useAppSidePanel'
 import { useArmies } from '@/composables/useArmies'
 import { useListPage } from '@/composables/useListPage'
 import { useMyInProgressMatches, inProgressMenuLabel } from '@/composables/useMyInProgressMatches'
@@ -58,7 +57,6 @@ const router = useRouter()
 const route = useRoute()
 const { isAuthenticated, player } = useAuth()
 const { showAdminUi: isAdmin, isEditMode } = useAdminEditMode()
-const { setCustomSide } = useAppSidePanel()
 const { armies, ensureLoaded } = useArmies()
 const {
   allMatches,
@@ -119,8 +117,6 @@ const playableArmies = computed(() =>
     .filter((army) => isListableArmy(army))
     .sort((a, b) => a.id - b.id),
 )
-
-const showArmyListsSide = computed(() => isListsTab.value)
 
 const inProgressTitle = computed(() => {
   const count = inProgress.value.length
@@ -187,10 +183,6 @@ function armyIdFromSlug(slug: string | null): number | null {
   )
 }
 
-function armyTo(slug: string) {
-  return { name: 'matchs-listes' as const, query: { army: slug } }
-}
-
 function syncArmyQuery(armyId: number | null) {
   if (!isListsTab.value) return
   const army = playableArmies.value.find((item) => item.id === armyId)
@@ -230,37 +222,12 @@ function initArmySelection() {
   syncArmyQuery(selectedArmyId.value)
 }
 
-/** Clic gauche : mémorise. Molette / nouvel onglet : navigation native via RouterLink. */
-function onArmyLinkClick(armyId: number, event: MouseEvent) {
-  if (
-    event.button !== 0 ||
-    event.metaKey ||
-    event.ctrlKey ||
-    event.shiftKey ||
-    event.altKey
-  ) {
-    return
-  }
+function onSelectedArmyIdUpdate(armyId: number | null) {
+  // Ignorer le clear temporaire pendant la saisie dans le picker.
+  if (armyId == null) return
   selectedArmyId.value = armyId
   persistArmySelection()
-}
-
-function scrollActiveArmyIntoView() {
-  const run = () => {
-    document.querySelectorAll('.scenario-side-item--active').forEach((el) => {
-      ;(el as HTMLElement).scrollIntoView({
-        block: 'center',
-        inline: 'nearest',
-      })
-    })
-  }
-  void nextTick(() => {
-    run()
-    requestAnimationFrame(() => {
-      run()
-      requestAnimationFrame(run)
-    })
-  })
+  syncArmyQuery(armyId)
 }
 
 async function refreshMatches() {
@@ -430,15 +397,6 @@ watch(
   },
 )
 
-watch(
-  [showArmyListsSide, selectedArmyId, () => playableArmies.value.length],
-  ([sideVisible, armyId]) => {
-    if (!sideVisible || armyId == null) return
-    scrollActiveArmyIntoView()
-  },
-  { flush: 'post' },
-)
-
 watch(isReportsTab, (isReports) => {
   if (isReports) {
     void refreshReports()
@@ -456,12 +414,6 @@ watch(isListsTab, (active) => {
     void refreshAll()
   }
 })
-
-watch(
-  showArmyListsSide,
-  (active) => setCustomSide(active),
-  { immediate: true },
-)
 
 watch(() => route.hash, scrollToHash)
 watch(loadingInProgress, (loading) => {
@@ -491,48 +443,6 @@ onMounted(async () => {
         puis rechargez la page.
       </AlertDescription>
     </Alert>
-
-    <Teleport defer to="#app-side-panel">
-      <Card
-        v-if="showArmyListsSide"
-        class="neon-panel flex h-full max-h-full min-h-0 flex-col overflow-hidden"
-      >
-        <CardHeader class="shrink-0 pb-3">
-          <CardTitle>Sectorielles</CardTitle>
-          <CardDescription>
-            Choisissez une sectorielle pour afficher ses listes.
-          </CardDescription>
-        </CardHeader>
-        <CardContent class="min-h-0 flex-1 overflow-y-auto pt-0">
-          <div
-            v-if="loadingArmies"
-            class="px-1 text-sm text-muted-foreground"
-          >
-            Chargement…
-          </div>
-          <nav
-            v-else
-            class="scenario-side-list"
-            aria-label="Sectorielles jouables"
-          >
-            <RouterLink
-              v-for="army in playableArmies"
-              :key="army.id"
-              :to="armyTo(army.slug)"
-              class="scenario-side-item flex items-center gap-2"
-              :class="{
-                'scenario-side-item--active': selectedArmyId === army.id,
-              }"
-              :aria-current="selectedArmyId === army.id ? 'page' : undefined"
-              @click="onArmyLinkClick(army.id, $event)"
-            >
-              <ArmyLogo :army-id="army.id" />
-              <span class="min-w-0 truncate">{{ army.name }}</span>
-            </RouterLink>
-          </nav>
-        </CardContent>
-      </Card>
-    </Teleport>
 
     <Card
       v-if="showInProgress"
@@ -640,50 +550,15 @@ onMounted(async () => {
       </CardContent>
     </Card>
 
-    <template v-if="isListsTab">
-      <Card class="neon-panel lg:hidden">
-        <CardHeader class="pb-3">
-          <CardTitle>Sectorielles</CardTitle>
-          <CardDescription>
-            Choisissez une sectorielle pour afficher ses listes.
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <div
-            v-if="loadingArmies"
-            class="text-sm text-muted-foreground"
-          >
-            Chargement…
-          </div>
-          <nav
-            v-else
-            class="scenario-side-list"
-            aria-label="Sectorielles jouables"
-          >
-            <RouterLink
-              v-for="army in playableArmies"
-              :key="`mobile-${army.id}`"
-              :to="armyTo(army.slug)"
-              class="scenario-side-item flex items-center gap-2"
-              :class="{
-                'scenario-side-item--active': selectedArmyId === army.id,
-              }"
-              :aria-current="selectedArmyId === army.id ? 'page' : undefined"
-              @click="onArmyLinkClick(army.id, $event)"
-            >
-              <ArmyLogo :army-id="army.id" />
-              <span class="min-w-0 truncate">{{ army.name }}</span>
-            </RouterLink>
-          </nav>
-        </CardContent>
-      </Card>
-
-      <ArmyListsTable
-        :army-id="selectedArmyId"
-        :lists="selectedArmyLists"
-        :loading="loadingArmyLists || loadingArmies"
-      />
-    </template>
+    <ArmyListsTable
+      v-if="isListsTab"
+      :army-id="selectedArmyId"
+      :lists="selectedArmyLists"
+      :armies="playableArmies"
+      :loading="loadingArmyLists || loadingArmies"
+      :armies-loading="loadingArmies"
+      @update:army-id="onSelectedArmyIdUpdate"
+    />
 
     <RecentReportsList
       v-else-if="isReportsTab"

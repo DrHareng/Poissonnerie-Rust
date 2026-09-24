@@ -445,6 +445,8 @@ export interface ArmyListStatsEntry {
   code: string
   army_id: number
   name?: string | null
+  origin_player?: string | null
+  origin_player_display_name?: string | null
   wins: number
   draws: number
   losses: number

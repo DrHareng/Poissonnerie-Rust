@@ -25,6 +25,10 @@ pub struct ArmyListStatsEntry {
     pub code: String,
     pub army_id: u32,
     pub name: Option<String>,
+    /// Joueur le plus souvent associé à cette liste (origine / « propriétaire »).
+    pub origin_player: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub origin_player_display_name: Option<String>,
     pub wins: u32,
     pub draws: u32,
     pub losses: u32,
@@ -182,6 +186,8 @@ fn list_stats_by_army_in_conn(
             SELECT
                 m.outcome,
                 m.recorded_at,
+                m.player1,
+                m.player2,
                 m.player1_army_list_id AS p1_list,
                 m.player2_army_list_id AS p2_list
             FROM matches m
@@ -196,10 +202,10 @@ fn list_stats_by_army_in_conn(
               AND (m.player1_army_list_id IS NOT NULL OR m.player2_army_list_id IS NOT NULL)
         ),
         appearances AS (
-            SELECT p1_list AS army_list_id, outcome, recorded_at, 1 AS side
+            SELECT p1_list AS army_list_id, player1 AS player_name, outcome, recorded_at, 1 AS side
             FROM eligible WHERE p1_list IS NOT NULL
             UNION ALL
-            SELECT p2_list AS army_list_id, outcome, recorded_at, 2 AS side
+            SELECT p2_list AS army_list_id, player2 AS player_name, outcome, recorded_at, 2 AS side
             FROM eligible WHERE p2_list IS NOT NULL
         ),
         scored AS (
@@ -214,12 +220,30 @@ fn list_stats_by_army_in_conn(
                     ELSE 'draw'
                 END AS result
             FROM appearances
+        ),
+        origin AS (
+            SELECT army_list_id, player_name
+            FROM (
+                SELECT
+                    army_list_id,
+                    player_name,
+                    COUNT(*) AS uses,
+                    MIN(recorded_at) AS first_at,
+                    ROW_NUMBER() OVER (
+                        PARTITION BY army_list_id
+                        ORDER BY COUNT(*) DESC, MIN(recorded_at) ASC, player_name ASC
+                    ) AS rn
+                FROM appearances
+                GROUP BY army_list_id, player_name
+            )
+            WHERE rn = 1
         )
         SELECT
             al.id,
             al.code,
             al.army_id,
             al.name,
+            MAX(o.player_name) AS origin_player,
             SUM(CASE WHEN s.result = 'win' THEN 1 ELSE 0 END) AS wins,
             SUM(CASE WHEN s.result = 'draw' THEN 1 ELSE 0 END) AS draws,
             SUM(CASE WHEN s.result = 'loss' THEN 1 ELSE 0 END) AS losses,
@@ -227,6 +251,7 @@ fn list_stats_by_army_in_conn(
             MAX(s.recorded_at) AS last_used_at
         FROM army_lists al
         INNER JOIN scored s ON s.army_list_id = al.id
+        LEFT JOIN origin o ON o.army_list_id = al.id
     ";
 
     let entries = if let Some(ids) = army_ids {
@@ -298,10 +323,10 @@ fn list_match_ids_in_conn(
 }
 
 fn map_stats_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<ArmyListStatsEntry> {
-    let wins: u32 = row.get(4)?;
-    let draws: u32 = row.get(5)?;
-    let losses: u32 = row.get(6)?;
-    let games: u32 = row.get(7)?;
+    let wins: u32 = row.get(5)?;
+    let draws: u32 = row.get(6)?;
+    let losses: u32 = row.get(7)?;
+    let games: u32 = row.get(8)?;
     let win_rate = if games == 0 {
         0.0
     } else {
@@ -312,12 +337,14 @@ fn map_stats_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<ArmyListStatsEntry
         code: row.get(1)?,
         army_id: row.get(2)?,
         name: row.get(3)?,
+        origin_player: row.get(4)?,
+        origin_player_display_name: None,
         wins,
         draws,
         losses,
         games,
         win_rate,
-        last_used_at: row.get(8)?,
+        last_used_at: row.get(9)?,
     })
 }
 

@@ -2595,10 +2595,21 @@ async fn list_army_lists(
             .collect::<Vec<_>>()
     });
     let filter = army_ids.as_deref();
-    let groups = state
+    let mut groups = state
         .army_lists
         .list_stats_by_army(filter)
         .map_err(|error| ApiError::bad_request(error.to_string()))?;
+    {
+        let board = state.board.lock().unwrap();
+        let resolver = crate::display_name::PlayerDisplayResolver::new(&board, state.users.as_ref());
+        for group in &mut groups {
+            for entry in &mut group.lists {
+                if let Some(player) = entry.origin_player.as_deref() {
+                    entry.origin_player_display_name = Some(resolver.resolve(player));
+                }
+            }
+        }
+    }
     Ok(Json(groups))
 }
 
