@@ -1052,16 +1052,6 @@ fn migrate_tts_maps(conn: &Connection) -> Result<()> {
         CREATE INDEX IF NOT EXISTS idx_tts_map_pictures_map
             ON tts_map_pictures(map_id);
 
-        CREATE TABLE IF NOT EXISTS tts_module_updates (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            body_md TEXT NOT NULL,
-            created_at INTEGER NOT NULL,
-            updated_at INTEGER NOT NULL
-        );
-
-        CREATE INDEX IF NOT EXISTS idx_tts_module_updates_created
-            ON tts_module_updates(created_at DESC, id DESC);
-
         CREATE TABLE IF NOT EXISTS tts_map_reports (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             map_id INTEGER NOT NULL REFERENCES tts_maps(id) ON DELETE CASCADE,
@@ -1103,6 +1093,12 @@ fn migrate_tts_maps(conn: &Connection) -> Result<()> {
         "users",
         "tts_map_slug",
         "ALTER TABLE users ADD COLUMN tts_map_slug TEXT",
+    )?;
+    conn.execute_batch(
+        "
+        DROP INDEX IF EXISTS idx_tts_module_updates_created;
+        DROP TABLE IF EXISTS tts_module_updates;
+        ",
     )?;
     Ok(())
 }

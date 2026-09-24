@@ -34,7 +34,6 @@ import type {
   TtsMapReport,
   TtsMapSummary,
   TtsMapVariant,
-  TtsModuleUpdate,
   User,
 } from '@/types/elo'
 import { withBase } from '@/lib/basePath'
@@ -231,31 +230,6 @@ export function renameTtsMap(id: number, name: string): Promise<TtsMapDetail> {
 
 export function deleteTtsMap(id: number): Promise<void> {
   return request(`/api/tts-maps/${id}`, { method: 'DELETE' })
-}
-
-export function fetchTtsModuleUpdates(): Promise<TtsModuleUpdate[]> {
-  return request('/api/tts-module-updates')
-}
-
-export function createTtsModuleUpdate(bodyMd: string): Promise<TtsModuleUpdate> {
-  return request('/api/tts-module-updates', {
-    method: 'POST',
-    body: JSON.stringify({ body_md: bodyMd }),
-  })
-}
-
-export function updateTtsModuleUpdate(
-  id: number,
-  bodyMd: string,
-): Promise<TtsModuleUpdate> {
-  return request(`/api/tts-module-updates/${id}`, {
-    method: 'PATCH',
-    body: JSON.stringify({ body_md: bodyMd }),
-  })
-}
-
-export function deleteTtsModuleUpdate(id: number): Promise<void> {
-  return request(`/api/tts-module-updates/${id}`, { method: 'DELETE' })
 }
 
 export function fetchTtsContentImages(): Promise<TtsContentImage[]> {

@@ -520,13 +520,6 @@ export interface TtsMapDetail {
   updated_at: number
 }
 
-export interface TtsModuleUpdate {
-  id: number
-  body_md: string
-  created_at: number
-  updated_at: number
-}
-
 export interface TtsContentImage {
   label: string
   path: string

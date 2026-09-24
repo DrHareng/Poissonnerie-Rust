@@ -12,7 +12,6 @@ use crate::migrate::{migrate, row_text};
 
 pub const MAX_JSON_BYTES: usize = 15 * 1024 * 1024;
 pub const MAX_PICTURE_BYTES: usize = 8 * 1024 * 1024;
-pub const MAX_UPDATE_CHARS: usize = 80_000;
 pub const MAX_REPORT_CHARS: usize = 8_000;
 pub const MAX_NAME_CHARS: usize = 80;
 pub const THUMB_MAX_PX: u32 = 512;
@@ -60,14 +59,6 @@ pub struct TtsMapDetail {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub json_url: Option<String>,
     pub pictures: Vec<TtsMapPicture>,
-    pub created_at: u64,
-    pub updated_at: u64,
-}
-
-#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
-pub struct TtsModuleUpdate {
-    pub id: i64,
-    pub body_md: String,
     pub created_at: u64,
     pub updated_at: u64,
 }
@@ -494,76 +485,6 @@ impl TtsMapStore {
             })
         })?;
         rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
-    }
-
-    pub fn list_updates(&self) -> Result<Vec<TtsModuleUpdate>> {
-        let conn = self.conn.lock().unwrap();
-        let mut stmt = conn.prepare(
-            "
-            SELECT id, body_md, created_at, updated_at
-            FROM tts_module_updates
-            ORDER BY created_at DESC, id DESC
-            ",
-        )?;
-        let rows = stmt.query_map([], row_to_update)?;
-        rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
-    }
-
-    pub fn create_update(&self, body_md: &str) -> Result<TtsModuleUpdate> {
-        let body_md = validate_update_body(body_md)?;
-        let now = now_unix();
-        let conn = self.conn.lock().unwrap();
-        conn.execute(
-            "
-            INSERT INTO tts_module_updates (body_md, created_at, updated_at)
-            VALUES (?1, ?2, ?2)
-            ",
-            params![body_md, now],
-        )?;
-        let id = conn.last_insert_rowid();
-        Ok(TtsModuleUpdate {
-            id,
-            body_md,
-            created_at: now,
-            updated_at: now,
-        })
-    }
-
-    pub fn update_update(&self, id: i64, body_md: &str) -> Result<TtsModuleUpdate> {
-        let body_md = validate_update_body(body_md)?;
-        let now = now_unix();
-        let conn = self.conn.lock().unwrap();
-        let n = conn.execute(
-            "
-            UPDATE tts_module_updates
-            SET body_md = ?1, updated_at = ?2
-            WHERE id = ?3
-            ",
-            params![body_md, now, id],
-        )?;
-        if n == 0 {
-            bail!("mise à jour introuvable");
-        }
-        let created_at: u64 = conn.query_row(
-            "SELECT created_at FROM tts_module_updates WHERE id = ?1",
-            params![id],
-            |row| row.get(0),
-        )?;
-        Ok(TtsModuleUpdate {
-            id,
-            body_md,
-            created_at,
-            updated_at: now,
-        })
-    }
-
-    pub fn delete_update(&self, id: i64) -> Result<()> {
-        let conn = self.conn.lock().unwrap();
-        let n = conn.execute("DELETE FROM tts_module_updates WHERE id = ?1", params![id])?;
-        if n == 0 {
-            bail!("mise à jour introuvable");
-        }
-        Ok(())
     }
 
     pub fn create_report(
@@ -1187,17 +1108,6 @@ fn validate_map_name(name: &str) -> Result<String> {
     Ok(name.to_string())
 }
 
-fn validate_update_body(body_md: &str) -> Result<String> {
-    let body_md = body_md.trim();
-    if body_md.is_empty() {
-        bail!("la description est requise");
-    }
-    if body_md.chars().count() > MAX_UPDATE_CHARS {
-        bail!("la description est trop longue");
-    }
-    Ok(body_md.to_string())
-}
-
 fn validate_report_description(description: &str) -> Result<String> {
     let description = description.trim();
     if description.is_empty() {
@@ -1348,15 +1258,6 @@ fn append_filename_suffix(filename: &str, n: usize) -> String {
     } else {
         format!("{filename}-{n}")
     }
-}
-
-fn row_to_update(row: &rusqlite::Row<'_>) -> rusqlite::Result<TtsModuleUpdate> {
-    Ok(TtsModuleUpdate {
-        id: row.get(0)?,
-        body_md: row.get(1)?,
-        created_at: row.get(2)?,
-        updated_at: row.get(3)?,
-    })
 }
 
 fn row_to_report(row: &rusqlite::Row<'_>) -> rusqlite::Result<TtsMapReport> {
@@ -1513,14 +1414,6 @@ mod tests {
         assert_eq!(listed[0].pictures.len(), 1);
         assert_eq!(listed[0].pictures[0].filename, "Vue_nord.png");
         assert!(listed[0].pictures[0].thumb_url.ends_with("?thumb=1"));
-
-        let update = store.create_update("Nouveau pack TTS").unwrap();
-        assert_eq!(store.list_updates().unwrap().len(), 1);
-        store
-            .update_update(update.id, "Pack TTS corrigé")
-            .unwrap();
-        store.delete_update(update.id).unwrap();
-        assert!(store.list_updates().unwrap().is_empty());
 
         let map_dir = json_path.parent().unwrap().parent().unwrap().to_path_buf();
         store.delete_map(created.id).unwrap();

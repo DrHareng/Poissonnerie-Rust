@@ -12,7 +12,7 @@ use tower_sessions::Session;
 use crate::{
     api::{ApiError, AppState},
     auth,
-    tts_map::{self, TtsMapDetail, TtsMapReport, TtsMapVariant, TtsModuleUpdate},
+    tts_map::{self, TtsMapDetail, TtsMapReport, TtsMapVariant},
     User,
 };
 
@@ -48,14 +48,6 @@ pub fn tts_map_routes() -> Router<AppState> {
         .route(
             "/api/tts-map-content-images",
             get(list_content_images),
-        )
-        .route(
-            "/api/tts-module-updates",
-            get(list_updates).post(create_update),
-        )
-        .route(
-            "/api/tts-module-updates/{id}",
-            axum::routing::patch(update_update).delete(delete_update),
         )
         .route(
             "/api/tts-map-reports",
@@ -308,61 +300,6 @@ async fn list_content_images(
         .list_content_images()
         .map(Json)
         .map_err(|error| ApiError::bad_request(error.to_string()))
-}
-
-async fn list_updates(
-    State(state): State<AppState>,
-) -> Result<Json<Vec<TtsModuleUpdate>>, ApiError> {
-    state
-        .tts_maps
-        .list_updates()
-        .map(Json)
-        .map_err(|error| ApiError::bad_request(error.to_string()))
-}
-
-#[derive(Debug, Deserialize)]
-struct UpdateBodyRequest {
-    body_md: String,
-}
-
-async fn create_update(
-    State(state): State<AppState>,
-    session: Session,
-    Json(payload): Json<UpdateBodyRequest>,
-) -> Result<Json<TtsModuleUpdate>, ApiError> {
-    require_admin(&state, &session).await?;
-    state
-        .tts_maps
-        .create_update(&payload.body_md)
-        .map(Json)
-        .map_err(|error| ApiError::bad_request(error.to_string()))
-}
-
-async fn update_update(
-    State(state): State<AppState>,
-    session: Session,
-    Path(id): Path<i64>,
-    Json(payload): Json<UpdateBodyRequest>,
-) -> Result<Json<TtsModuleUpdate>, ApiError> {
-    require_admin(&state, &session).await?;
-    state
-        .tts_maps
-        .update_update(id, &payload.body_md)
-        .map(Json)
-        .map_err(|error| ApiError::bad_request(error.to_string()))
-}
-
-async fn delete_update(
-    State(state): State<AppState>,
-    session: Session,
-    Path(id): Path<i64>,
-) -> Result<StatusCode, ApiError> {
-    require_admin(&state, &session).await?;
-    state
-        .tts_maps
-        .delete_update(id)
-        .map_err(|error| ApiError::bad_request(error.to_string()))?;
-    Ok(StatusCode::NO_CONTENT)
 }
 
 async fn create_map_report(

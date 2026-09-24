@@ -28,7 +28,6 @@ import ImageViewer, {
 import TtsMapReportDialog from '@/components/TtsMapReportDialog.vue'
 import TtsMapTile from '@/components/TtsMapTile.vue'
 import TtsMapVariantsBlock from '@/components/TtsMapVariantsBlock.vue'
-import TtsModuleUpdatesPanel from '@/components/TtsModuleUpdatesPanel.vue'
 import { useAdminEditMode } from '@/composables/useAdminEditMode'
 import { useAuth } from '@/composables/useAuth'
 import { useVirtualGrid } from '@/composables/useVirtualGrid'
@@ -358,7 +357,6 @@ watch(selectedSlug, () => {
 
 <template>
   <div ref="scrollEl" class="page-panel-scroll min-h-0 flex-1">
-    <TtsModuleUpdatesPanel v-if="apiOnline" :mobile="!selectedSlug" />
     <p v-if="!apiOnline" class="shrink-0 text-sm text-muted-foreground">
       Impossible de charger Map TTS.
     </p>
