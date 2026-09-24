@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, ref, watch } from 'vue'
 import { onClickOutside, useElementBounding, useEventListener } from '@vueuse/core'
-import { ChevronsUpDown } from '@lucide/vue'
+import { ChevronsUpDown, X } from '@lucide/vue'
 import type { Army } from '@/types/elo'
 import { Input } from '@/components/ui/input'
 import { useSearchablePickerKeyboard } from '@/composables/useSearchablePickerKeyboard'
@@ -83,6 +83,12 @@ const inputValue = computed({
     query.value = String(value)
     onInput()
   },
+})
+
+const canClear = computed(() => {
+  if (props.disabled) return false
+  if (props.modelValue != null && props.modelValue !== '') return true
+  return open.value && query.value.trim() !== ''
 })
 
 const { handleKeydown, handleBlur, isHighlighted, setOptionRef } = useSearchablePickerKeyboard({
@@ -168,6 +174,12 @@ function onInput() {
     emit('update:modelValue', undefined)
   }
 }
+
+function clearSelection() {
+  emit('update:modelValue', undefined)
+  query.value = ''
+  open.value = false
+}
 </script>
 
 <template>
@@ -193,6 +205,20 @@ function onInput() {
         @blur="handleBlur(trigger, dropdown)"
         @keydown="handleKeydown"
       />
+
+      <button
+        v-if="canClear"
+        type="button"
+        class="searchable-picker-toggle"
+        :disabled="disabled"
+        tabindex="-1"
+        title="Réinitialiser"
+        aria-label="Réinitialiser"
+        @mousedown.prevent
+        @click="clearSelection"
+      >
+        <X class="size-4 opacity-60" />
+      </button>
 
       <button
         type="button"

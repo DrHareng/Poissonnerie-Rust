@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, ref, watch } from 'vue'
 import { onClickOutside, useElementBounding, useEventListener } from '@vueuse/core'
-import { ChevronsUpDown } from '@lucide/vue'
+import { ChevronsUpDown, X } from '@lucide/vue'
 import { Input } from '@/components/ui/input'
 import { useSearchablePickerKeyboard } from '@/composables/useSearchablePickerKeyboard'
 
@@ -9,6 +9,10 @@ export interface PlayerPickerOption {
   value: string
   label: string
 }
+
+type PickerItem =
+  | { kind: 'empty' }
+  | { kind: 'option'; option: PlayerPickerOption }
 
 const props = withDefaults(
   defineProps<{
@@ -19,11 +23,16 @@ const props = withDefaults(
     placeholder?: string
     emptyMessage?: string
     allowCustom?: boolean
+    /** Affiche une option pour vider la sélection (ex. « Tous »). */
+    allowEmpty?: boolean
+    emptyLabel?: string
   }>(),
   {
     placeholder: 'Tapez pour chercher un joueur',
     emptyMessage: 'Aucun joueur trouvé.',
     allowCustom: false,
+    allowEmpty: false,
+    emptyLabel: 'Tous',
   },
 )
 
@@ -62,6 +71,20 @@ const filteredOptions = computed(() => {
   )
 })
 
+const pickerItems = computed<PickerItem[]>(() => {
+  const items: PickerItem[] = []
+  if (props.allowEmpty) {
+    const needle = query.value.trim().toLowerCase()
+    if (!needle || props.emptyLabel.toLowerCase().includes(needle)) {
+      items.push({ kind: 'empty' })
+    }
+  }
+  for (const option of filteredOptions.value) {
+    items.push({ kind: 'option', option })
+  }
+  return items
+})
+
 const inputValue = computed({
   get() {
     if (open.value) {
@@ -75,12 +98,18 @@ const inputValue = computed({
   },
 })
 
+const canClear = computed(() => {
+  if (props.disabled) return false
+  if (props.modelValue != null && props.modelValue !== '') return true
+  return open.value && query.value.trim() !== ''
+})
+
 const { handleKeydown, handleBlur, isHighlighted, highlightedIndex, setOptionRef } =
   useSearchablePickerKeyboard({
     open,
-    items: filteredOptions,
+    items: pickerItems,
     disabled: computed(() => !!props.disabled),
-    onSelect: selectOption,
+    onSelect: selectItem,
     onClose: closePicker,
     onOpen: openPicker,
     autoHighlight: computed(() => !props.allowCustom),
@@ -152,6 +181,17 @@ function closePicker() {
   syncQueryWithSelection()
 }
 
+function selectItem(item: PickerItem) {
+  if (item.kind === 'empty') {
+    emit('update:modelValue', undefined)
+    emit('update:query', '')
+    query.value = ''
+    open.value = false
+    return
+  }
+  selectOption(item.option)
+}
+
 function selectOption(option: PlayerPickerOption) {
   emit('update:modelValue', option.value)
   query.value = option.label
@@ -164,6 +204,11 @@ function onInput() {
   }
 
   emit('update:query', query.value)
+
+  // Avec allowEmpty, on ne vide la sélection que via l'option dédiée.
+  if (props.allowEmpty) {
+    return
+  }
 
   if (selectedOption.value && query.value !== selectedOption.value.label) {
     emit('update:modelValue', undefined)
@@ -179,6 +224,13 @@ function onKeydown(event: KeyboardEvent) {
     }
   }
   handleKeydown(event)
+}
+
+function clearSelection() {
+  emit('update:modelValue', undefined)
+  emit('update:query', '')
+  query.value = ''
+  open.value = false
 }
 </script>
 
@@ -200,6 +252,20 @@ function onKeydown(event: KeyboardEvent) {
       />
 
       <button
+        v-if="canClear"
+        type="button"
+        class="searchable-picker-toggle"
+        :disabled="disabled"
+        tabindex="-1"
+        title="Réinitialiser"
+        aria-label="Réinitialiser"
+        @mousedown.prevent
+        @click="clearSelection"
+      >
+        <X class="size-4 opacity-60" />
+      </button>
+
+      <button
         type="button"
         class="searchable-picker-toggle"
         :disabled="disabled"
@@ -219,25 +285,33 @@ function onKeydown(event: KeyboardEvent) {
         @mousedown.prevent
       >
         <p
-          v-if="filteredOptions.length === 0"
+          v-if="pickerItems.length === 0"
           class="px-3 py-2 text-sm text-muted-foreground"
         >
           {{ emptyMessage }}
         </p>
 
         <button
-          v-for="(option, index) in filteredOptions"
-          :key="option.value"
+          v-for="(item, index) in pickerItems"
+          :key="item.kind === 'empty' ? 'empty' : item.option.value"
           :ref="(element) => setOptionRef(element as HTMLElement | null, index)"
           type="button"
           class="searchable-picker-option"
           :class="{
-            'searchable-picker-option-active': option.value === modelValue && !isHighlighted(index),
+            'searchable-picker-option-active':
+              (item.kind === 'empty'
+                ? modelValue == null || modelValue === ''
+                : item.option.value === modelValue) && !isHighlighted(index),
             'searchable-picker-option-highlighted': isHighlighted(index),
           }"
-          @click="selectOption(option)"
+          @click="selectItem(item)"
         >
-          <span class="truncate">{{ option.label }}</span>
+          <span
+            class="truncate"
+            :class="{ 'text-muted-foreground': item.kind === 'empty' }"
+          >
+            {{ item.kind === 'empty' ? emptyLabel : item.option.label }}
+          </span>
         </button>
       </div>
     </Teleport>

@@ -453,6 +453,7 @@ export interface ArmyListStatsEntry {
   games: number
   win_rate: number
   last_used_at: number
+  used_in_tournament: boolean
 }
 
 export interface ArmyListStatsGroup {

@@ -53,6 +53,7 @@ import type {
 import { useAuth } from '@/composables/useAuth'
 import { useAdminEditMode } from '@/composables/useAdminEditMode'
 import { useAppSidePanel } from '@/composables/useAppSidePanel'
+import { useListPage } from '@/composables/useListPage'
 import { useNetworkStatus } from '@/composables/useNetworkStatus'
 import { useServerConfirmAck } from '@/composables/useServerConfirmAck'
 import ArmyLogo from '@/components/ArmyLogo.vue'
@@ -61,7 +62,7 @@ import BracketTree from '@/components/BracketTree.vue'
 import PlayerLink from '@/components/PlayerLink.vue'
 import PlayerPicker from '@/components/PlayerPicker.vue'
 import PoolMatchesTable from '@/components/PoolMatchesTable.vue'
-import PoolPlayerCards from '@/components/PoolPlayerCards.vue'
+import PaginationBar from '@/components/PaginationBar.vue'
 import TournamentPoolsPreview from '@/components/TournamentPoolsPreview.vue'
 import TournamentMatchCard from '@/components/TournamentMatchCard.vue'
 import TournamentScenarioPicker from '@/components/TournamentScenarioPicker.vue'
@@ -287,6 +288,34 @@ const TAB_PRIORITY: TournamentTabId[] = [
 
 const activeTab = ref<TournamentTabId>('inscriptions')
 const userPickedTab = ref(false)
+
+const POOL_OVERVIEW_MATCHES_PAGE_SIZE = 5
+
+const showPoolsOverviewMatches = computed(
+  () => activeTab.value === 'poules' && selectedPoolId.value == null,
+)
+
+const {
+  page: poolOverviewMatchesPage,
+  setPage: setPoolOverviewMatchesPage,
+  clampToTotalPages: clampPoolOverviewMatchesPages,
+} = useListPage({
+  enabled: showPoolsOverviewMatches,
+})
+
+const poolOverviewMatchesTotalPages = computed(() =>
+  Math.max(1, Math.ceil(poolMatches.value.length / POOL_OVERVIEW_MATCHES_PAGE_SIZE)),
+)
+
+const poolOverviewMatchesPageItems = computed(() => {
+  const start = (poolOverviewMatchesPage.value - 1) * POOL_OVERVIEW_MATCHES_PAGE_SIZE
+  return poolMatches.value.slice(start, start + POOL_OVERVIEW_MATCHES_PAGE_SIZE)
+})
+
+watch(poolMatches, () => {
+  if (!showPoolsOverviewMatches.value) return
+  clampPoolOverviewMatchesPages(poolOverviewMatchesTotalPages.value)
+})
 
 const showArbreTab = computed(
   () =>
@@ -2412,23 +2441,56 @@ onMounted(refresh)
               </nav>
             </CardHeader>
             <CardContent class="grid gap-3">
-              <TournamentPoolsPreview
-                v-if="!selectedPoolId"
-                :pools="sortedPools"
-                :registrations="detail.registrations"
-                :matches="poolMatches"
-                :qualified-per-pool="detail.qualified_per_pool ?? 0"
-                selectable
-                @select-pool="selectPool"
-              />
+              <template v-if="!selectedPoolId">
+                <TournamentPoolsPreview
+                  :pools="sortedPools"
+                  :registrations="detail.registrations"
+                  :matches="poolMatches"
+                  :qualified-per-pool="detail.qualified_per_pool ?? 0"
+                  selectable
+                  @select-pool="selectPool"
+                />
+                <PoolMatchesTable
+                  v-if="poolMatches.length > 0"
+                  :matches="poolOverviewMatchesPageItems"
+                  :is-admin="isAdmin"
+                  :current-player-name="player?.name"
+                  :get-form="getForm"
+                  :can-interact="canInteractWithMatch"
+                  :player-army-id="matchPlayerArmyId"
+                  :player-has-list2="matchHasList2"
+                  :status-label="matchStatusLabel"
+                  :lists-ready="matchListsReady"
+                  :lists-ready-message="matchListsReadyMessage"
+                  :is-online="isOnline"
+                  @start="startPartie"
+                  @resume="resumePartie"
+                  @confirm="confirmMatch"
+                  @correct="correctMatch"
+                  @forfeit="forfeitMatch"
+                  @cancel-forfeit="cancelForfeit"
+                  @unplayed="markMatchUnplayed"
+                />
+                <PaginationBar
+                  v-if="poolOverviewMatchesTotalPages > 1"
+                  :page="poolOverviewMatchesPage"
+                  :total-pages="poolOverviewMatchesTotalPages"
+                  :total="poolMatches.length"
+                  :page-size="POOL_OVERVIEW_MATCHES_PAGE_SIZE"
+                  @page-change="setPoolOverviewMatchesPage"
+                />
+              </template>
 
               <section
                 v-else-if="selectedPool()"
-                class="pool-detail"
+                class="pool-detail grid gap-3"
               >
-                <PoolPlayerCards
-                  v-if="selectedPool()!.players.length > 0"
-                  :players="selectedPool()!.players"
+                <TournamentPoolsPreview
+                  :pools="[selectedPool()!]"
+                  :registrations="detail.registrations"
+                  :matches="poolMatches"
+                  :qualified-per-pool="detail.qualified_per_pool ?? 0"
+                  stacked
                 />
                 <PoolMatchesTable
                   v-if="poolMatchesForPool(selectedPoolId!).length > 0"

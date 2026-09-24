@@ -264,8 +264,9 @@ async function refreshArmyLists() {
   }
   loadingArmyLists.value = true
   try {
-    const armyIds = selectedArmyId.value != null ? [selectedArmyId.value] : []
-    const groups = await fetchArmyLists(armyIds)
+    // Toujours charger toutes les listes : les filtres secto / joueur sont côté client
+    // pour croiser correctement les options des combos.
+    const groups = await fetchArmyLists([])
     selectedArmyLists.value = groups
       .flatMap((group) => group.lists)
       .sort((a, b) => b.last_used_at - a.last_used_at)
@@ -338,9 +339,6 @@ watch(page, () => {
 })
 watch(reportsPage, () => {
   if (isReportsTab.value) void refreshReports()
-})
-watch(selectedArmyId, () => {
-  if (isListsTab.value) void refreshArmyLists()
 })
 
 watch(

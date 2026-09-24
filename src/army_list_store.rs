@@ -35,6 +35,8 @@ pub struct ArmyListStatsEntry {
     pub games: u32,
     pub win_rate: f64,
     pub last_used_at: u64,
+    /// Au moins un match complété en tournoi (tournoi terminé).
+    pub used_in_tournament: bool,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq)]
@@ -188,6 +190,7 @@ fn list_stats_by_army_in_conn(
                 m.recorded_at,
                 m.player1,
                 m.player2,
+                m.tournament_id,
                 m.player1_army_list_id AS p1_list,
                 m.player2_army_list_id AS p2_list
             FROM matches m
@@ -202,16 +205,17 @@ fn list_stats_by_army_in_conn(
               AND (m.player1_army_list_id IS NOT NULL OR m.player2_army_list_id IS NOT NULL)
         ),
         appearances AS (
-            SELECT p1_list AS army_list_id, player1 AS player_name, outcome, recorded_at, 1 AS side
+            SELECT p1_list AS army_list_id, player1 AS player_name, outcome, recorded_at, tournament_id, 1 AS side
             FROM eligible WHERE p1_list IS NOT NULL
             UNION ALL
-            SELECT p2_list AS army_list_id, player2 AS player_name, outcome, recorded_at, 2 AS side
+            SELECT p2_list AS army_list_id, player2 AS player_name, outcome, recorded_at, tournament_id, 2 AS side
             FROM eligible WHERE p2_list IS NOT NULL
         ),
         scored AS (
             SELECT
                 army_list_id,
                 recorded_at,
+                tournament_id,
                 CASE
                     WHEN side = 1 AND outcome = 'player1_win' THEN 'win'
                     WHEN side = 1 AND outcome = 'player2_win' THEN 'loss'
@@ -248,7 +252,8 @@ fn list_stats_by_army_in_conn(
             SUM(CASE WHEN s.result = 'draw' THEN 1 ELSE 0 END) AS draws,
             SUM(CASE WHEN s.result = 'loss' THEN 1 ELSE 0 END) AS losses,
             COUNT(*) AS games,
-            MAX(s.recorded_at) AS last_used_at
+            MAX(s.recorded_at) AS last_used_at,
+            MAX(CASE WHEN s.tournament_id IS NOT NULL THEN 1 ELSE 0 END) AS used_in_tournament
         FROM army_lists al
         INNER JOIN scored s ON s.army_list_id = al.id
         LEFT JOIN origin o ON o.army_list_id = al.id
@@ -331,6 +336,7 @@ fn map_stats_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<ArmyListStatsEntry
     } else {
         (wins as f64 + 0.5 * draws as f64) / games as f64 * 100.0
     };
+    let used_flag: i64 = row.get(10)?;
     Ok(ArmyListStatsEntry {
         id: row.get(0)?,
         code: row.get(1)?,
@@ -344,6 +350,7 @@ fn map_stats_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<ArmyListStatsEntry
         games,
         win_rate,
         last_used_at: row.get(9)?,
+        used_in_tournament: used_flag != 0,
     })
 }
 
