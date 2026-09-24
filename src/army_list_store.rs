@@ -260,7 +260,7 @@ fn list_stats_by_army_in_conn(
         }
         let placeholders = ids.iter().map(|_| "?").collect::<Vec<_>>().join(", ");
         let sql = format!(
-            "{BASE_SQL} WHERE al.army_id IN ({placeholders}) GROUP BY al.id ORDER BY al.army_id ASC, last_used_at DESC"
+            "{BASE_SQL} WHERE al.army_id IN ({placeholders}) GROUP BY al.id ORDER BY last_used_at DESC"
         );
         let mut stmt = conn.prepare(&sql)?;
         let params: Vec<rusqlite::types::Value> = ids
@@ -270,21 +270,20 @@ fn list_stats_by_army_in_conn(
         let rows = stmt.query_map(rusqlite::params_from_iter(params.iter()), map_stats_row)?;
         rows.collect::<Result<Vec<_>, _>>()?
     } else {
-        let sql =
-            format!("{BASE_SQL} GROUP BY al.id ORDER BY al.army_id ASC, last_used_at DESC");
+        let sql = format!("{BASE_SQL} GROUP BY al.id ORDER BY last_used_at DESC");
         let mut stmt = conn.prepare(&sql)?;
         let rows = stmt.query_map([], map_stats_row)?;
         rows.collect::<Result<Vec<_>, _>>()?
     };
 
     let mut groups: Vec<ArmyListStatsGroup> = Vec::new();
+    let mut index_by_army: std::collections::HashMap<u32, usize> = std::collections::HashMap::new();
     for entry in entries {
-        if let Some(group) = groups.last_mut() {
-            if group.army_id == entry.army_id {
-                group.lists.push(entry);
-                continue;
-            }
+        if let Some(&idx) = index_by_army.get(&entry.army_id) {
+            groups[idx].lists.push(entry);
+            continue;
         }
+        index_by_army.insert(entry.army_id, groups.len());
         groups.push(ArmyListStatsGroup {
             army_id: entry.army_id,
             lists: vec![entry],

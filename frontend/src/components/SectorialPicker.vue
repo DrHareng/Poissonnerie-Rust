@@ -6,12 +6,25 @@ import type { Army } from '@/types/elo'
 import { Input } from '@/components/ui/input'
 import { useSearchablePickerKeyboard } from '@/composables/useSearchablePickerKeyboard'
 
-const props = defineProps<{
-  modelValue?: string
-  armies: Army[]
-  disabled?: boolean
-  placeholder?: string
-}>()
+type PickerItem =
+  | { kind: 'empty' }
+  | { kind: 'army'; army: Army }
+
+const props = withDefaults(
+  defineProps<{
+    modelValue?: string
+    armies: Army[]
+    disabled?: boolean
+    placeholder?: string
+    /** Affiche une option pour vider la sélection (ex. « Toutes »). */
+    allowEmpty?: boolean
+    emptyLabel?: string
+  }>(),
+  {
+    allowEmpty: false,
+    emptyLabel: 'Toutes',
+  },
+)
 
 const emit = defineEmits<{
   'update:modelValue': [value: string | undefined]
@@ -45,6 +58,20 @@ const filteredArmies = computed(() => {
   )
 })
 
+const pickerItems = computed<PickerItem[]>(() => {
+  const items: PickerItem[] = []
+  if (props.allowEmpty) {
+    const needle = query.value.trim().toLowerCase()
+    if (!needle || props.emptyLabel.toLowerCase().includes(needle)) {
+      items.push({ kind: 'empty' })
+    }
+  }
+  for (const army of filteredArmies.value) {
+    items.push({ kind: 'army', army })
+  }
+  return items
+})
+
 const inputValue = computed({
   get() {
     if (open.value) {
@@ -60,9 +87,9 @@ const inputValue = computed({
 
 const { handleKeydown, handleBlur, isHighlighted, setOptionRef } = useSearchablePickerKeyboard({
   open,
-  items: filteredArmies,
+  items: pickerItems,
   disabled: computed(() => !!props.disabled),
-  onSelect: selectArmy,
+  onSelect: selectItem,
   onClose: closePicker,
   onOpen: openPicker,
 })
@@ -114,15 +141,27 @@ function closePicker() {
   syncQueryWithSelection()
 }
 
-function selectArmy(army: Army) {
-  emit('update:modelValue', String(army.id))
-  query.value = army.name
+function selectItem(item: PickerItem) {
+  if (item.kind === 'empty') {
+    emit('update:modelValue', undefined)
+    query.value = ''
+    open.value = false
+    return
+  }
+  emit('update:modelValue', String(item.army.id))
+  query.value = item.army.name
   open.value = false
 }
 
 function onInput() {
   if (!open.value) {
     open.value = true
+  }
+
+  // Avec allowEmpty, on ne vide la sélection que via l'option dédiée
+  // (évite de tout recharger pendant la saisie).
+  if (props.allowEmpty) {
+    return
   }
 
   if (selectedArmy.value && query.value !== selectedArmy.value.name) {
@@ -175,26 +214,34 @@ function onInput() {
         @mousedown.prevent
       >
         <p
-          v-if="filteredArmies.length === 0"
+          v-if="pickerItems.length === 0"
           class="px-3 py-2 text-sm text-muted-foreground"
         >
           Aucune sectorielle trouvée.
         </p>
 
         <button
-          v-for="(army, index) in filteredArmies"
-          :key="army.id"
+          v-for="(item, index) in pickerItems"
+          :key="item.kind === 'empty' ? 'empty' : item.army.id"
           :ref="(element) => setOptionRef(element as HTMLElement | null, index)"
           type="button"
           class="searchable-picker-option"
           :class="{
-            'searchable-picker-option-active': String(army.id) === modelValue && !isHighlighted(index),
+            'searchable-picker-option-active':
+              (item.kind === 'empty'
+                ? modelValue == null || modelValue === ''
+                : String(item.army.id) === modelValue) && !isHighlighted(index),
             'searchable-picker-option-highlighted': isHighlighted(index),
           }"
-          @click="selectArmy(army)"
+          @click="selectItem(item)"
         >
-          <img :src="army.logo_url" :alt="army.name" class="army-logo shrink-0" />
-          <span class="truncate">{{ army.name }}</span>
+          <template v-if="item.kind === 'empty'">
+            <span class="truncate text-muted-foreground">{{ emptyLabel }}</span>
+          </template>
+          <template v-else>
+            <img :src="item.army.logo_url" :alt="item.army.name" class="army-logo shrink-0" />
+            <span class="truncate">{{ item.army.name }}</span>
+          </template>
         </button>
       </div>
     </Teleport>

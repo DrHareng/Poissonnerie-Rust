@@ -51,7 +51,6 @@ import {
 const PAGE_SIZE = 5
 const REPORT_PAGE_SIZE = 10
 const ARMY_SELECTION_STORAGE_KEY = 'poissonnerie.army-lists-selected-army'
-const LEGACY_ARMY_FILTER_STORAGE_KEY = 'poissonnerie.army-lists-filter'
 
 const router = useRouter()
 const route = useRoute()
@@ -137,29 +136,11 @@ function stepLabel(step: string | null | undefined): string {
   return PARTIE_STEP_LABELS[step as PartieStep] ?? step
 }
 
-function loadStoredArmyId(): number | null {
-  try {
-    const raw = localStorage.getItem(ARMY_SELECTION_STORAGE_KEY)
-    if (raw) {
-      const parsed = JSON.parse(raw) as unknown
-      if (typeof parsed === 'number') return parsed
-    }
-
-    const legacy = localStorage.getItem(LEGACY_ARMY_FILTER_STORAGE_KEY)
-    if (legacy) {
-      const parsed = JSON.parse(legacy) as unknown
-      if (Array.isArray(parsed) && typeof parsed[0] === 'number') {
-        return parsed[0]
-      }
-    }
-  } catch {
-    return null
-  }
-  return null
-}
-
 function persistArmySelection() {
-  if (selectedArmyId.value == null) return
+  if (selectedArmyId.value == null) {
+    localStorage.removeItem(ARMY_SELECTION_STORAGE_KEY)
+    return
+  }
   localStorage.setItem(
     ARMY_SELECTION_STORAGE_KEY,
     JSON.stringify(selectedArmyId.value),
@@ -196,13 +177,6 @@ function syncArmyQuery(armyId: number | null) {
 }
 
 function initArmySelection() {
-  const ids = playableArmies.value.map((army) => army.id)
-  if (ids.length === 0) {
-    selectedArmyId.value = null
-    syncArmyQuery(null)
-    return
-  }
-
   const fromQuery = armyIdFromSlug(armySlugFromQuery())
   if (fromQuery != null) {
     selectedArmyId.value = fromQuery
@@ -210,21 +184,13 @@ function initArmySelection() {
     return
   }
 
-  const stored = loadStoredArmyId()
-  if (stored != null && ids.includes(stored)) {
-    selectedArmyId.value = stored
-    syncArmyQuery(stored)
-    return
-  }
-
-  selectedArmyId.value = ids[0] ?? null
+  // Par défaut : aucune sectorielle (toutes les listes).
+  selectedArmyId.value = null
   persistArmySelection()
-  syncArmyQuery(selectedArmyId.value)
+  syncArmyQuery(null)
 }
 
 function onSelectedArmyIdUpdate(armyId: number | null) {
-  // Ignorer le clear temporaire pendant la saisie dans le picker.
-  if (armyId == null) return
   selectedArmyId.value = armyId
   persistArmySelection()
   syncArmyQuery(armyId)
@@ -292,14 +258,17 @@ async function refreshArmyListTab() {
 }
 
 async function refreshArmyLists() {
-  if (!isListsTab.value || selectedArmyId.value == null) {
+  if (!isListsTab.value) {
     selectedArmyLists.value = []
     return
   }
   loadingArmyLists.value = true
   try {
-    const groups = await fetchArmyLists([selectedArmyId.value])
-    selectedArmyLists.value = groups[0]?.lists ?? []
+    const armyIds = selectedArmyId.value != null ? [selectedArmyId.value] : []
+    const groups = await fetchArmyLists(armyIds)
+    selectedArmyLists.value = groups
+      .flatMap((group) => group.lists)
+      .sort((a, b) => b.last_used_at - a.last_used_at)
     apiOnline.value = true
   } catch (error) {
     apiOnline.value = false
@@ -377,7 +346,7 @@ watch(selectedArmyId, () => {
 watch(
   () => [isListsTab.value, route.query.army] as const,
   () => {
-    if (!isListsTab.value || playableArmies.value.length === 0) return
+    if (!isListsTab.value) return
     const fromQuery = armyIdFromSlug(armySlugFromQuery())
     if (fromQuery != null) {
       if (selectedArmyId.value !== fromQuery) {
@@ -386,14 +355,11 @@ watch(
       }
       return
     }
-    if (
-      selectedArmyId.value == null ||
-      !playableArmies.value.some((army) => army.id === selectedArmyId.value)
-    ) {
-      initArmySelection()
-      return
+    if (selectedArmyId.value != null) {
+      selectedArmyId.value = null
+      persistArmySelection()
     }
-    syncArmyQuery(selectedArmyId.value)
+    syncArmyQuery(null)
   },
 )
 
