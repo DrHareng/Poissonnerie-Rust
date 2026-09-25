@@ -295,6 +295,18 @@ const showPoolsOverviewMatches = computed(
   () => activeTab.value === 'poules' && selectedPoolId.value == null,
 )
 
+const poolOverviewPlayedMatches = computed(() =>
+  poolMatches.value
+    .filter((match) => isMatchPlayed(match))
+    .slice()
+    .sort((a, b) => {
+      const aAt = a.played_at ?? 0
+      const bAt = b.played_at ?? 0
+      if (aAt !== bAt) return bAt - aAt
+      return b.id - a.id
+    }),
+)
+
 const {
   page: poolOverviewMatchesPage,
   setPage: setPoolOverviewMatchesPage,
@@ -304,15 +316,21 @@ const {
 })
 
 const poolOverviewMatchesTotalPages = computed(() =>
-  Math.max(1, Math.ceil(poolMatches.value.length / POOL_OVERVIEW_MATCHES_PAGE_SIZE)),
+  Math.max(
+    1,
+    Math.ceil(poolOverviewPlayedMatches.value.length / POOL_OVERVIEW_MATCHES_PAGE_SIZE),
+  ),
 )
 
 const poolOverviewMatchesPageItems = computed(() => {
   const start = (poolOverviewMatchesPage.value - 1) * POOL_OVERVIEW_MATCHES_PAGE_SIZE
-  return poolMatches.value.slice(start, start + POOL_OVERVIEW_MATCHES_PAGE_SIZE)
+  return poolOverviewPlayedMatches.value.slice(
+    start,
+    start + POOL_OVERVIEW_MATCHES_PAGE_SIZE,
+  )
 })
 
-watch(poolMatches, () => {
+watch(poolOverviewPlayedMatches, () => {
   if (!showPoolsOverviewMatches.value) return
   clampPoolOverviewMatchesPages(poolOverviewMatchesTotalPages.value)
 })
@@ -2451,7 +2469,7 @@ onMounted(refresh)
                   @select-pool="selectPool"
                 />
                 <PoolMatchesTable
-                  v-if="poolMatches.length > 0"
+                  v-if="poolOverviewPlayedMatches.length > 0"
                   :matches="poolOverviewMatchesPageItems"
                   :is-admin="isAdmin"
                   :current-player-name="player?.name"
@@ -2475,7 +2493,7 @@ onMounted(refresh)
                   v-if="poolOverviewMatchesTotalPages > 1"
                   :page="poolOverviewMatchesPage"
                   :total-pages="poolOverviewMatchesTotalPages"
-                  :total="poolMatches.length"
+                  :total="poolOverviewPlayedMatches.length"
                   :page-size="POOL_OVERVIEW_MATCHES_PAGE_SIZE"
                   @page-change="setPoolOverviewMatchesPage"
                 />
