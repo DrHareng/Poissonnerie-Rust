@@ -1,9 +1,10 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, onMounted } from 'vue'
 import { ArrowUp } from '@lucide/vue'
 import ArmyLogo from '@/components/ArmyLogo.vue'
 import PlayerLink from '@/components/PlayerLink.vue'
 import { Badge } from '@/components/ui/badge'
+import { useArmies } from '@/composables/useArmies'
 import { registrationStatusLabel } from '@/lib/tournamentDisplay'
 import type { Pool, PoolPlayer, RegistrationStatus, TournamentMatch } from '@/types/elo'
 
@@ -47,6 +48,12 @@ const emit = defineEmits<{
   selectPool: [poolId: number]
 }>()
 
+const { ensureLoaded, getArmy } = useArmies()
+
+onMounted(() => {
+  void ensureLoaded()
+})
+
 const registrationByPlayer = computed(() => {
   const map = new Map<string, PoolStandingRegistration>()
   for (const registration of props.registrations) {
@@ -84,12 +91,25 @@ function playerArmyId(pp: PoolPlayer) {
   return reg?.army_id ?? undefined
 }
 
+function playerArmyName(pp: PoolPlayer) {
+  return getArmy(playerArmyId(pp))?.name ?? null
+}
+
 function playerPendingStatus(pp: PoolPlayer): string | null {
   if (playerArmyId(pp)) return null
   const reg = registrationFor(pp.player_name)
   if (!reg) return null
   if (listsFullyValidated(reg) || reg.status === 'approved') return null
   return registrationStatusLabel(reg)
+}
+
+function playerLabel(pp: PoolPlayer) {
+  return pp.player_display_name?.trim() || pp.player_name
+}
+
+function playerInitial(pp: PoolPlayer) {
+  const label = playerLabel(pp)
+  return label.charAt(0).toUpperCase() || '?'
 }
 
 function isPoolMatchFinished(match: TournamentMatch) {
@@ -160,6 +180,7 @@ function isQualifiedRank(rankIndex: number) {
           <tr>
             <th class="pool-col-rank"></th>
             <th class="pool-col-player">Joueur</th>
+            <th class="pool-col-army">Sectorielle</th>
             <th class="pool-col-elo">ELO</th>
             <th class="pool-col-played">Jouées</th>
             <th class="pool-col-stat">PT</th>
@@ -185,25 +206,46 @@ function isQualifiedRank(rankIndex: number) {
             </td>
             <td class="pool-col-player">
               <span class="flex min-w-0 items-center gap-2">
-                <ArmyLogo
-                  v-if="playerArmyId(pp)"
-                  :army-id="playerArmyId(pp)!"
-                  class="shrink-0"
+                <img
+                  v-if="pp.avatar_url"
+                  :src="pp.avatar_url"
+                  :alt="playerLabel(pp)"
+                  class="pool-standings-avatar"
                 />
-                <Badge
-                  v-else-if="playerPendingStatus(pp)"
-                  variant="outline"
-                  class="shrink-0 text-xs font-normal"
-                >
-                  {{ playerPendingStatus(pp) }}
-                </Badge>
+                <span
+                  v-else
+                  class="pool-standings-avatar-fallback"
+                  aria-hidden="true"
+                >{{ playerInitial(pp) }}</span>
                 <PlayerLink
-                  class="min-w-0 flex-1"
+                  class="min-w-0 flex-1 truncate"
                   :name="pp.player_name"
                   :display-name="pp.player_display_name"
                   @click.stop
                 />
               </span>
+            </td>
+            <td class="pool-col-army">
+              <span
+                v-if="playerArmyId(pp)"
+                class="flex min-w-0 items-center gap-2"
+                :title="playerArmyName(pp) ?? undefined"
+              >
+                <ArmyLogo
+                  :army-id="playerArmyId(pp)!"
+                  class="shrink-0"
+                />
+                <span class="min-w-0 truncate">{{ playerArmyName(pp) }}</span>
+              </span>
+              <Badge
+                v-else-if="playerPendingStatus(pp)"
+                variant="outline"
+                class="max-w-full truncate text-xs font-normal"
+                :title="playerPendingStatus(pp) ?? undefined"
+              >
+                {{ playerPendingStatus(pp) }}
+              </Badge>
+              <span v-else class="text-muted-foreground">—</span>
             </td>
             <td class="pool-col-elo">{{ playerRatingLabel(pp) }}</td>
             <td class="pool-col-played">

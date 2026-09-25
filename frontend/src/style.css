@@ -781,13 +781,31 @@
   .pool-standings-table .pool-col-player {
     @apply relative z-0 overflow-hidden;
     max-width: 0;
-    width: 100%;
+    width: 28%;
+  }
+
+  .pool-col-army {
+    @apply min-w-0 text-left;
+  }
+
+  .pool-standings-table .pool-col-army {
+    @apply overflow-hidden;
+    max-width: 0;
+    width: 28%;
   }
 
   .pool-standings-table .pool-col-player:hover,
   .pool-standings-table .pool-col-player:focus-within {
     overflow: visible;
     z-index: 8;
+  }
+
+  .pool-standings-avatar {
+    @apply size-6 shrink-0 rounded-full object-cover;
+  }
+
+  .pool-standings-avatar-fallback {
+    @apply flex size-6 shrink-0 items-center justify-center rounded-full bg-muted text-[0.65rem] font-semibold text-muted-foreground;
   }
 
   .pool-col-elo {
@@ -808,6 +826,7 @@
   }
 
   .pool-standings-table th.pool-col-player,
+  .pool-standings-table th.pool-col-army,
   .pool-standings-table th.pool-col-elo {
     @apply text-left;
   }
