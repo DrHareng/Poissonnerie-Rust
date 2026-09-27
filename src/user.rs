@@ -17,6 +17,8 @@ pub struct User {
     pub avatar_url: String,
     pub local_display_name: Option<String>,
     pub local_avatar_url: Option<String>,
+    /// Illustration brand choisie pour la page profil publique (`side_01`, …).
+    pub profile_image_id: Option<String>,
     pub secondary_view_mode: Option<String>,
     pub scenario_slug: Option<String>,
     pub tts_map_slug: Option<String>,
@@ -41,6 +43,8 @@ pub struct UserResponse {
     pub local_display_name: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub local_avatar_url: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub profile_image_id: Option<String>,
     pub is_admin: bool,
     pub created_at: u64,
     pub last_login_at: u64,
@@ -58,6 +62,7 @@ impl From<User> for UserResponse {
             avatar_url: user.avatar_url,
             local_display_name: user.local_display_name,
             local_avatar_url: user.local_avatar_url,
+            profile_image_id: user.profile_image_id,
             is_admin: user.is_admin,
             created_at: user.created_at,
             last_login_at: user.last_login_at,
@@ -99,6 +104,7 @@ pub struct DiscordProfile {
 pub struct LocalProfileUpdate {
     pub local_display_name: Option<Option<String>>,
     pub local_avatar_url: Option<Option<String>>,
+    pub profile_image_id: Option<Option<String>>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -198,15 +204,20 @@ impl UserStore {
             Some(value) => normalize_optional_text(value),
             None => current.local_avatar_url,
         };
+        let profile_image_id = match update.profile_image_id {
+            Some(value) => normalize_profile_image_id(value)?,
+            None => current.profile_image_id,
+        };
 
         conn.execute(
             "
             UPDATE users
             SET local_display_name = ?1,
-                local_avatar_url = ?2
-            WHERE id = ?3
+                local_avatar_url = ?2,
+                profile_image_id = ?3
+            WHERE id = ?4
             ",
-            params![local_display_name, local_avatar_url, user_id],
+            params![local_display_name, local_avatar_url, profile_image_id, user_id],
         )?;
 
         self.get_by_id_in_conn(&conn, user_id)?
@@ -280,7 +291,8 @@ impl UserStore {
         let mut stmt = conn.prepare(
             "
             SELECT id, discord_id, username, display_name, avatar_url,
-                   local_display_name, local_avatar_url, secondary_view_mode,
+                   local_display_name, local_avatar_url, profile_image_id,
+                   secondary_view_mode,
                    scenario_slug, tts_map_slug, army_sort_mode, player_sort_mode,
                    tournament_completed_view_mode, is_admin,
                    created_at, last_login_at
@@ -296,7 +308,8 @@ impl UserStore {
         let mut stmt = conn.prepare(
             "
             SELECT id, discord_id, username, display_name, avatar_url,
-                   local_display_name, local_avatar_url, secondary_view_mode,
+                   local_display_name, local_avatar_url, profile_image_id,
+                   secondary_view_mode,
                    scenario_slug, tts_map_slug, army_sort_mode, player_sort_mode,
                    tournament_completed_view_mode, is_admin,
                    created_at, last_login_at
@@ -319,7 +332,8 @@ impl UserStore {
         let mut stmt = conn.prepare(
             "
             SELECT id, discord_id, username, display_name, avatar_url,
-                   local_display_name, local_avatar_url, secondary_view_mode,
+                   local_display_name, local_avatar_url, profile_image_id,
+                   secondary_view_mode,
                    scenario_slug, tts_map_slug, army_sort_mode, player_sort_mode,
                    tournament_completed_view_mode, is_admin,
                    created_at, last_login_at
@@ -342,7 +356,8 @@ impl UserStore {
         let mut stmt = conn.prepare(
             "
             SELECT id, discord_id, username, display_name, avatar_url,
-                   local_display_name, local_avatar_url, secondary_view_mode,
+                   local_display_name, local_avatar_url, profile_image_id,
+                   secondary_view_mode,
                    scenario_slug, tts_map_slug, army_sort_mode, player_sort_mode,
                    tournament_completed_view_mode, is_admin,
                    created_at, last_login_at
@@ -358,6 +373,11 @@ impl UserStore {
     }
 }
 
+const PROFILE_IMAGE_IDS: &[&str] = &[
+    "side_01", "side_01b", "side_02", "side_03", "side_04", "side_05", "side_06",
+    "side_07", "side_08", "side_09", "side_10", "side_11", "side_12", "side_13",
+];
+
 fn normalize_optional_text(value: Option<String>) -> Option<String> {
     value.and_then(|text| {
         let trimmed = text.trim().to_string();
@@ -369,6 +389,16 @@ fn normalize_optional_text(value: Option<String>) -> Option<String> {
     })
 }
 
+fn normalize_profile_image_id(value: Option<String>) -> Result<Option<String>> {
+    let Some(raw) = normalize_optional_text(value) else {
+        return Ok(None);
+    };
+    if !PROFILE_IMAGE_IDS.contains(&raw.as_str()) {
+        anyhow::bail!("image de profil invalide");
+    }
+    Ok(Some(raw))
+}
+
 fn row_to_user(row: &rusqlite::Row<'_>) -> rusqlite::Result<User> {
     Ok(User {
         id: row.get(0)?,
@@ -378,15 +408,16 @@ fn row_to_user(row: &rusqlite::Row<'_>) -> rusqlite::Result<User> {
         avatar_url: row.get(4)?,
         local_display_name: row.get(5)?,
         local_avatar_url: row.get(6)?,
-        secondary_view_mode: row.get(7)?,
-        scenario_slug: row_opt_text(row, 8)?,
-        tts_map_slug: row_opt_text(row, 9)?,
-        army_sort_mode: row.get(10)?,
-        player_sort_mode: row.get(11)?,
-        tournament_completed_view_mode: row.get(12)?,
-        is_admin: row.get::<_, i64>(13)? != 0,
-        created_at: row.get(14)?,
-        last_login_at: row.get(15)?,
+        profile_image_id: row.get(7)?,
+        secondary_view_mode: row.get(8)?,
+        scenario_slug: row_opt_text(row, 9)?,
+        tts_map_slug: row_opt_text(row, 10)?,
+        army_sort_mode: row.get(11)?,
+        player_sort_mode: row.get(12)?,
+        tournament_completed_view_mode: row.get(13)?,
+        is_admin: row.get::<_, i64>(14)? != 0,
+        created_at: row.get(15)?,
+        last_login_at: row.get(16)?,
     })
 }
 
@@ -462,6 +493,7 @@ mod tests {
                 LocalProfileUpdate {
                     local_display_name: Some(Some("Sardine".into())),
                     local_avatar_url: Some(Some("https://example.test/avatar.png".into())),
+                    profile_image_id: None,
                 },
             )
             .unwrap();
@@ -479,6 +511,7 @@ mod tests {
                 LocalProfileUpdate {
                     local_display_name: Some(None),
                     local_avatar_url: None,
+                    profile_image_id: None,
                 },
             )
             .unwrap();

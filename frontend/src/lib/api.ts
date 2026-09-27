@@ -147,8 +147,10 @@ export function logout(): Promise<void> {
 export function updateProfile(payload: {
   local_display_name?: string
   local_avatar_url?: string
+  profile_image_id?: string
   clear_local_display_name?: boolean
   clear_local_avatar_url?: boolean
+  clear_profile_image_id?: boolean
 }): Promise<AuthUser['user']> {
   return request<AuthUser['user']>('/api/auth/me', {
     method: 'PATCH',

@@ -399,6 +399,10 @@ pub fn migrate(conn: &Connection) -> Result<()> {
         conn.execute("ALTER TABLE users ADD COLUMN local_avatar_url TEXT", [])?;
     }
 
+    if !column_exists(conn, "users", "profile_image_id")? {
+        conn.execute("ALTER TABLE users ADD COLUMN profile_image_id TEXT", [])?;
+    }
+
     if !column_exists(conn, "users", "secondary_view_mode")? {
         conn.execute("ALTER TABLE users ADD COLUMN secondary_view_mode TEXT", [])?;
     }

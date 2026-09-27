@@ -63,6 +63,8 @@ pub struct PlayerProfileResponse {
     pub player: Player,
     pub display_name: String,
     pub avatar_url: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub profile_image_id: Option<String>,
     pub profile_display_name: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub discord_display_name: Option<String>,
@@ -276,9 +278,13 @@ struct UpdateProfileRequest {
     #[serde(default)]
     local_avatar_url: Option<String>,
     #[serde(default)]
+    profile_image_id: Option<String>,
+    #[serde(default)]
     clear_local_display_name: bool,
     #[serde(default)]
     clear_local_avatar_url: bool,
+    #[serde(default)]
+    clear_profile_image_id: bool,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -716,6 +722,14 @@ async fn update_profile(
         None
     };
 
+    let profile_image_id = if payload.clear_profile_image_id {
+        Some(None)
+    } else if payload.profile_image_id.is_some() {
+        Some(payload.profile_image_id)
+    } else {
+        None
+    };
+
     let updated = state
         .users
         .update_local_profile(
@@ -723,6 +737,7 @@ async fn update_profile(
             LocalProfileUpdate {
                 local_display_name,
                 local_avatar_url,
+                profile_image_id,
             },
         )
         .map_err(|error| ApiError::bad_request(error.to_string()))?;
@@ -1335,6 +1350,7 @@ fn build_player_profile(
         player: player.clone(),
         display_name: display_name.clone(),
         avatar_url: None,
+        profile_image_id: None,
         profile_display_name: Some(display_name),
         discord_display_name: None,
         is_own_profile: false,
@@ -1354,6 +1370,7 @@ fn build_player_profile(
     };
 
     response.avatar_url = Some(linked_user.effective_avatar_url().to_string());
+    response.profile_image_id = linked_user.profile_image_id.clone();
     response.profile_display_name = Some(linked_user.effective_display_name().to_string());
     response.display_name = linked_user.effective_display_name().to_string();
 

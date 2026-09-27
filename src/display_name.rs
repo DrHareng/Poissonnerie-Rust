@@ -200,6 +200,7 @@ mod tests {
                 crate::user::LocalProfileUpdate {
                     local_display_name: Some(Some("Capitaine Hareng".into())),
                     local_avatar_url: None,
+                    profile_image_id: None,
                 },
             )
             .unwrap();

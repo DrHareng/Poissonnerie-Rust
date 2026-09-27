@@ -23,16 +23,16 @@ export const SIDE_IMAGES = [
   { id: 'side_11', src: brandImage('/brand/side_11.png'), name: 'Au p\'tit optimiste' },
   { id: 'side_12', src: brandImage('/brand/side_12.png'), name: 'White Sea' },
   { id: 'side_13', src: brandImage('/brand/side_13.png'), name: 'Fishbusters' },
+  { id: 'side_14', src: brandImage('/brand/side_14.png'), name: 'Au Fishing Club' },
 ] as const
 
 export type SideImageId = (typeof SIDE_IMAGES)[number]['id']
 
-
-
 export function isSideImageId(value: unknown): value is SideImageId {
-
   return SIDE_IMAGES.some((image) => image.id === value)
-
 }
 
-
+export function getSideImage(id: string | null | undefined) {
+  if (!id || !isSideImageId(id)) return null
+  return SIDE_IMAGES.find((image) => image.id === id) ?? null
+}

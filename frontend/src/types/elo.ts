@@ -33,6 +33,7 @@ export interface User {
   effective_avatar_url: string
   local_display_name?: string | null
   local_avatar_url?: string | null
+  profile_image_id?: string | null
   is_admin: boolean
   created_at: number
   last_login_at: number
@@ -41,6 +42,7 @@ export interface User {
 export interface PlayerProfile extends Player {
   display_name: string
   avatar_url?: string | null
+  profile_image_id?: string | null
   profile_display_name?: string | null
   discord_display_name?: string | null
   is_own_profile: boolean

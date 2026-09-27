@@ -1,7 +1,7 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter, RouterLink } from 'vue-router'
-import { useTitle } from '@vueuse/core'
+import { useTitle, onKeyStroke } from '@vueuse/core'
 import { toast } from 'vue-sonner'
 import {
   fetchPlayer,
@@ -16,6 +16,7 @@ import { classementTabs } from '@/lib/pageTitleTabs'
 import { useAuth } from '@/composables/useAuth'
 import { useAppSidePanel } from '@/composables/useAppSidePanel'
 import { useListPage } from '@/composables/useListPage'
+import { useSideImagePrefs } from '@/composables/useSideImagePrefs'
 import type {
   MatchRecord,
   PlayerArmyStats,
@@ -30,6 +31,7 @@ import WinDrawLossBar from '@/components/WinDrawLossBar.vue'
 import ArmyLogo from '@/components/ArmyLogo.vue'
 import { useArmies } from '@/composables/useArmies'
 import PlayerPreferencesForm from '@/components/PlayerPreferencesForm.vue'
+import { getSideImage } from '@/lib/sideImages'
 import {
   Card,
   CardContent,
@@ -42,6 +44,7 @@ const route = useRoute()
 const router = useRouter()
 const { user, refresh: refreshAuth } = useAuth()
 const { setCustomSide } = useAppSidePanel()
+const { setForcedSideImage, setSideImageDismiss } = useSideImagePrefs()
 const { ensureLoaded: ensureArmiesLoaded, getArmy } = useArmies()
 
 const player = ref<RankedPlayer | null>(null)
@@ -58,6 +61,8 @@ const MATCHES_PAGE_SIZE = 5
 
 const localDisplayName = ref('')
 const localAvatarUrl = ref('')
+const profileImageId = ref<string | null>(null)
+const profilePreviewActive = ref(false)
 
 function normalize(name: string) {
   return name.trim().toLowerCase()
@@ -123,16 +128,69 @@ watch(
 const isOwnProfile = computed(() => Boolean(profile.value?.is_own_profile))
 
 watch(
-  isOwnProfile,
-  (own) => {
-    setCustomSide(own)
+  [isOwnProfile, profilePreviewActive],
+  ([own, preview]) => {
+    setCustomSide(Boolean(own && !preview))
   },
   { immediate: true },
 )
 
+watch(
+  [
+    isOwnProfile,
+    profilePreviewActive,
+    profileImageId,
+    () => profile.value?.profile_image_id,
+  ],
+  () => {
+    if (profilePreviewActive.value) {
+      setForcedSideImage(getSideImage(profileImageId.value)?.src ?? null)
+      return
+    }
+    // Sur son propre profil, le panneau latéral affiche les préférences.
+    if (isOwnProfile.value) {
+      setForcedSideImage(null)
+      return
+    }
+    setForcedSideImage(getSideImage(profile.value?.profile_image_id)?.src ?? null)
+  },
+  { immediate: true },
+)
+
+function startProfilePreview() {
+  if (!getSideImage(profileImageId.value)) return
+  profilePreviewActive.value = true
+}
+
+function stopProfilePreview() {
+  profilePreviewActive.value = false
+}
+
+watch(
+  profilePreviewActive,
+  (active) => {
+    setSideImageDismiss(active ? stopProfilePreview : null)
+  },
+  { immediate: true },
+)
+
+onKeyStroke('Escape', (event) => {
+  if (!profilePreviewActive.value) return
+  event.preventDefault()
+  stopProfilePreview()
+})
+
+onBeforeUnmount(() => {
+  profilePreviewActive.value = false
+  setSideImageDismiss(null)
+  setForcedSideImage(null)
+  setCustomSide(false)
+})
+
 function syncProfileForm() {
   localDisplayName.value = user.value?.local_display_name ?? ''
   localAvatarUrl.value = user.value?.local_avatar_url ?? ''
+  profileImageId.value = user.value?.profile_image_id ?? null
 }
 
 async function loadPlayer() {
@@ -234,6 +292,9 @@ async function saveProfile() {
     await updateProfile({
       local_display_name: localDisplayName.value,
       local_avatar_url: localAvatarUrl.value,
+      ...(profileImageId.value
+        ? { profile_image_id: profileImageId.value }
+        : { clear_profile_image_id: true }),
     })
     await refreshAuth()
     await loadPlayer()
@@ -275,6 +336,21 @@ async function resetAvatar() {
   }
 }
 
+async function clearProfileImage() {
+  savingProfile.value = true
+  try {
+    await updateProfile({ clear_profile_image_id: true })
+    profileImageId.value = null
+    await refreshAuth()
+    await loadPlayer()
+    toast.success('Image de profil retirée.')
+  } catch (error) {
+    toast.error(error instanceof Error ? error.message : 'Erreur inconnue')
+  } finally {
+    savingProfile.value = false
+  }
+}
+
 async function refresh() {
   void ensureArmiesLoaded()
   await Promise.all([loadPlayer(), loadMatches(), loadArmyStats(), loadTournaments()])
@@ -304,45 +380,51 @@ onMounted(refresh)
 
       <Teleport defer to="#app-side-panel">
         <Card
-          v-if="isOwnProfile"
+          v-if="isOwnProfile && !profilePreviewActive"
           class="neon-panel flex h-full min-h-0 flex-col"
         >
           <CardHeader class="shrink-0">
             <CardTitle>Préférences</CardTitle>
             <CardDescription>
-              Personnalisez le pseudo et l'avatar affichés à la place de ceux de Discord.
+              Personnalisez le pseudo, l'avatar et l'image visibles sur votre profil.
             </CardDescription>
           </CardHeader>
           <CardContent class="min-h-0 flex-1 overflow-y-auto">
             <PlayerPreferencesForm
               v-model:display-name="localDisplayName"
               v-model:avatar-url="localAvatarUrl"
+              v-model:profile-image-id="profileImageId"
               id-prefix="side"
               :saving="savingProfile"
               @save="saveProfile"
               @reset-display-name="resetDisplayName"
               @reset-avatar="resetAvatar"
+              @clear-profile-image="clearProfileImage"
+              @preview-profile-image="startProfilePreview"
             />
           </CardContent>
         </Card>
       </Teleport>
 
-      <Card v-if="isOwnProfile" class="neon-panel shrink-0 lg:hidden">
+      <Card v-if="isOwnProfile && !profilePreviewActive" class="neon-panel shrink-0 lg:hidden">
         <CardHeader>
           <CardTitle>Préférences</CardTitle>
           <CardDescription>
-            Personnalisez le pseudo et l'avatar affichés à la place de ceux de Discord.
+            Personnalisez le pseudo, l'avatar et l'image visibles sur votre profil.
           </CardDescription>
         </CardHeader>
         <CardContent>
           <PlayerPreferencesForm
             v-model:display-name="localDisplayName"
             v-model:avatar-url="localAvatarUrl"
+            v-model:profile-image-id="profileImageId"
             id-prefix="mobile"
             :saving="savingProfile"
             @save="saveProfile"
             @reset-display-name="resetDisplayName"
             @reset-avatar="resetAvatar"
+            @clear-profile-image="clearProfileImage"
+            @preview-profile-image="startProfilePreview"
           />
         </CardContent>
       </Card>

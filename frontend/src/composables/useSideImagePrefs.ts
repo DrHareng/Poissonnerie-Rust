@@ -17,6 +17,12 @@ function readStored(): SideImageId[] {
 
 const disabledIds = ref<SideImageId[]>(readStored())
 
+/** Image imposée (ex. image de profil d'un joueur consulté). */
+const forcedSideImageSrc = ref<string | null>(null)
+
+/** Action de fermeture affichée en overlay sur l'image latérale (ex. fin de prévisualisation). */
+const sideImageDismiss = ref<(() => void) | null>(null)
+
 watch(disabledIds, (value) => {
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(value))
@@ -49,11 +55,23 @@ function pickSideImage(): string | null {
   return pool[Math.floor(Math.random() * pool.length)]!.src
 }
 
+function setForcedSideImage(src: string | null) {
+  forcedSideImageSrc.value = src
+}
+
+function setSideImageDismiss(handler: (() => void) | null) {
+  sideImageDismiss.value = handler
+}
+
 export function useSideImagePrefs() {
   return {
     enabledImages,
+    forcedSideImageSrc,
+    sideImageDismiss,
     isEnabled,
     setEnabled,
     pickSideImage,
+    setForcedSideImage,
+    setSideImageDismiss,
   }
 }
