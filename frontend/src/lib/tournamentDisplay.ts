@@ -133,6 +133,17 @@ export function isTournamentPoolsPhase(tournament: {
   return (tournament.pools?.length ?? 0) > 0
 }
 
+/** Durée théorique de la phase de poules (alignée sur l'historique Coupe). */
+export const THEORETICAL_POOLS_DURATION_SECONDS = 2_592_000 // 30 jours
+
+/** Timestamp Unix théorique de fin des poules (`started_at` + 30 jours). */
+export function theoreticalPoolsEndAt(
+  startedAt: number | null | undefined,
+): number | null {
+  if (!startedAt || startedAt < 31_536_000) return null
+  return startedAt + THEORETICAL_POOLS_DURATION_SECONDS
+}
+
 export function isTournamentCompleted(status: string): boolean {
   return status === 'completed'
 }

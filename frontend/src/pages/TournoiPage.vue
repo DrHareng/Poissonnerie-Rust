@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter, type LocationQuery } from 'vue-router'
-import { Check, Trash2, X } from '@lucide/vue'
+import { Check, CircleAlert, Trash2, X } from '@lucide/vue'
 import { toast } from 'vue-sonner'
 import { COUPE_REQUIRES_NETWORK } from '@/lib/partieOffline'
 import {
@@ -73,15 +73,19 @@ import type { TournamentMatchForm } from '@/components/TournamentMatchCard.vue'
 import TournamentDescriptionWithRegistrants from '@/components/TournamentDescriptionWithRegistrants.vue'
 import {
   formatRegistrationSummary,
+  isTournamentPoolsPhase,
   registrationStatusLabel,
   sortRegistrationsForDisplay,
   suggestedPoolCount,
+  theoreticalPoolsEndAt,
   tournamentRegistrationCapacity,
 } from '@/lib/tournamentDisplay'
+import { formatMatchDate } from '@/lib/tournamentMatchDisplay'
 import { phaseLabels } from '@/lib/tournamentPhase'
 import { tournoisTabs } from '@/lib/pageTitleTabs'
 import { normalizeArmyListCode } from '@/lib/armyList'
 import PageTitleTabs from '@/components/PageTitleTabs.vue'
+import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import {
@@ -349,6 +353,13 @@ const showPoulesTab = computed(
       ? detail.value?.status === 'started' || detail.value?.status === 'completed'
       : (detail.value?.pools.length ?? 0) > 0 || canEditPools.value,
 )
+
+const poolsEndDateLabel = computed(() => {
+  if (!detail.value || !isTournamentPoolsPhase(detail.value)) return null
+  const endAt = theoreticalPoolsEndAt(detail.value.started_at)
+  if (endAt == null) return null
+  return formatMatchDate(endAt)
+})
 
 const showInscriptionsTab = computed(
   () => detail.value?.status === 'registration_open',
@@ -2429,6 +2440,16 @@ onMounted(refresh)
               </div>
             </CardContent>
           </Card>
+
+          <Alert
+            v-if="detail.pools.length > 0 && !canEditPools && poolsEndDateLabel"
+            class="neon-panel"
+          >
+            <CircleAlert />
+            <AlertDescription>
+              La date de fin des poules est prévue pour le {{ poolsEndDateLabel }}.
+            </AlertDescription>
+          </Alert>
 
           <Card
             v-if="detail.pools.length > 0 && !canEditPools"

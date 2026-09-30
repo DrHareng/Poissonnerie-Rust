@@ -289,7 +289,10 @@ onMounted(async () => {
               <div class="flex items-start justify-between gap-4">
                 <div class="min-w-0 space-y-1">
                   <p class="font-medium">{{ tournament.name }}</p>
-                  <p class="text-sm text-muted-foreground">
+                  <p
+                    v-if="!isTournamentPoolsPhase(tournament)"
+                    class="text-sm text-muted-foreground"
+                  >
                     {{
                       formatRegistrationSummary(
                         tournament.registered_count,
