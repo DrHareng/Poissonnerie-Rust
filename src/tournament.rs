@@ -16,6 +16,8 @@ pub const POOL_SCENARIO_LETTERS: &[char] = &['A', 'B', 'C', 'D', 'E'];
 pub const BRACKET_SCENARIO_COUNT: usize = 4;
 pub const DEFAULT_SWISS_ROUNDS: u8 = 5;
 pub const DEFAULT_QUALIFIED_PER_POOL: u8 = 3;
+/// Durée par défaut de la phase de poules (30 jours).
+pub const DEFAULT_POOLS_DURATION_SECS: u64 = 2_592_000;
 pub const MAX_SWISS_ROUNDS: u8 = 12;
 
 pub fn default_swiss_rounds() -> u8 {
@@ -271,6 +273,8 @@ pub struct Tournament {
     pub qualified_per_pool: u8,
     pub created_at: u64,
     pub started_at: Option<u64>,
+    /// Date prévue de fin de la phase de poules (Unix).
+    pub pools_end_at: Option<u64>,
     pub pools_finalized_at: Option<u64>,
     pub completed_at: Option<u64>,
     /// Utilisateur chargé de valider les listes d'armées (prérequis au démarrage).

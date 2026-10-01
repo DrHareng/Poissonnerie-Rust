@@ -297,6 +297,7 @@ export interface Tournament {
   qualified_per_pool: number
   created_at: number
   started_at?: number | null
+  pools_end_at?: number | null
   pools_finalized_at?: number | null
   completed_at?: number | null
   list_validator_user_id?: number | null

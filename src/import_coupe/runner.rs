@@ -293,7 +293,7 @@ pub fn run_import(args: &ImportCoupeArgs, config: &CoupeConfig) -> Result<()> {
         }
         let pools_finalized_at = config.started_at + 2_592_000;
         conn.execute(
-            "UPDATE tournaments SET started_at = ?1, pools_finalized_at = ?2, completed_at = ?3 WHERE id = ?4",
+            "UPDATE tournaments SET started_at = ?1, pools_end_at = ?2, pools_finalized_at = ?2, completed_at = ?3 WHERE id = ?4",
             params![
                 config.started_at,
                 pools_finalized_at,

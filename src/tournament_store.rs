@@ -21,15 +21,16 @@ use crate::tournament::{
     PlayerTournamentResult, Pool, PoolPlayer, RegistrationStatus, Tournament, TournamentDetail,
     TournamentListEntry, TournamentMatch, TournamentMatchStatus, TournamentPhase,
     TournamentPlayerSnapshot, TournamentRegistration, TournamentRegistrationPreview,
-    TournamentScenarioSlot, TournamentStatus, TournamentStructure, DEFAULT_QUALIFIED_PER_POOL,
-    DEFAULT_SWISS_ROUNDS, MAX_POOL_SIZE, MAX_SWISS_ROUNDS,
+    TournamentScenarioSlot, TournamentStatus, TournamentStructure, DEFAULT_POOLS_DURATION_SECS,
+    DEFAULT_QUALIFIED_PER_POOL, DEFAULT_SWISS_ROUNDS, MAX_POOL_SIZE, MAX_SWISS_ROUNDS,
     compute_display_status, compute_top_four, registration_counts,
 };
 
 const TOURNAMENT_SELECT: &str = "
     SELECT id, name, description, status, pool_count, bracket_format,
            created_at, started_at, pools_finalized_at, completed_at,
-           list_validator_user_id, structure, swiss_rounds, qualified_per_pool
+           list_validator_user_id, structure, swiss_rounds, qualified_per_pool,
+           pools_end_at
     FROM tournaments
 ";
 
@@ -58,6 +59,9 @@ pub struct UpdateTournamentDetailsRequest {
     pub name: String,
     #[serde(default)]
     pub description: String,
+    /// Date prévue de fin de la phase de poules (Unix). Absent = ne pas modifier.
+    #[serde(default)]
+    pub pools_end_at: Option<u64>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -474,17 +478,46 @@ impl TournamentStore {
         let description = request.description.trim();
 
         let conn = self.conn.lock().unwrap();
-        self.ensure_tournament_exists(&conn, tournament_id)?;
-        let updated = conn.execute(
-            "
-            UPDATE tournaments
-            SET name = ?1, description = ?2
-            WHERE id = ?3
-            ",
-            params![name, description, tournament_id],
-        )?;
-        if updated == 0 {
-            bail!("tournoi introuvable");
+        let tournament = self
+            .get_in_conn(&conn, tournament_id)?
+            .context("tournoi introuvable")?;
+
+        if let Some(pools_end_at) = request.pools_end_at {
+            if tournament.status != TournamentStatus::Started {
+                bail!("la date de fin des poules n'est modifiable qu'une fois le tournoi démarré");
+            }
+            if !tournament.structure.uses_pools() {
+                bail!("ce format n'utilise pas de poules");
+            }
+            if tournament.pools_finalized_at.is_some() {
+                bail!("les poules sont déjà clôturées");
+            }
+            if pools_end_at < 31_536_000 {
+                bail!("date de fin des poules invalide");
+            }
+            let updated = conn.execute(
+                "
+                UPDATE tournaments
+                SET name = ?1, description = ?2, pools_end_at = ?3
+                WHERE id = ?4
+                ",
+                params![name, description, pools_end_at, tournament_id],
+            )?;
+            if updated == 0 {
+                bail!("tournoi introuvable");
+            }
+        } else {
+            let updated = conn.execute(
+                "
+                UPDATE tournaments
+                SET name = ?1, description = ?2
+                WHERE id = ?3
+                ",
+                params![name, description, tournament_id],
+            )?;
+            if updated == 0 {
+                bail!("tournoi introuvable");
+            }
         }
         self.get_in_conn(&conn, tournament_id)?
             .context("tournoi introuvable après mise à jour")
@@ -1494,12 +1527,23 @@ impl TournamentStore {
             )?;
         }
 
+        let pools_end_at = if tournament.structure.uses_pools() {
+            Some(now + DEFAULT_POOLS_DURATION_SECS)
+        } else {
+            None
+        };
+
         tx.execute(
             "
-            UPDATE tournaments SET status = ?1, started_at = ?2
-            WHERE id = ?3
+            UPDATE tournaments SET status = ?1, started_at = ?2, pools_end_at = ?3
+            WHERE id = ?4
             ",
-            params![TournamentStatus::Started.as_str(), now, tournament_id],
+            params![
+                TournamentStatus::Started.as_str(),
+                now,
+                pools_end_at,
+                tournament_id
+            ],
         )?;
 
         tx.commit()?;
@@ -1579,7 +1623,7 @@ impl TournamentStore {
         tx.execute(
             "
             UPDATE tournaments
-            SET status = ?1, started_at = NULL, pools_finalized_at = NULL
+            SET status = ?1, started_at = NULL, pools_finalized_at = NULL, pools_end_at = NULL
             WHERE id = ?2
             ",
             params![
@@ -4845,6 +4889,7 @@ fn row_to_tournament(row: &rusqlite::Row<'_>) -> rusqlite::Result<Tournament> {
             .unwrap_or(TournamentStructure::PoolsBracket),
         swiss_rounds: row.get(12)?,
         qualified_per_pool: row.get(13)?,
+        pools_end_at: row.get(14)?,
     })
 }
 

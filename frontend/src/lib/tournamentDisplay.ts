@@ -133,15 +133,59 @@ export function isTournamentPoolsPhase(tournament: {
   return (tournament.pools?.length ?? 0) > 0
 }
 
-/** Durée théorique de la phase de poules (alignée sur l'historique Coupe). */
-export const THEORETICAL_POOLS_DURATION_SECONDS = 2_592_000 // 30 jours
+import { formatMatchDate } from '@/lib/tournamentMatchDisplay'
 
-/** Timestamp Unix théorique de fin des poules (`started_at` + 30 jours). */
-export function theoreticalPoolsEndAt(
+/** Durée par défaut de la phase de poules (alignée sur l'historique Coupe). */
+export const DEFAULT_POOLS_DURATION_SECONDS = 2_592_000 // 30 jours
+
+/** Timestamp Unix par défaut de fin des poules (`started_at` + 30 jours). */
+export function defaultPoolsEndAt(
   startedAt: number | null | undefined,
 ): number | null {
   if (!startedAt || startedAt < 31_536_000) return null
-  return startedAt + THEORETICAL_POOLS_DURATION_SECONDS
+  return startedAt + DEFAULT_POOLS_DURATION_SECONDS
+}
+
+/** Date de fin des poules enregistrée, sinon défaut théorique. */
+export function resolvePoolsEndAt(tournament: {
+  pools_end_at?: number | null
+  started_at?: number | null
+}): number | null {
+  if (tournament.pools_end_at && tournament.pools_end_at >= 31_536_000) {
+    return tournament.pools_end_at
+  }
+  return defaultPoolsEndAt(tournament.started_at)
+}
+
+export function formatPoolsEndSummary(tournament: {
+  pools_end_at?: number | null
+  started_at?: number | null
+}): string | null {
+  const endAt = resolvePoolsEndAt(tournament)
+  if (endAt == null) return null
+  return `Fin des poules : ${formatMatchDate(endAt)}`
+}
+
+/** `YYYY-MM-DD` local pour un input `type="date"`. */
+export function unixToDateInputValue(timestamp: number): string {
+  const date = new Date(timestamp * 1000)
+  const year = date.getFullYear()
+  const month = String(date.getMonth() + 1).padStart(2, '0')
+  const day = String(date.getDate()).padStart(2, '0')
+  return `${year}-${month}-${day}`
+}
+
+/** Fin de journée locale → Unix seconds. */
+export function dateInputValueToUnix(value: string): number | null {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value.trim())
+  if (!match) return null
+  const year = Number(match[1])
+  const month = Number(match[2])
+  const day = Number(match[3])
+  const date = new Date(year, month - 1, day, 23, 59, 59)
+  const unix = Math.floor(date.getTime() / 1000)
+  if (!Number.isFinite(unix) || unix < 31_536_000) return null
+  return unix
 }
 
 export function isTournamentCompleted(status: string): boolean {

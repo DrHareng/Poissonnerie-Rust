@@ -26,7 +26,7 @@ import TournamentPoolScenarioLinks from '@/components/TournamentPoolScenarioLink
 import { useArmies } from '@/composables/useArmies'
 import { casualMatchContextLabel } from '@/lib/matchElo'
 import { scoreBadgeMinCh as computeScoreBadgeMinCh } from '@/lib/matchResultBadges'
-import { formatRegistrationSummary, isTournamentPoolsPhase, isTournamentRegistrationPhase, tournamentRegistrationCapacity } from '@/lib/tournamentDisplay'
+import { formatPoolsEndSummary, formatRegistrationSummary, isTournamentPoolsPhase, isTournamentRegistrationPhase, tournamentRegistrationCapacity } from '@/lib/tournamentDisplay'
 import TournamentDescriptionWithRegistrants from '@/components/TournamentDescriptionWithRegistrants.vue'
 import TournamentPoolsPreview from '@/components/TournamentPoolsPreview.vue'
 import { tournamentPhaseDisplay } from '@/lib/tournamentPhase'
@@ -290,7 +290,13 @@ onMounted(async () => {
                 <div class="min-w-0 space-y-1">
                   <p class="font-medium">{{ tournament.name }}</p>
                   <p
-                    v-if="!isTournamentPoolsPhase(tournament)"
+                    v-if="isTournamentPoolsPhase(tournament) && formatPoolsEndSummary(tournament)"
+                    class="text-sm text-muted-foreground"
+                  >
+                    {{ formatPoolsEndSummary(tournament) }}
+                  </p>
+                  <p
+                    v-else-if="!isTournamentPoolsPhase(tournament)"
                     class="text-sm text-muted-foreground"
                   >
                     {{

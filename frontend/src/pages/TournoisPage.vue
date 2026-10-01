@@ -13,6 +13,7 @@ import {
 import TournamentCompletedPodium from '@/components/TournamentCompletedPodium.vue'
 import MyTournamentSideCard from '@/components/MyTournamentSideCard.vue'
 import {
+  formatPoolsEndSummary,
   formatRegistrationSummary,
   isTournamentCompleted,
   isTournamentPoolsPhase,
@@ -300,7 +301,13 @@ onMounted(() => {
               <div class="min-w-0 space-y-1">
                 <p class="font-medium">{{ tournament.name }}</p>
                 <p
-                  v-if="!isCompressedCompletedView"
+                  v-if="!isCompressedCompletedView && isTournamentPoolsPhase(tournament) && formatPoolsEndSummary(tournament)"
+                  class="text-sm text-muted-foreground"
+                >
+                  {{ formatPoolsEndSummary(tournament) }}
+                </p>
+                <p
+                  v-else-if="!isCompressedCompletedView && !isTournamentPoolsPhase(tournament)"
                   class="text-sm text-muted-foreground"
                 >
                   {{

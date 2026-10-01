@@ -72,6 +72,7 @@ pub fn migrate(conn: &Connection) -> Result<()> {
             created_at INTEGER NOT NULL,
             started_at INTEGER,
             pools_finalized_at INTEGER,
+            pools_end_at INTEGER,
             completed_at INTEGER
         );
 
@@ -489,6 +490,25 @@ pub fn migrate(conn: &Connection) -> Result<()> {
             UPDATE tournaments
             SET qualified_per_pool = 2
             WHERE bracket_format IN ('quarters_direct', 'round_of_16_full')
+            ",
+            [],
+        )?;
+    }
+
+    if add_column_if_missing(
+        conn,
+        "tournaments",
+        "pools_end_at",
+        "ALTER TABLE tournaments ADD COLUMN pools_end_at INTEGER",
+    )? {
+        // Par défaut : 30 jours après le démarrage (historique Coupe).
+        conn.execute(
+            "
+            UPDATE tournaments
+            SET pools_end_at = started_at + 2592000
+            WHERE pools_end_at IS NULL
+              AND started_at IS NOT NULL
+              AND structure != 'swiss'
             ",
             [],
         )?;

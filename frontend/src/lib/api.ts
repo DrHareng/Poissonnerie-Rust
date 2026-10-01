@@ -769,7 +769,11 @@ export function deleteTournament(id: number): Promise<void> {
 
 export function updateTournamentDetails(
   id: number,
-  payload: { name: string; description: string },
+  payload: {
+    name: string
+    description: string
+    pools_end_at?: number
+  },
 ): Promise<Tournament> {
   return request<Tournament>(`/api/tournaments/${id}`, {
     method: 'PATCH',

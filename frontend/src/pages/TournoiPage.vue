@@ -72,13 +72,15 @@ import MarkdownContent from '@/components/MarkdownContent.vue'
 import type { TournamentMatchForm } from '@/components/TournamentMatchCard.vue'
 import TournamentDescriptionWithRegistrants from '@/components/TournamentDescriptionWithRegistrants.vue'
 import {
+  dateInputValueToUnix,
   formatRegistrationSummary,
   isTournamentPoolsPhase,
   registrationStatusLabel,
+  resolvePoolsEndAt,
   sortRegistrationsForDisplay,
   suggestedPoolCount,
-  theoreticalPoolsEndAt,
   tournamentRegistrationCapacity,
+  unixToDateInputValue,
 } from '@/lib/tournamentDisplay'
 import { formatMatchDate } from '@/lib/tournamentMatchDisplay'
 import { phaseLabels } from '@/lib/tournamentPhase'
@@ -356,10 +358,57 @@ const showPoulesTab = computed(
 
 const poolsEndDateLabel = computed(() => {
   if (!detail.value || !isTournamentPoolsPhase(detail.value)) return null
-  const endAt = theoreticalPoolsEndAt(detail.value.started_at)
+  const endAt = resolvePoolsEndAt(detail.value)
   if (endAt == null) return null
   return formatMatchDate(endAt)
 })
+
+const canEditPoolsEndDate = computed(
+  () =>
+    isAdmin.value
+    && detail.value?.status === 'started'
+    && !detail.value.pools_finalized_at
+    && tournamentStructure.value !== 'swiss',
+)
+
+const poolsEndDateDraft = ref('')
+const savingPoolsEndDate = ref(false)
+
+watch(
+  () => [detail.value?.pools_end_at, detail.value?.started_at, canEditPoolsEndDate.value] as const,
+  () => {
+    if (!canEditPoolsEndDate.value || !detail.value) {
+      poolsEndDateDraft.value = ''
+      return
+    }
+    const endAt = resolvePoolsEndAt(detail.value)
+    poolsEndDateDraft.value = endAt != null ? unixToDateInputValue(endAt) : ''
+  },
+  { immediate: true },
+)
+
+async function savePoolsEndDate() {
+  if (!detail.value || !canEditPoolsEndDate.value) return
+  const poolsEndAt = dateInputValueToUnix(poolsEndDateDraft.value)
+  if (poolsEndAt == null) {
+    toast.error('Date de fin des poules invalide')
+    return
+  }
+  savingPoolsEndDate.value = true
+  try {
+    const updated = await updateTournamentDetails(tournamentId.value, {
+      name: detail.value.name,
+      description: detail.value.description,
+      pools_end_at: poolsEndAt,
+    })
+    detail.value = { ...detail.value, pools_end_at: updated.pools_end_at }
+    toast.success('Date de fin des poules mise à jour')
+  } catch (error) {
+    toast.error(error instanceof Error ? error.message : 'Erreur')
+  } finally {
+    savingPoolsEndDate.value = false
+  }
+}
 
 const showInscriptionsTab = computed(
   () => detail.value?.status === 'registration_open',
@@ -3007,6 +3056,30 @@ onMounted(refresh)
                 >
                   <Trash2 class="size-4" />
                   {{ deletingTournament ? 'Suppression…' : 'Supprimer le tournoi' }}
+                </Button>
+              </div>
+
+              <div
+                v-if="canEditPoolsEndDate"
+                class="flex flex-wrap items-end gap-3 border-t pt-4"
+              >
+                <div class="grid gap-1">
+                  <Label for="pools-end-at">Date de fin des poules</Label>
+                  <Input
+                    id="pools-end-at"
+                    v-model="poolsEndDateDraft"
+                    type="date"
+                    class="w-auto"
+                    :disabled="savingPoolsEndDate"
+                  />
+                </div>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  :disabled="savingPoolsEndDate || !poolsEndDateDraft"
+                  @click="savePoolsEndDate"
+                >
+                  {{ savingPoolsEndDate ? 'Enregistrement...' : 'Enregistrer la date' }}
                 </Button>
               </div>
             </CardContent>
