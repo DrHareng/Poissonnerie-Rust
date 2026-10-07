@@ -615,6 +615,8 @@ async fn list_tournaments(
                     for player in &mut pool.players {
                         player.player_display_name =
                             Some(resolver.resolve(&player.player_name));
+                        player.avatar_url =
+                            resolver.resolve_avatar_url(&player.player_name);
                     }
                 }
                 enrich_my_tournament_summary(&state, &viewer, &resolver, &mut entry);

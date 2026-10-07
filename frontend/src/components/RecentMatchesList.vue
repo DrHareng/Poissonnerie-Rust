@@ -3,6 +3,7 @@ import { computed } from 'vue'
 import { History } from '@lucide/vue'
 import type { MatchRecord } from '@/types/elo'
 import PaginationBar from '@/components/PaginationBar.vue'
+import MatchListRow from '@/components/MatchListRow.vue'
 import MatchResultBadges from '@/components/MatchResultBadges.vue'
 import MatchContextCell from '@/components/MatchContextCell.vue'
 import MatchOpenButton from '@/components/MatchOpenButton.vue'
@@ -16,6 +17,7 @@ import {
   normalizeMatchForPlayer,
   playerMatchEloDelta,
 } from '@/lib/matchPlayerPerspective'
+import { scoreBadgeMinCh as computeScoreBadgeMinCh } from '@/lib/matchResultBadges'
 import { formatMatchRecordedDate } from '@/lib/tournamentMatchDisplay'
 import {
   Card,
@@ -107,6 +109,15 @@ const displayMatches = computed(() =>
   props.clientSide ? visibleMatches.value : preparedMatches.value,
 )
 
+const scoreBadgeMinCh = computed(() => computeScoreBadgeMinCh(displayMatches.value))
+
+const emphasizeDefeat = computed(
+  () =>
+    !!props.perspectivePlayer
+    || props.perspectiveArmyId != null
+    || props.perspectiveArmyListId != null,
+)
+
 const defaultDescription = computed(() => {
   if (effectiveTotal.value) {
     return `${effectiveTotal.value} match${effectiveTotal.value > 1 ? 's' : ''} au total, du plus récent au plus ancien.`
@@ -172,91 +183,104 @@ function formatEloCell(match: MatchRecord) {
       </div>
 
       <template v-else>
-        <Table>
-          <TableHeader class="sticky top-0 z-10 bg-card/95 backdrop-blur">
-            <TableRow>
-              <TableHead>Date</TableHead>
-              <TableHead class="text-right">Joueur 1</TableHead>
-              <TableHead class="w-10" aria-hidden="true" />
-              <TableHead class="text-center">Résultat</TableHead>
-              <TableHead class="w-10" aria-hidden="true" />
-              <TableHead>Joueur 2</TableHead>
-              <TableHead>Contexte</TableHead>
-              <TableHead v-if="showElo">ELO</TableHead>
-              <TableHead class="w-12 text-right">
-                <span class="sr-only">Actions</span>
-              </TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            <TableRow v-for="match in displayMatches" :key="match.id">
-              <TableCell class="whitespace-nowrap text-muted-foreground">
-                {{ formatMatchRecordedDate(match.recorded_at) ?? '—' }}
-              </TableCell>
-              <TableCell class="text-right">
-                <PlayerLink
-                  :name="match.player1"
-                  :display-name="match.player1_display_name"
-                  :adversaire="match.adversaire"
-                />
-              </TableCell>
-              <TableCell class="px-2">
-                <div class="flex items-center gap-1">
-                  <ArmyLogo :army-id="match.player1_army_id" />
-                  <ArmyListQuickActions
-                    :code="match.player1_army_list_code"
-                    icon-only
+        <div class="divide-y divide-border/60 rounded-lg border md:hidden">
+          <MatchListRow
+            v-for="match in displayMatches"
+            :key="`m-${match.id}`"
+            :match="match"
+            :badge-min-ch="scoreBadgeMinCh"
+            :emphasize-defeat="emphasizeDefeat"
+            :show-elo="showElo"
+          />
+        </div>
+
+        <div class="hidden md:block">
+          <Table>
+            <TableHeader class="sticky top-0 z-10 bg-card/95 backdrop-blur">
+              <TableRow>
+                <TableHead>Date</TableHead>
+                <TableHead class="text-right">Joueur 1</TableHead>
+                <TableHead class="w-10" aria-hidden="true" />
+                <TableHead class="text-center">Résultat</TableHead>
+                <TableHead class="w-10" aria-hidden="true" />
+                <TableHead>Joueur 2</TableHead>
+                <TableHead>Contexte</TableHead>
+                <TableHead v-if="showElo">ELO</TableHead>
+                <TableHead class="w-12 text-right">
+                  <span class="sr-only">Actions</span>
+                </TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              <TableRow v-for="match in displayMatches" :key="match.id">
+                <TableCell class="whitespace-nowrap text-muted-foreground">
+                  {{ formatMatchRecordedDate(match.recorded_at) ?? '—' }}
+                </TableCell>
+                <TableCell class="text-right">
+                  <PlayerLink
+                    :name="match.player1"
+                    :display-name="match.player1_display_name"
+                    :adversaire="match.adversaire"
                   />
-                </div>
-              </TableCell>
-              <TableCell>
-                <MatchResultBadges
-                  :match="match"
-                  :emphasize-defeat="!!perspectivePlayer || perspectiveArmyId != null || perspectiveArmyListId != null"
-                />
-              </TableCell>
-              <TableCell class="px-2">
-                <div class="flex items-center gap-1">
-                  <ArmyLogo :army-id="match.player2_army_id" />
-                  <ArmyListQuickActions
-                    :code="match.player2_army_list_code"
-                    icon-only
+                </TableCell>
+                <TableCell class="px-2">
+                  <div class="flex items-center gap-1">
+                    <ArmyLogo :army-id="match.player1_army_id" />
+                    <ArmyListQuickActions
+                      :code="match.player1_army_list_code"
+                      icon-only
+                    />
+                  </div>
+                </TableCell>
+                <TableCell>
+                  <MatchResultBadges
+                    :match="match"
+                    :emphasize-defeat="emphasizeDefeat"
                   />
-                </div>
-              </TableCell>
-              <TableCell>
-                <PlayerLink
-                  :name="match.player2"
-                  :display-name="match.player2_display_name"
-                  :adversaire="match.adversaire"
-                />
-              </TableCell>
-              <TableCell>
-                <MatchContextCell :match="match" />
-              </TableCell>
-              <TableCell
-                v-if="showElo"
-                class="tabular-nums"
-              >
-                <template v-if="formatEloCell(match)">
-                  {{ formatEloCell(match)!.oldRating }}
-                  →
-                  {{ formatEloCell(match)!.newRating }}
-                  <span
-                    class="text-xs"
-                    :class="eloDeltaClass(match)"
-                  >
-                    ({{ formatEloCell(match)!.deltaLabel }})
-                  </span>
-                </template>
-                <span v-else class="text-muted-foreground">—</span>
-              </TableCell>
-              <TableCell class="text-right">
-                <MatchOpenButton :match-id="match.id" />
-              </TableCell>
-            </TableRow>
-          </TableBody>
-        </Table>
+                </TableCell>
+                <TableCell class="px-2">
+                  <div class="flex items-center gap-1">
+                    <ArmyLogo :army-id="match.player2_army_id" />
+                    <ArmyListQuickActions
+                      :code="match.player2_army_list_code"
+                      icon-only
+                    />
+                  </div>
+                </TableCell>
+                <TableCell>
+                  <PlayerLink
+                    :name="match.player2"
+                    :display-name="match.player2_display_name"
+                    :adversaire="match.adversaire"
+                  />
+                </TableCell>
+                <TableCell>
+                  <MatchContextCell :match="match" />
+                </TableCell>
+                <TableCell
+                  v-if="showElo"
+                  class="tabular-nums"
+                >
+                  <template v-if="formatEloCell(match)">
+                    {{ formatEloCell(match)!.oldRating }}
+                    →
+                    {{ formatEloCell(match)!.newRating }}
+                    <span
+                      class="text-xs"
+                      :class="eloDeltaClass(match)"
+                    >
+                      ({{ formatEloCell(match)!.deltaLabel }})
+                    </span>
+                  </template>
+                  <span v-else class="text-muted-foreground">—</span>
+                </TableCell>
+                <TableCell class="text-right">
+                  <MatchOpenButton :match-id="match.id" />
+                </TableCell>
+              </TableRow>
+            </TableBody>
+          </Table>
+        </div>
 
         <PaginationBar
           v-if="effectiveTotalPages > 1"

@@ -24,43 +24,54 @@ const isTournamentMatch = computed(
 
 const phaseText = computed(() => tournamentPhaseDisplay(props.match))
 
-const contextLine = computed(() => {
+const tournamentTitle = computed(
+  () =>
+    props.match.tournament_name?.trim()
+    || (props.match.tournament_id != null
+      ? `Tournoi #${props.match.tournament_id}`
+      : null),
+)
+
+const scenarioName = computed(() => props.match.scenario_name?.trim() || null)
+
+const casualLabel = computed(() =>
+  casualMatchContextLabel(props.match.counts_for_elo),
+)
+
+const secondaryLine = computed(() => {
   const parts: string[] = []
-
-  if (isTournamentMatch.value && phaseText.value) {
-    parts.push(phaseText.value)
-  } else if (!isTournamentMatch.value) {
-    parts.push(casualMatchContextLabel(props.match.counts_for_elo))
-  }
-
-  if (props.match.scenario_name) {
-    parts.push(props.match.scenario_name)
-  }
-
-  if (props.match.sync_pending) {
-    parts.push('En attente de synchro')
-  }
-
-  return parts.join(' · ')
+  if (scenarioName.value) parts.push(scenarioName.value)
+  if (props.match.sync_pending) parts.push('En attente de synchro')
+  return parts.length > 0 ? parts.join(' · ') : null
 })
 </script>
 
 <template>
-  <div class="min-w-0 text-sm">
+  <div class="min-w-0 text-sm leading-snug">
     <template v-if="isTournamentMatch">
-      <RouterLink
-        v-if="match.tournament_id"
-        :to="{ name: 'tournoi', params: { id: match.tournament_id } }"
-        class="block truncate font-medium text-primary hover:underline"
-      >
-        {{ match.tournament_name ?? `Tournoi #${match.tournament_id}` }}
-      </RouterLink>
-      <p class="truncate text-muted-foreground">
-        {{ contextLine }}
+      <p class="truncate">
+        <RouterLink
+          v-if="match.tournament_id"
+          :to="{ name: 'tournoi', params: { id: match.tournament_id } }"
+          class="font-medium text-primary hover:underline"
+          @click.stop
+        >
+          {{ tournamentTitle }}
+        </RouterLink>
+        <span v-else class="font-medium">{{ tournamentTitle }}</span>
+        <span v-if="phaseText" class="text-muted-foreground">
+          {{ ` - ${phaseText}` }}
+        </span>
+      </p>
+      <p v-if="secondaryLine" class="truncate text-muted-foreground">
+        {{ secondaryLine }}
       </p>
     </template>
-    <p v-else class="truncate text-muted-foreground">
-      {{ contextLine }}
-    </p>
+    <template v-else>
+      <p class="truncate text-muted-foreground">{{ casualLabel }}</p>
+      <p v-if="secondaryLine" class="truncate text-muted-foreground">
+        {{ secondaryLine }}
+      </p>
+    </template>
   </div>
 </template>

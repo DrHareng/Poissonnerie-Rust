@@ -171,10 +171,16 @@
   }
 
   .poissonnerie-inner {
-    @apply relative z-10 mx-auto flex min-h-0 w-[90%] max-w-[1600px] flex-col lg:h-full lg:overflow-hidden;
-    padding:
-      clamp(0.75rem, 2vw, 1.5rem)
-      clamp(0.625rem, 2.5vw, 1.75rem);
+    @apply relative z-10 mx-auto flex min-h-0 w-full max-w-[1600px] flex-col pt-0 md:w-[90%] lg:h-full lg:overflow-hidden;
+    padding-inline: 0.5rem;
+    padding-bottom: 0.75rem;
+  }
+
+  @media (min-width: 768px) {
+    .poissonnerie-inner {
+      padding-inline: clamp(0.625rem, 2.5vw, 1.75rem);
+      padding-bottom: clamp(0.75rem, 2vw, 1.5rem);
+    }
   }
 
   .poissonnerie-body {
@@ -225,7 +231,7 @@
   }
 
   .topbar {
-    @apply relative z-20 mb-6 flex shrink-0 items-center justify-between gap-3 rounded-lg border border-primary/20 bg-card/70 p-3 backdrop-blur-md md:gap-4 md:p-4;
+    @apply relative z-20 mb-4 flex shrink-0 items-center justify-between gap-3 rounded-b-lg rounded-t-none border border-t-0 border-primary/20 bg-card/70 px-3 py-2.5 backdrop-blur-md md:mb-6 md:gap-4 md:px-4 md:py-3;
     box-shadow: 0 0 30px oklch(0.8 0.14 195 / 15%);
   }
 
@@ -243,15 +249,6 @@
 
   .topbar-end {
     @apply flex min-w-0 shrink-0 items-center gap-2 md:gap-4;
-  }
-
-  .topbar-menu-trigger {
-    @apply inline-flex size-9 items-center justify-center rounded-md border border-transparent text-muted-foreground transition-colors outline-none md:hidden;
-  }
-
-  .topbar-menu-trigger:hover,
-  .topbar-menu-trigger[data-state='open'] {
-    @apply border-primary/30 bg-primary/10 text-primary;
   }
 
   .topbar-nav {
@@ -310,10 +307,6 @@
     @apply bg-primary/10 text-primary;
   }
 
-  .topbar-menu-child {
-    @apply pl-8 text-muted-foreground;
-  }
-
   .partie-stepper {
     @apply flex flex-wrap items-center gap-2 sm:gap-4;
   }
@@ -370,6 +363,35 @@
 
   .page-stack {
     @apply flex flex-col gap-4 lg:h-full lg:min-h-0;
+  }
+
+  .match-list-row {
+    @apply grid w-full cursor-pointer gap-1 px-2 py-1.5 text-left transition hover:bg-muted/30;
+  }
+
+  .match-list-row-players {
+    @apply grid w-full grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-x-1.5;
+  }
+
+  .match-list-row-meta {
+    @apply flex min-w-0 items-start gap-2 text-[11px] text-muted-foreground;
+  }
+
+  .home-nav-grid {
+    @apply grid grid-cols-2 gap-2 sm:grid-cols-3 md:hidden;
+  }
+
+  .home-nav-tile {
+    @apply flex flex-col items-center justify-center gap-2 rounded-lg border border-primary/20 bg-card/70 px-3 py-4 text-center no-underline transition-colors;
+  }
+
+  .home-nav-tile:hover,
+  .home-nav-tile:focus-visible {
+    @apply border-primary/40 bg-primary/10 text-primary outline-none;
+  }
+
+  .home-nav-tile-label {
+    @apply text-sm font-medium;
   }
 
   .page-header {
@@ -587,11 +609,15 @@
 
   .tournament-match-meta {
     @apply mb-2 grid items-center gap-x-3 gap-y-0.5 text-xs text-muted-foreground;
-    grid-template-columns: auto minmax(0, 1fr) auto minmax(0, auto);
+    grid-template-columns: auto minmax(0, 1fr) auto;
   }
 
   .tournament-match-card--compact .tournament-match-meta {
     grid-template-columns: auto minmax(0, 1fr) auto;
+  }
+
+  .tournament-match-meta-date {
+    @apply col-span-full order-last shrink-0 whitespace-nowrap tabular-nums;
   }
 
   .tournament-match-meta-phase {
@@ -604,10 +630,6 @@
 
   .tournament-match-meta-scenario--link {
     @apply text-primary underline-offset-2 hover:underline;
-  }
-
-  .tournament-match-meta-date {
-    @apply shrink-0 whitespace-nowrap tabular-nums;
   }
 
   .tournament-match-meta-empty {

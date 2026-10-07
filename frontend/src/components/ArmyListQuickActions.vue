@@ -54,6 +54,7 @@ function openArmy() {
       type="button"
       :size="buttonSize"
       variant="outline"
+      class="hidden md:inline-flex"
       title="Ouvrir l'Army Builder Infinity"
       :aria-label="iconOnly ? 'Ouvrir l\'Army Builder Infinity' : undefined"
       @click="openArmy"

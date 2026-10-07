@@ -1,21 +1,15 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, ref, watch, type Component } from 'vue'
+import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { useRoute, useRouter, type RouteLocationRaw } from 'vue-router'
 import {
-  BookOpen,
   ChevronDown,
   CircleAlert,
   Eye,
   LogIn,
   LogOut,
-  Map,
-  Menu,
   Pencil,
   Play,
-  Podium,
   Shield,
-  Swords,
-  Trophy,
   User,
 } from '@lucide/vue'
 import {
@@ -31,20 +25,13 @@ import { useAdminEditMode } from '@/composables/useAdminEditMode'
 import { useMyInProgressMatches } from '@/composables/useMyInProgressMatches'
 import { useTtsMapReportCount } from '@/composables/useTtsMapReportCount'
 import { withBase } from '@/lib/basePath'
+import {
+  isMainNavLinkActive,
+  mainNavLinks,
+  type MainNavLink,
+} from '@/lib/mainNav'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
-
-type NavChild = {
-  to: RouteLocationRaw
-  label: string
-}
-
-type NavLink = {
-  to: string
-  label: string
-  icon: Component
-  children?: NavChild[]
-}
 
 const route = useRoute()
 const router = useRouter()
@@ -63,58 +50,7 @@ const profileBadgeCount = computed(
   () => inProgressCount.value + ttsReportCount.value,
 )
 
-const links: NavLink[] = [
-  {
-    to: '/scenarios',
-    label: 'Scénarios',
-    icon: Map,
-    children: [
-      { to: { name: 'scenarios' }, label: 'Scénarios' },
-      {
-        to: { name: 'scenarios', query: { tab: 'secondaires' } },
-        label: 'Secondaires',
-      },
-      { to: { name: 'scenarios', query: { tab: 'regles' } }, label: 'Règles' },
-    ],
-  },
-  {
-    to: '/matchs',
-    label: 'Matchs',
-    icon: Swords,
-    children: [
-      { to: { name: 'matchs' }, label: 'Matchs' },
-      { to: { name: 'matchs-listes' }, label: 'Listes' },
-      { to: { name: 'matchs-cr' }, label: 'Rapports' },
-    ],
-  },
-  {
-    to: '/tournois',
-    label: 'Tournois',
-    icon: Trophy,
-    children: [
-      { to: { name: 'tournois' }, label: 'En cours' },
-      { to: { name: 'tournois-termines' }, label: 'Terminés' },
-    ],
-  },
-  {
-    to: '/classement',
-    label: 'Classement',
-    icon: Podium,
-    children: [
-      { to: { name: 'classement' }, label: 'Joueurs' },
-      { to: { name: 'sectorielles' }, label: 'Sectorielles' },
-    ],
-  },
-  {
-    to: '/maps',
-    label: 'Maps & liens',
-    icon: BookOpen,
-    children: [
-      { to: { name: 'maps' }, label: 'Map TTS' },
-      { to: { name: 'links' }, label: 'Liens' },
-    ],
-  },
-]
+const links = mainNavLinks
 
 const activePath = computed(() => route.path)
 const openFlyout = ref<string | null>(null)
@@ -141,27 +77,7 @@ const partieCta = computed(() => {
 const isPartieCtaActive = computed(() => route.path.startsWith('/partie'))
 
 function isLinkActive(to: string) {
-  const path = activePath.value
-  if (to === '/classement') {
-    return (
-      path === '/classement' ||
-      path.startsWith('/sectorielle') ||
-      path.startsWith('/joueur')
-    )
-  }
-  if (to === '/matchs') {
-    return path.startsWith('/matchs')
-  }
-  if (to === '/tournois') {
-    return path.startsWith('/tournoi')
-  }
-  if (to === '/scenarios') {
-    return path.startsWith('/scenarios')
-  }
-  if (to === '/maps') {
-    return path.startsWith('/maps') || path.startsWith('/links')
-  }
-  return path === to
+  return isMainNavLinkActive(activePath.value, to)
 }
 
 function isChildActive(to: RouteLocationRaw) {
@@ -171,13 +87,6 @@ function isChildActive(to: RouteLocationRaw) {
   const currentTab = String(route.query.tab ?? '')
   if (resolvedTab || currentTab) return resolvedTab === currentTab
   return true
-}
-
-function extraChildren(link: NavLink): NavChild[] {
-  const parentPath = router.resolve(link.to).fullPath
-  return (link.children ?? []).filter(
-    (child) => router.resolve(child.to).fullPath !== parentPath,
-  )
 }
 
 function clearFlyoutTimer() {
@@ -191,11 +100,11 @@ function showFlyout(id: string) {
   openFlyout.value = id
 }
 
-function onNavEnter(link: NavLink) {
+function onNavEnter(link: MainNavLink) {
   if (link.children?.length) showFlyout(link.to)
 }
 
-function onNavLeave(link: NavLink) {
+function onNavLeave(link: MainNavLink) {
   if (link.children?.length) scheduleHideFlyout()
 }
 
@@ -253,44 +162,6 @@ async function handleLogout() {
     </RouterLink>
 
     <div class="topbar-end">
-      <DropdownMenuRoot>
-        <DropdownMenuTrigger class="topbar-menu-trigger" aria-label="Menu de navigation">
-          <Menu class="size-5" />
-        </DropdownMenuTrigger>
-        <DropdownMenuPortal>
-          <DropdownMenuContent
-            align="start"
-            :side-offset="8"
-            class="topbar-user-menu max-h-[min(70vh,28rem)] overflow-y-auto"
-          >
-            <template v-for="(link, index) in links" :key="link.to">
-              <DropdownMenuSeparator
-                v-if="index > 0"
-                class="topbar-user-menu-separator"
-              />
-              <DropdownMenuItem as-child>
-                <RouterLink :to="link.to" :class="menuItemClass">
-                  <component :is="link.icon" class="size-4" />
-                  {{ link.label }}
-                </RouterLink>
-              </DropdownMenuItem>
-              <DropdownMenuItem
-                v-for="child in extraChildren(link)"
-                :key="`${link.to}-${child.label}`"
-                as-child
-              >
-                <RouterLink
-                  :to="child.to"
-                  :class="[menuItemClass, 'topbar-menu-child']"
-                >
-                  {{ child.label }}
-                </RouterLink>
-              </DropdownMenuItem>
-            </template>
-          </DropdownMenuContent>
-        </DropdownMenuPortal>
-      </DropdownMenuRoot>
-
       <nav class="topbar-nav" aria-label="Navigation principale" @keydown.escape="openFlyout = null">
         <div
           v-for="link in links"
