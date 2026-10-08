@@ -328,6 +328,14 @@ pub fn tournament_routes() -> axum::Router<AppState> {
             "/api/scenario-packs/{slug}/scenarios/{scenario_slug}",
             get(get_pack_scenario).patch(update_pack_scenario),
         )
+        .route(
+            "/api/scenario-packs/{slug}/scenarios/{scenario_slug}/updates",
+            get(list_scenario_updates).post(create_scenario_update),
+        )
+        .route(
+            "/api/scenario-packs/{slug}/recent-updates",
+            get(list_recent_scenario_updates),
+        )
         .route("/api/tournaments", get(list_tournaments).post(create_tournament))
         .route("/api/users", get(list_users))
         .route(
@@ -568,6 +576,47 @@ async fn update_pack_common_rule(
         .map_err(|error| ApiError::bad_request(error.to_string()))?
         .map(Json)
         .ok_or_else(|| ApiError::bad_request("règle commune introuvable"))
+}
+
+#[derive(Debug, Deserialize)]
+struct CreateScenarioUpdateRequest {
+    description: String,
+}
+
+async fn list_recent_scenario_updates(
+    State(state): State<AppState>,
+    Path(slug): Path<String>,
+) -> Result<Json<Vec<crate::content_update::ScenarioContentUpdate>>, ApiError> {
+    state
+        .content_updates
+        .list_recent_scenarios(&slug, crate::content_update::RECENT_SCENARIO_UPDATE_SECS)
+        .map(Json)
+        .map_err(|error| ApiError::bad_request(error.to_string()))
+}
+
+async fn list_scenario_updates(
+    State(state): State<AppState>,
+    Path((_pack_slug, scenario_slug)): Path<(String, String)>,
+) -> Result<Json<Vec<crate::content_update::ContentUpdate>>, ApiError> {
+    state
+        .content_updates
+        .list_for_scenario(&scenario_slug)
+        .map(Json)
+        .map_err(|error| ApiError::bad_request(error.to_string()))
+}
+
+async fn create_scenario_update(
+    State(state): State<AppState>,
+    session: Session,
+    Path((_pack_slug, scenario_slug)): Path<(String, String)>,
+    Json(payload): Json<CreateScenarioUpdateRequest>,
+) -> Result<Json<crate::content_update::ContentUpdate>, ApiError> {
+    require_admin(&state, &session).await?;
+    state
+        .content_updates
+        .add_for_scenario(&scenario_slug, &payload.description)
+        .map(Json)
+        .map_err(|error| ApiError::bad_request(error.to_string()))
 }
 
 async fn update_pack_scenario(

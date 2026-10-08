@@ -232,10 +232,11 @@ function formatEloCell(match: MatchRecord) {
                     />
                   </div>
                 </TableCell>
-                <TableCell>
+                <TableCell class="text-center">
                   <MatchResultBadges
                     :match="match"
                     :emphasize-defeat="emphasizeDefeat"
+                    :badge-min-ch="scoreBadgeMinCh"
                   />
                 </TableCell>
                 <TableCell class="px-2">

@@ -176,6 +176,7 @@ export interface MatchRecord extends RatingUpdate, MatchScores {
   tournament_phase?: string | null
   tournament_name?: string | null
   tournament_pool_name?: string | null
+  tournament_pool_id?: number | null
   player1_report?: MatchReport | null
   player2_report?: MatchReport | null
   player1_army_list_code?: string | null
@@ -521,6 +522,30 @@ export interface TtsMapDetail {
   pictures: TtsMapPicture[]
   created_at: number
   updated_at: number
+}
+
+export interface ContentUpdate {
+  id: number
+  description: string
+  created_at: number
+}
+
+export interface MapContentUpdate {
+  id: number
+  map_id: number
+  map_name: string
+  map_slug: string
+  description: string
+  created_at: number
+}
+
+export interface ScenarioContentUpdate {
+  id: number
+  scenario_id: number
+  scenario_slug: string
+  scenario_name: string
+  description: string
+  created_at: number
 }
 
 export interface TtsContentImage {

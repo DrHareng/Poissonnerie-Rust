@@ -294,6 +294,7 @@ pub fn migrate(conn: &Connection) -> Result<()> {
     migrate_match_reports(conn)?;
     migrate_site_content(conn)?;
     migrate_tts_maps(conn)?;
+    migrate_content_updates(conn)?;
 
     if column_exists(conn, "matches", "tournament_id")?
         && column_exists(conn, "matches", "tournament_phase")?
@@ -1032,6 +1033,24 @@ fn migrate_dauphine_schema(conn: &Connection) -> Result<()> {
             body_md TEXT NOT NULL DEFAULT '',
             UNIQUE(edition_id, position)
         );
+        ",
+    )?;
+    Ok(())
+}
+
+fn migrate_content_updates(conn: &Connection) -> Result<()> {
+    conn.execute_batch(
+        "
+        CREATE TABLE IF NOT EXISTS content_updates (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            target_kind TEXT NOT NULL,
+            target_id INTEGER NOT NULL,
+            description TEXT NOT NULL,
+            created_at INTEGER NOT NULL
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_content_updates_target
+            ON content_updates(target_kind, target_id, created_at DESC, id DESC);
         ",
     )?;
     Ok(())

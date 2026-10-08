@@ -61,6 +61,10 @@ const topPlayers = computed(() =>
 /** Largeur commune des badges score (max sur les 5 parties). */
 const scoreBadgeMinCh = computed(() => computeScoreBadgeMinCh(matches.value))
 
+const matchListStyle = computed(() => ({
+  '--match-score-track': `calc(${scoreBadgeMinCh.value * 2}ch + 2.5rem)`,
+}))
+
 function rankBadgeClass(rank: number) {
   if (rank === 1) return 'rank-badge-gold tabular-nums font-semibold'
   if (rank === 2) return 'rank-badge-silver tabular-nums font-semibold'
@@ -186,12 +190,17 @@ onMounted(async () => {
             >
               Aucune partie pour l’instant.
             </div>
-            <div v-else class="divide-y divide-border/60 rounded-lg border">
+            <div
+              v-else
+              class="home-match-list divide-y divide-border/60 rounded-lg border"
+              :style="matchListStyle"
+            >
               <MatchListRow
                 v-for="match in matches"
                 :key="match.id"
                 :match="match"
                 :badge-min-ch="scoreBadgeMinCh"
+                compact
               />
             </div>
           </CardContent>

@@ -163,6 +163,9 @@ pub struct MatchRecord {
     pub tournament_name: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tournament_pool_name: Option<String>,
+    /// Poule du match, renseignée à l'affichage pour ouvrir la page de la poule.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tournament_pool_id: Option<i64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub player1_report: Option<MatchReport>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -257,6 +260,7 @@ impl MatchRecord {
             tournament_phase,
             tournament_name,
             tournament_pool_name: None,
+            tournament_pool_id: None,
             player1_report: None,
             player2_report: None,
             player1_army_list_code: None,

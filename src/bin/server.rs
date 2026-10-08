@@ -52,6 +52,7 @@ async fn main() -> Result<()> {
         report_templates: Arc::new(poissonnerie_elo::ReportTemplateStore::open(&args.db)?),
         site_content: Arc::new(poissonnerie_elo::SiteContentStore::open(&args.db)?),
         tts_maps: Arc::new(poissonnerie_elo::TtsMapStore::open(&args.db)?),
+        content_updates: Arc::new(poissonnerie_elo::ContentUpdateStore::open(&args.db)?),
         auth,
         db_path: args.db,
         k_factor: args.k,

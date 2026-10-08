@@ -19,6 +19,7 @@ import type {
   ReportStatus,
   ReportTemplate,
   Scenario,
+  ScenarioContentUpdate,
   ScenarioDetail,
   ScenarioPack,
   ScenarioPackPage,
@@ -30,6 +31,8 @@ import type {
   TournamentRegistration,
   TournamentScenarioSlot,
   TtsContentImage,
+  ContentUpdate,
+  MapContentUpdate,
   TtsMapDetail,
   TtsMapReport,
   TtsMapSummary,
@@ -214,6 +217,24 @@ export function fetchTtsMaps(): Promise<TtsMapSummary[]> {
 
 export function fetchTtsMap(id: number): Promise<TtsMapDetail> {
   return request(`/api/tts-maps/${id}`)
+}
+
+export function fetchMapUpdates(id: number): Promise<ContentUpdate[]> {
+  return request(`/api/tts-maps/${id}/updates`)
+}
+
+export function createMapUpdate(
+  id: number,
+  description: string,
+): Promise<ContentUpdate> {
+  return request(`/api/tts-maps/${id}/updates`, {
+    method: 'POST',
+    body: JSON.stringify({ description }),
+  })
+}
+
+export function fetchRecentMapUpdates(limit = 20): Promise<MapContentUpdate[]> {
+  return request(`/api/tts-map-updates?limit=${limit}`)
 }
 
 export function createTtsMap(name: string): Promise<TtsMapDetail> {
@@ -674,6 +695,37 @@ export function fetchPackCommonRules(slug: string): Promise<CommonRule[]> {
 
 export function fetchScenarioContentImages(): Promise<string[]> {
   return request<string[]>('/api/scenario-content-images')
+}
+
+export function fetchRecentScenarioUpdates(
+  packSlug: string,
+): Promise<ScenarioContentUpdate[]> {
+  return request(
+    `/api/scenario-packs/${encodeURIComponent(packSlug)}/recent-updates`,
+  )
+}
+
+export function fetchScenarioUpdates(
+  packSlug: string,
+  scenarioSlug: string,
+): Promise<ContentUpdate[]> {
+  return request(
+    `/api/scenario-packs/${encodeURIComponent(packSlug)}/scenarios/${encodeURIComponent(scenarioSlug)}/updates`,
+  )
+}
+
+export function createScenarioUpdate(
+  packSlug: string,
+  scenarioSlug: string,
+  description: string,
+): Promise<ContentUpdate> {
+  return request(
+    `/api/scenario-packs/${encodeURIComponent(packSlug)}/scenarios/${encodeURIComponent(scenarioSlug)}/updates`,
+    {
+      method: 'POST',
+      body: JSON.stringify({ description }),
+    },
+  )
 }
 
 export function fetchPackScenario(

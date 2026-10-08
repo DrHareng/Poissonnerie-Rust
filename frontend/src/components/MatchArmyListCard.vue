@@ -1,8 +1,13 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, ref, watch } from 'vue'
+import { useResizeObserver } from '@vueuse/core'
 import { toast } from 'vue-sonner'
 import { Pencil } from '@lucide/vue'
-import { normalizeArmyListCode, parseArmyListFactionSlug } from '@/lib/armyList'
+import {
+  normalizeArmyListCode,
+  parseArmyListFactionSlug,
+  parseArmyListName,
+} from '@/lib/armyList'
 import ArmyListQuickActions from '@/components/ArmyListQuickActions.vue'
 import { useArmies } from '@/composables/useArmies'
 import type { Army } from '@/types/elo'
@@ -27,6 +32,27 @@ const pendingArmy = ref<Army | null>(null)
 
 const currentArmy = computed(() => getArmy(props.currentArmyId))
 
+const listName = computed(() => parseArmyListName(props.code ?? ''))
+const listLabel = computed(() => listName.value ?? 'Liste sans nom')
+
+const nameEl = ref<HTMLElement | null>(null)
+const nameTruncated = ref(false)
+
+const nameHover = computed(() =>
+  nameTruncated.value ? listLabel.value : undefined,
+)
+
+function updateNameTruncation() {
+  const el = nameEl.value
+  nameTruncated.value = !!el && el.scrollWidth > el.clientWidth + 1
+}
+
+useResizeObserver(nameEl, updateNameTruncation)
+
+watch([listLabel, editing], () => {
+  void nextTick(updateNameTruncation)
+})
+
 watch(
   () => props.code,
   (value) => {
@@ -39,6 +65,7 @@ watch(
 
 onMounted(() => {
   void ensureLoaded()
+  void nextTick(updateNameTruncation)
 })
 
 function startEdit() {
@@ -179,14 +206,32 @@ async function confirmUpdateArmy() {
       </div>
     </div>
 
-    <div v-else class="flex flex-wrap items-center gap-2">
-      <span class="text-sm text-muted-foreground">Liste :</span>
-      <template v-if="code?.trim()">
-        <Input
-          :model-value="code"
-          readonly
-          class="min-w-0 flex-1 text-xs"
-        />
+    <div
+      v-else
+      class="grid min-w-0 grid-cols-[auto_minmax(0,1fr)] items-center gap-x-1.5 gap-y-1 text-sm"
+    >
+      <span class="text-muted-foreground">Liste :</span>
+      <span
+        v-if="code?.trim()"
+        ref="nameEl"
+        class="min-w-0 truncate font-medium"
+        :title="nameHover"
+      >
+        {{ listLabel }}
+      </span>
+      <Button
+        v-else-if="canEdit"
+        type="button"
+        size="sm"
+        variant="outline"
+        class="w-fit"
+        @click="startEdit"
+      >
+        <Pencil class="size-3.5" />
+        Saisir le code
+      </Button>
+      <span v-else class="italic text-muted-foreground">non renseignée</span>
+      <div v-if="code?.trim()" class="col-start-2 flex flex-wrap items-center gap-1">
         <ArmyListQuickActions :code="code" />
         <Button
           v-if="canEdit"
@@ -199,18 +244,7 @@ async function confirmUpdateArmy() {
         >
           <Pencil class="size-3.5" />
         </Button>
-      </template>
-      <Button
-        v-else-if="canEdit"
-        type="button"
-        size="sm"
-        variant="outline"
-        @click="startEdit"
-      >
-        <Pencil class="size-3.5" />
-        Saisir le code
-      </Button>
-      <span v-else class="text-sm italic text-muted-foreground">non renseignée</span>
+      </div>
     </div>
   </div>
 </template>

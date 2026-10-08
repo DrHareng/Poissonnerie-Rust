@@ -1,9 +1,11 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { toast } from 'vue-sonner'
-import { CircleAlert, Copy, Dices, Download, Plus, Trash2 } from '@lucide/vue'
+import { onKeyStroke, useScrollLock } from '@vueuse/core'
+import { CircleAlert, Copy, Dices, Download, Plus, Trash2, X } from '@lucide/vue'
 import {
+  createMapUpdate,
   createTtsMap,
   deleteTtsMap,
   deleteTtsMapPicture,
@@ -32,10 +34,18 @@ import { useAdminEditMode } from '@/composables/useAdminEditMode'
 import { useAuth } from '@/composables/useAuth'
 import { useVirtualGrid } from '@/composables/useVirtualGrid'
 import { Button } from '@/components/ui/button'
+import {
+  Card,
+  CardContent,
+  CardHeader,
+  CardTitle,
+} from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
 
 const emit = defineEmits<{
-  mapChange: [payload: { slug: string; name: string } | null]
+  mapChange: [payload: { id: number; slug: string; name: string } | null]
+  updatesChange: []
 }>()
 
 const route = useRoute()
@@ -58,15 +68,44 @@ const newMapName = ref('')
 const creatingMap = ref(false)
 const renaming = ref(false)
 const renameDraft = ref('')
-const uploadingJson = ref(false)
 const uploadingPictures = ref(false)
-const jsonInput = ref<HTMLInputElement | null>(null)
 const picturesInput = ref<HTMLInputElement | null>(null)
+const updateOpen = ref(false)
+const updateDraft = ref('')
+const updateJsonFile = ref<File | null>(null)
+const updateJsonInput = ref<HTMLInputElement | null>(null)
+const publishingUpdate = ref(false)
 const imageViewerOpen = ref(false)
 const imageViewerIndex = ref(0)
 const reportOpen = ref(false)
 const scrollEl = ref<HTMLElement | null>(null)
 const gridEl = ref<HTMLElement | null>(null)
+
+const canPublishUpdate = computed(
+  () => updateDraft.value.trim().length > 0 && !publishingUpdate.value,
+)
+
+const pageBody = typeof document !== 'undefined' ? document.body : null
+const updateScrollLock = useScrollLock(pageBody)
+watch(updateOpen, (value) => {
+  updateScrollLock.value = value
+  if (!value) {
+    updateDraft.value = ''
+    updateJsonFile.value = null
+    publishingUpdate.value = false
+    if (updateJsonInput.value) updateJsonInput.value.value = ''
+  }
+})
+
+onKeyStroke('Escape', (event) => {
+  if (!updateOpen.value) return
+  event.preventDefault()
+  updateOpen.value = false
+})
+
+onBeforeUnmount(() => {
+  updateScrollLock.value = false
+})
 
 const { visibleItems, paddingTop, paddingBottom } = useVirtualGrid({
   items: maps,
@@ -232,31 +271,50 @@ async function removeMap() {
   }
 }
 
-async function onJsonSelected(event: Event) {
+function onUpdateJsonPicked(event: Event) {
   const input = event.target as HTMLInputElement
-  const file = input.files?.[0]
-  input.value = ''
-  if (!file || !detail.value) return
-  uploadingJson.value = true
+  updateJsonFile.value = input.files?.[0] ?? null
+}
+
+function onUpdateBackdropClick(event: MouseEvent) {
+  if (event.target === event.currentTarget) updateOpen.value = false
+}
+
+async function publishUpdate() {
+  if (!detail.value) return
+  const description = updateDraft.value.trim()
+  if (!description) {
+    toast.error('La description est requise')
+    return
+  }
+  const file = updateJsonFile.value
+  publishingUpdate.value = true
   try {
-    detail.value = await uploadTtsMapJson(detail.value.id, file)
-    maps.value = maps.value.map((map) =>
-      map.id === detail.value?.id
-        ? {
-            ...map,
-            has_json: true,
-            json_filename: detail.value.json_filename,
-            updated_at: detail.value.updated_at,
-          }
-        : map,
-    )
-    toast.success('JSON enregistré')
+    if (file) {
+      detail.value = await uploadTtsMapJson(detail.value.id, file)
+      maps.value = maps.value.map((map) =>
+        map.id === detail.value?.id
+          ? {
+              ...map,
+              has_json: true,
+              json_filename: detail.value.json_filename,
+              updated_at: detail.value.updated_at,
+            }
+          : map,
+      )
+    }
+    await createMapUpdate(detail.value.id, description)
+    emit('updatesChange')
+    updateOpen.value = false
+    toast.success('Mise à jour publiée')
   } catch (error) {
     toast.error(
-      error instanceof Error ? error.message : 'Impossible d’envoyer le JSON',
+      error instanceof Error
+        ? error.message
+        : 'Impossible de publier la mise à jour',
     )
   } finally {
-    uploadingJson.value = false
+    publishingUpdate.value = false
   }
 }
 
@@ -334,7 +392,11 @@ watch(
     }
     const summary = maps.value.find((map) => map.slug === slug)
     if (!summary) return
-    emit('mapChange', { slug: summary.slug, name: summary.name })
+    emit('mapChange', {
+      id: summary.id,
+      slug: summary.slug,
+      name: summary.name,
+    })
     document.title = pageTitle(summary.name)
     void loadDetail(summary.id)
   },
@@ -344,14 +406,19 @@ watch(
 watch(
   () => detail.value?.name,
   (name) => {
-    if (!selectedSlug.value || !name) return
-    emit('mapChange', { slug: selectedSlug.value, name })
+    if (!detail.value || !selectedSlug.value || !name) return
+    emit('mapChange', {
+      id: detail.value.id,
+      slug: selectedSlug.value,
+      name,
+    })
     document.title = pageTitle(name)
   },
 )
 
 watch(selectedSlug, () => {
   reportOpen.value = false
+  updateOpen.value = false
 })
 </script>
 
@@ -419,24 +486,15 @@ watch(selectedSlug, () => {
               <CircleAlert class="size-4" />
               Remonter un soucis
             </Button>
-            <template v-if="canEditContent">
-              <input
-                ref="jsonInput"
-                type="file"
-                accept=".json,application/json"
-                class="sr-only"
-                @change="onJsonSelected"
-              />
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                :disabled="uploadingJson"
-                @click="jsonInput?.click()"
-              >
-                {{ uploadingJson ? 'Envoi…' : 'Uploader un JSON' }}
-              </Button>
-            </template>
+            <Button
+              v-if="canEditContent"
+              type="button"
+              variant="outline"
+              size="sm"
+              @click="updateOpen = true"
+            >
+              Ajouter une mise à jour
+            </Button>
           </div>
 
           <div v-if="detail.pictures.length" class="grid gap-3 pb-4 sm:grid-cols-2">
@@ -583,5 +641,62 @@ watch(selectedSlug, () => {
       :map-id="detail.id"
       :map-name="detail.name"
     />
+    <Teleport to="body">
+      <div
+        v-if="updateOpen && detail"
+        class="player-detail-overlay"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="map-update-title"
+        @click="onUpdateBackdropClick"
+      >
+        <Card class="player-detail-modal neon-panel w-full max-w-lg">
+          <CardHeader class="relative pr-12">
+            <CardTitle id="map-update-title">Ajouter une mise à jour</CardTitle>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon-sm"
+              class="absolute top-3 right-3"
+              aria-label="Fermer"
+              @click="updateOpen = false"
+            >
+              <X class="size-4" />
+            </Button>
+          </CardHeader>
+          <CardContent>
+            <form class="space-y-4" @submit.prevent="publishUpdate">
+              <div class="grid gap-2">
+                <Label for="map-update-description">Description</Label>
+                <textarea
+                  id="map-update-description"
+                  v-model="updateDraft"
+                  rows="4"
+                  maxlength="4000"
+                  class="flex w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-xs outline-none placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50"
+                  placeholder="Décrivez la mise à jour…"
+                />
+              </div>
+              <div class="grid gap-2">
+                <Label for="map-update-json">JSON (optionnel)</Label>
+                <input
+                  id="map-update-json"
+                  ref="updateJsonInput"
+                  type="file"
+                  accept=".json,application/json"
+                  class="text-sm text-muted-foreground file:mr-3 file:rounded-md file:border-0 file:bg-primary/15 file:px-3 file:py-1.5 file:text-sm file:font-medium file:text-primary"
+                  @change="onUpdateJsonPicked"
+                />
+              </div>
+              <div class="flex justify-end">
+                <Button type="submit" size="sm" :disabled="!canPublishUpdate">
+                  {{ publishingUpdate ? 'Publication…' : 'Publier' }}
+                </Button>
+              </div>
+            </form>
+          </CardContent>
+        </Card>
+      </div>
+    </Teleport>
   </div>
 </template>

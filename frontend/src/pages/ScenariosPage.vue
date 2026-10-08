@@ -1,12 +1,13 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, ref, watch } from 'vue'
-import { RouterLink, useRoute, useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { toast } from 'vue-sonner'
 import { Dices } from '@lucide/vue'
 import {
   fetchPackCommonRules,
   fetchPackSecondaries,
   fetchPrefs,
+  fetchRecentScenarioUpdates,
   fetchScenarioPack,
   updatePackCommonRule,
   updatePackSecondary,
@@ -21,6 +22,7 @@ import { splitRuleTitle } from '@/lib/ruleTitle'
 import {
   DEFAULT_SCENARIO_PACK_SLUG,
   type CommonRule,
+  type ScenarioContentUpdate,
   type ScenarioDetail,
   type ScenarioPackPage,
   type SecondaryObjective,
@@ -31,6 +33,7 @@ import ImageViewer, {
 } from '@/components/ImageViewer.vue'
 import MarkdownContent from '@/components/MarkdownContent.vue'
 import ScenarioDetailView from '@/components/ScenarioDetailView.vue'
+import ScenarioSideItem from '@/components/ScenarioSideItem.vue'
 import { useAdminEditMode } from '@/composables/useAdminEditMode'
 import { useAppSidePanel } from '@/composables/useAppSidePanel'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
@@ -65,6 +68,31 @@ const commonRulesLoaded = ref(false)
 const secondaryViewMode = ref<SecondaryViewMode>('liste')
 const drawnSecondarySlugs = ref<string[] | null>(null)
 const preferredScenarioSlug = ref<string | null>(null)
+const recentScenarioUpdates = ref<ScenarioContentUpdate[]>([])
+
+const updatesBySlug = computed(() => {
+  const grouped = new Map<string, ScenarioContentUpdate[]>()
+  for (const update of recentScenarioUpdates.value) {
+    const list = grouped.get(update.scenario_slug)
+    if (list) list.push(update)
+    else grouped.set(update.scenario_slug, [update])
+  }
+  return grouped
+})
+
+function scenarioUpdates(slug: string) {
+  return updatesBySlug.value.get(slug) ?? []
+}
+
+async function loadRecentUpdates() {
+  try {
+    recentScenarioUpdates.value = await fetchRecentScenarioUpdates(
+      DEFAULT_SCENARIO_PACK_SLUG,
+    )
+  } catch {
+    recentScenarioUpdates.value = []
+  }
+}
 const imageViewerOpen = ref(false)
 const imageViewerIndex = ref(0)
 
@@ -173,10 +201,6 @@ function setSelectedScenario(slug: string) {
   void updatePrefs({ scenario_slug: slug }).catch(() => {
     // Keep the local choice even if persistence fails.
   })
-}
-
-function scenarioTo(slug: string) {
-  return { name: 'scenarios' as const, query: { scenario: slug } }
 }
 
 /** Clic gauche dans l’onglet courant : mémorise le choix. Molette / nouvel onglet : navigation native. */
@@ -365,6 +389,7 @@ onMounted(async () => {
       syncRouteQuery('liste', preferredScenarioSlug.value)
     }
     apiOnline.value = true
+    void loadRecentUpdates()
   } catch (error) {
     apiOnline.value = false
     toast.error(
@@ -479,22 +504,15 @@ watch(
                 class="scenario-side-list"
                 aria-label="Scénarios du pack"
               >
-                <RouterLink
+                <ScenarioSideItem
                   v-for="scenario in page.scenarios"
                   :key="scenario.id"
-                  :to="scenarioTo(scenario.slug)"
-                  class="scenario-side-item"
-                  :class="{
-                    'scenario-side-item--active':
-                      selectedScenarioSlug === scenario.slug,
-                  }"
-                  :aria-current="
-                    selectedScenarioSlug === scenario.slug ? 'page' : undefined
-                  "
-                  @click="onScenarioLinkClick(scenario.slug, $event)"
-                >
-                  {{ scenario.name }}
-                </RouterLink>
+                  :slug="scenario.slug"
+                  :name="scenario.name"
+                  :active="selectedScenarioSlug === scenario.slug"
+                  :updates="scenarioUpdates(scenario.slug)"
+                  @select="onScenarioLinkClick(scenario.slug, $event)"
+                />
               </nav>
             </CardContent>
           </Card>
@@ -521,22 +539,15 @@ watch(
                 class="scenario-side-list"
                 aria-label="Scénarios du pack"
               >
-                <RouterLink
+                <ScenarioSideItem
                   v-for="scenario in page.scenarios"
                   :key="`mobile-${scenario.id}`"
-                  :to="scenarioTo(scenario.slug)"
-                  class="scenario-side-item"
-                  :class="{
-                    'scenario-side-item--active':
-                      selectedScenarioSlug === scenario.slug,
-                  }"
-                  :aria-current="
-                    selectedScenarioSlug === scenario.slug ? 'page' : undefined
-                  "
-                  @click="onScenarioLinkClick(scenario.slug, $event)"
-                >
-                  {{ scenario.name }}
-                </RouterLink>
+                  :slug="scenario.slug"
+                  :name="scenario.name"
+                  :active="selectedScenarioSlug === scenario.slug"
+                  :updates="scenarioUpdates(scenario.slug)"
+                  @select="onScenarioLinkClick(scenario.slug, $event)"
+                />
               </nav>
             </CardContent>
           </Card>
@@ -546,6 +557,7 @@ watch(
             :key="selectedScenarioSlug"
             :slug="selectedScenarioSlug"
             @loaded="onScenarioLoaded"
+            @published="loadRecentUpdates"
           />
           <p v-else class="text-sm text-muted-foreground">
             Aucun scénario dans ce pack.

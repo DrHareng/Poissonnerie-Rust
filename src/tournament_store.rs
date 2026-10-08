@@ -4591,6 +4591,21 @@ impl TournamentStore {
         .map_err(Into::into)
     }
 
+    pub fn elo_match_pool_id(&self, elo_match_id: u64) -> Result<Option<i64>> {
+        let conn = self.conn.lock().unwrap();
+        conn.query_row(
+            "
+            SELECT tm.pool_id
+            FROM tournament_matches tm
+            WHERE tm.elo_match_id = ?1 AND tm.pool_id IS NOT NULL
+            ",
+            params![elo_match_id as i64],
+            |row| row.get(0),
+        )
+        .optional()
+        .map_err(Into::into)
+    }
+
     pub fn elo_match_pool_name(&self, elo_match_id: u64) -> Result<Option<String>> {
         let conn = self.conn.lock().unwrap();
         conn.query_row(

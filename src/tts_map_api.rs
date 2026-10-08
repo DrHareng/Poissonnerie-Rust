@@ -40,6 +40,10 @@ pub fn tts_map_routes() -> Router<AppState> {
             "/api/tts-maps/{id}",
             get(get_map).patch(update_map).delete(delete_map),
         )
+        .route(
+            "/api/tts-maps/{id}/updates",
+            get(list_map_updates).post(create_map_update),
+        )
         .route("/api/tts-maps/{id}/json", get(download_map_json))
         .route(
             "/api/tts-maps/{id}/pictures/{filename}",
@@ -53,6 +57,7 @@ pub fn tts_map_routes() -> Router<AppState> {
             "/api/tts-map-reports",
             get(list_map_reports),
         )
+        .route("/api/tts-map-updates", get(list_recent_map_updates))
         .route("/api/tts-map-reports/count", get(count_map_reports))
         .route(
             "/api/tts-map-reports/{id}",
@@ -193,7 +198,62 @@ async fn delete_map(
         .tts_maps
         .delete_map(id)
         .map_err(|error| ApiError::bad_request(error.to_string()))?;
+    state
+        .content_updates
+        .delete_for_map(id)
+        .map_err(|error| ApiError::bad_request(error.to_string()))?;
     Ok(StatusCode::NO_CONTENT)
+}
+
+#[derive(Debug, Deserialize)]
+struct CreateContentUpdateRequest {
+    description: String,
+}
+
+async fn list_map_updates(
+    State(state): State<AppState>,
+    Path(id): Path<i64>,
+) -> Result<Json<Vec<crate::content_update::ContentUpdate>>, ApiError> {
+    state
+        .content_updates
+        .list_for_map(id)
+        .map(Json)
+        .map_err(|error| ApiError::bad_request(error.to_string()))
+}
+
+#[derive(Debug, Deserialize)]
+struct RecentMapUpdatesQuery {
+    #[serde(default = "default_recent_map_updates_limit")]
+    limit: usize,
+}
+
+fn default_recent_map_updates_limit() -> usize {
+    20
+}
+
+async fn list_recent_map_updates(
+    State(state): State<AppState>,
+    Query(query): Query<RecentMapUpdatesQuery>,
+) -> Result<Json<Vec<crate::content_update::MapContentUpdate>>, ApiError> {
+    state
+        .content_updates
+        .list_recent_maps(query.limit)
+        .map(Json)
+        .map_err(|error| ApiError::bad_request(error.to_string()))
+}
+
+async fn create_map_update(
+    State(state): State<AppState>,
+    session: Session,
+    Path(id): Path<i64>,
+    Json(payload): Json<CreateContentUpdateRequest>,
+) -> Result<Json<crate::content_update::ContentUpdate>, ApiError> {
+    require_admin(&state, &session).await?;
+    state
+        .content_updates
+        .add_for_map(id, &payload.description)
+        .map(Json)
+        .map_err(|error| ApiError::bad_request(error.to_string()))
 }
 
 async fn upload_map_json(

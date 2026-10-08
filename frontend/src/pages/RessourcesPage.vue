@@ -7,6 +7,8 @@ import { fetchRessources, updateRessources } from '@/lib/api'
 import { pageTitle } from '@/lib/pageTitle'
 import AdminContentEditor from '@/components/AdminContentEditor.vue'
 import MarkdownContent from '@/components/MarkdownContent.vue'
+import ContentUpdates from '@/components/ContentUpdates.vue'
+import RecentMapUpdates from '@/components/RecentMapUpdates.vue'
 import TtsMapsTab from '@/components/TtsMapsTab.vue'
 import { useAdminEditMode } from '@/composables/useAdminEditMode'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
@@ -32,7 +34,9 @@ const bodyMd = ref('')
 const loading = ref(true)
 const apiOnline = ref(true)
 const liensLoaded = ref(false)
-const currentMap = ref<{ slug: string; name: string } | null>(null)
+const currentMap = ref<{ id: number; slug: string; name: string } | null>(null)
+const updatesVisible = ref(false)
+const updatesRefresh = ref(0)
 
 const activeTab = computed<MapsLinksTabId>(() =>
   route.name === 'links' ? 'liens' : 'maps',
@@ -96,7 +100,11 @@ watch(activeTab, (tab) => {
 
 <template>
   <div class="page-stack">
-    <nav class="page-title-tabs shrink-0" aria-label="Maps et liens">
+    <nav
+      class="page-title-tabs shrink-0"
+      :class="{ 'page-title-tabs--with-meta': updatesVisible && activeTab === 'maps' }"
+      aria-label="Maps et liens"
+    >
       <div class="page-title-tabs-list">
         <h1 class="sr-only">{{ activeTabLabel }}</h1>
         <button
@@ -125,6 +133,24 @@ watch(activeTab, (tab) => {
           <span class="page-title-tab-detail">> {{ currentMap.name }}</span>
         </RouterLink>
       </div>
+      <div
+        v-if="activeTab === 'maps'"
+        v-show="updatesVisible"
+        class="page-title-tabs-actions"
+      >
+        <RecentMapUpdates
+          v-if="!currentMap"
+          :refresh-key="updatesRefresh"
+          @visible="updatesVisible = $event"
+        />
+        <ContentUpdates
+          v-else
+          kind="map"
+          :map-id="currentMap.id"
+          :refresh-key="updatesRefresh"
+          @visible="updatesVisible = $event"
+        />
+      </div>
     </nav>
 
     <Alert v-if="!apiOnline && activeTab === 'liens'" variant="destructive" class="neon-panel-accent shrink-0">
@@ -137,6 +163,7 @@ watch(activeTab, (tab) => {
     <TtsMapsTab
       v-else-if="activeTab === 'maps'"
       @map-change="currentMap = $event"
+      @updates-change="updatesRefresh += 1"
     />
 
     <p v-else-if="loading" class="shrink-0 text-sm text-muted-foreground">

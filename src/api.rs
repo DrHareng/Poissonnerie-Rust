@@ -19,9 +19,9 @@ use tower_sessions::{cookie::SameSite, Expiry, Session, SessionManagerLayer};
 use crate::{
     auth::{self, AuthConfig, CallbackQuery},
     dauphine_api, default_db_path, scenario::ScenarioStore, session_store::SqliteSessionStore,
-    tts_map_api, tournament_api, ArmyListStore, ArmyStore, DauphineStore, Leaderboard, MatchOutcome,
-    MatchRecord, MatchScores, Player, ReportStatus, ReportTemplateStore, SiteContentStore,
-    TtsMapStore, TournamentStore, User, UserStore, DEFAULT_K_FACTOR, RESSOURCES_KEY,
+    tts_map_api, tournament_api, ArmyListStore, ArmyStore, ContentUpdateStore, DauphineStore,
+    Leaderboard, MatchOutcome, MatchRecord, MatchScores, Player, ReportStatus, ReportTemplateStore,
+    SiteContentStore, TtsMapStore, TournamentStore, User, UserStore, DEFAULT_K_FACTOR, RESSOURCES_KEY,
 };
 use crate::army_list_store::ArmyListStatsGroup;
 use crate::tournament::TournamentStatus;
@@ -41,6 +41,7 @@ pub struct AppState {
     pub report_templates: Arc<ReportTemplateStore>,
     pub site_content: Arc<SiteContentStore>,
     pub tts_maps: Arc<TtsMapStore>,
+    pub content_updates: Arc<ContentUpdateStore>,
     pub auth: Option<AuthConfig>,
     pub db_path: PathBuf,
     pub k_factor: f64,
@@ -1244,6 +1245,11 @@ fn enrich_tournament_context(state: &AppState, record: &mut MatchRecord) {
     if record.tournament_phase.as_deref() != Some("pool") {
         return;
     }
+    record.tournament_pool_id = state
+        .tournaments
+        .elo_match_pool_id(record.id)
+        .ok()
+        .flatten();
     if record
         .tournament_pool_name
         .as_ref()
@@ -2691,6 +2697,7 @@ pub fn default_state() -> anyhow::Result<AppState> {
     let report_templates = ReportTemplateStore::open(&db_path)?;
     let site_content = SiteContentStore::open(&db_path)?;
     let tts_maps = TtsMapStore::open(&db_path)?;
+    let content_updates = ContentUpdateStore::open(&db_path)?;
     let auth = AuthConfig::from_env().ok();
     Ok(AppState {
         board: Arc::new(Mutex::new(board)),
@@ -2703,6 +2710,7 @@ pub fn default_state() -> anyhow::Result<AppState> {
         report_templates: Arc::new(report_templates),
         site_content: Arc::new(site_content),
         tts_maps: Arc::new(tts_maps),
+        content_updates: Arc::new(content_updates),
         auth,
         db_path,
         k_factor: DEFAULT_K_FACTOR,

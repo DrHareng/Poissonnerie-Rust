@@ -16,10 +16,13 @@ const props = withDefaults(
     badgeMinCh?: number
     emphasizeDefeat?: boolean
     showElo?: boolean
+    /** Accueil : phase seule, scénario coupé à 10 caractères, seul le bouton Army. */
+    compact?: boolean
   }>(),
   {
     emphasizeDefeat: false,
     showElo: false,
+    compact: false,
   },
 )
 
@@ -54,18 +57,27 @@ const eloClass = computed(() => {
 function openMatch() {
   void router.push({ name: 'match', params: { id: String(props.match.id) } })
 }
+
+/** Largeur commune des pastilles, héritée par la grille des joueurs. */
+const scoreTrackStyle = computed(() => {
+  if (props.badgeMinCh == null) return undefined
+  return {
+    '--match-score-track': `calc(${props.badgeMinCh * 2}ch + 2.5rem)`,
+  }
+})
 </script>
 
 <template>
   <div
     role="link"
     tabindex="0"
-    class="match-list-row"
+    class="match-list-row lg:col-span-full lg:row-span-1 lg:grid lg:grid-cols-subgrid lg:items-center lg:gap-x-3 lg:px-0"
+    :style="scoreTrackStyle"
     @click="openMatch"
     @keydown.enter.prevent="openMatch"
     @keydown.space.prevent="openMatch"
   >
-    <div class="match-list-row-players">
+    <div class="match-list-row-players lg:col-span-3 lg:col-start-2 lg:row-start-1 lg:min-w-0 lg:grid-cols-subgrid lg:gap-x-3">
       <div class="flex min-w-0 items-center justify-end gap-1">
         <PlayerLink
           :name="match.player1"
@@ -77,6 +89,7 @@ function openMatch() {
         <ArmyListQuickActions
           :code="match.player1_army_list_code"
           icon-only
+          :open-only="compact"
           class="shrink-0"
           @click.stop
         />
@@ -93,6 +106,7 @@ function openMatch() {
         <ArmyListQuickActions
           :code="match.player2_army_list_code"
           icon-only
+          :open-only="compact"
           class="shrink-0"
           @click.stop
         />
@@ -104,12 +118,18 @@ function openMatch() {
         />
       </div>
     </div>
-    <div class="match-list-row-meta">
-      <span class="tabular-nums shrink-0 self-start pt-0.5">{{ shortDate ?? '—' }}</span>
-      <MatchContextCell :match="match" class="min-w-0 flex-1 text-[11px]" />
+    <div class="match-list-row-meta lg:contents">
+      <span class="match-list-row-date w-14 shrink-0 self-start pt-0.5 tabular-nums lg:col-start-1 lg:row-start-1 lg:w-auto lg:self-center lg:pt-0">{{ shortDate ?? '—' }}</span>
+      <MatchContextCell
+        :match="match"
+        class="match-list-row-context min-w-0 flex-1 text-[11px] lg:col-start-5 lg:row-start-1 lg:w-max lg:max-w-none lg:min-w-max lg:flex-none"
+        :phase-only="compact"
+        :tournament-name-limit="compact ? undefined : 15"
+        :scenario-name-limit="compact ? 10 : undefined"
+      />
       <span
         v-if="eloLabel"
-        class="ml-auto shrink-0 self-start pt-0.5 tabular-nums"
+        class="match-list-row-elo ml-auto shrink-0 self-start pt-0.5 tabular-nums lg:col-start-6 lg:ml-0 lg:self-center lg:pt-0"
         :class="eloClass"
       >
         {{ eloLabel }}

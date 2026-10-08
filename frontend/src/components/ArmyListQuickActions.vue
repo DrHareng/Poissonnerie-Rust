@@ -10,8 +10,10 @@ const props = withDefaults(
   defineProps<{
     code: string | null | undefined
     iconOnly?: boolean
+    /** N’affiche que l’ouverture dans Army, sans le bouton copier. */
+    openOnly?: boolean
   }>(),
-  { iconOnly: false },
+  { iconOnly: false, openOnly: false },
 )
 
 const normalized = computed(() => normalizeArmyListCode(props.code ?? ''))
@@ -40,6 +42,7 @@ function openArmy() {
     class="inline-flex shrink-0 items-center gap-0.5"
   >
     <Button
+      v-if="!openOnly"
       type="button"
       :size="buttonSize"
       variant="outline"
@@ -54,7 +57,7 @@ function openArmy() {
       type="button"
       :size="buttonSize"
       variant="outline"
-      class="hidden md:inline-flex"
+      :class="openOnly ? undefined : 'hidden md:inline-flex'"
       title="Ouvrir l'Army Builder Infinity"
       :aria-label="iconOnly ? 'Ouvrir l\'Army Builder Infinity' : undefined"
       @click="openArmy"

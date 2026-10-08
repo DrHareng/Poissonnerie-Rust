@@ -17,6 +17,7 @@ import ImageViewer, {
   type ImageViewerItem,
 } from '@/components/ImageViewer.vue'
 import MarkdownContent from '@/components/MarkdownContent.vue'
+import ContentUpdates from '@/components/ContentUpdates.vue'
 import TtsMapScenarioMenu from '@/components/TtsMapScenarioMenu.vue'
 import { useAdminEditMode } from '@/composables/useAdminEditMode'
 import { withBase } from '@/lib/basePath'
@@ -33,6 +34,7 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   loaded: [scenario: ScenarioDetail]
+  published: []
 }>()
 
 const { canEditContent } = useAdminEditMode()
@@ -186,10 +188,17 @@ watch(
         <h2 class="page-title min-w-0 flex-1 text-2xl">
           {{ scenario.name }}
         </h2>
-        <TtsMapScenarioMenu
-          class="shrink-0"
-          :scenario-id="scenario.id"
-        />
+        <div class="flex min-w-0 items-center gap-3">
+          <ContentUpdates
+            kind="scenario"
+            :scenario-slug="slug"
+            @published="emit('published')"
+          />
+          <TtsMapScenarioMenu
+            class="shrink-0"
+            :scenario-id="scenario.id"
+          />
+        </div>
       </div>
       <AdminContentEditor
         :can-edit="canEditContent"

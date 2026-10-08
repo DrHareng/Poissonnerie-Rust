@@ -370,11 +370,43 @@
   }
 
   .match-list-row-players {
-    @apply grid w-full grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-x-1.5;
+    @apply grid w-full items-center gap-x-1.5;
+    grid-template-columns: minmax(0, 1fr) var(--match-score-track, auto) minmax(0, 1fr);
   }
 
   .match-list-row-meta {
     @apply flex min-w-0 items-start gap-2 text-[11px] text-muted-foreground;
+  }
+
+  @media (min-width: 1024px) {
+    .home-match-list {
+      display: grid;
+      grid-template-columns:
+        3.5rem
+        minmax(0, 1fr)
+        var(--match-score-track, max-content)
+        minmax(0, 1fr)
+        max-content;
+      column-gap: 0.75rem;
+      align-items: center;
+      padding-inline: 0.5rem;
+    }
+
+    .match-list-row-context {
+      display: flex;
+      align-items: baseline;
+      gap: 0.35rem;
+      width: max-content;
+      overflow: visible;
+    }
+
+    .match-list-row-context > p {
+      min-width: max-content;
+    }
+
+    .match-list-row-context > p + p::before {
+      content: '· ';
+    }
   }
 
   .home-nav-grid {
@@ -415,7 +447,28 @@
   }
 
   .page-title-tabs-actions {
-    @apply flex shrink-0 items-center self-center pb-1;
+    @apply flex min-w-0 shrink items-center self-center pb-1;
+  }
+
+  @media (max-width: 767px) {
+    .page-title-tabs--with-meta {
+      flex-wrap: wrap;
+    }
+
+    .page-title-tabs--with-meta .page-title-tabs-actions {
+      width: 100%;
+      justify-content: flex-end;
+      padding-top: 0.15rem;
+    }
+  }
+
+  .content-update-info {
+    @apply inline-flex size-5 shrink-0 items-center justify-center rounded-full border border-primary/45 bg-primary/10 text-primary transition-colors;
+  }
+
+  .content-update-info:hover,
+  .content-update-info:focus-visible {
+    @apply border-primary bg-primary/20 outline-none;
   }
 
   .page-title-tab {
@@ -1336,7 +1389,11 @@
   }
 
   .scenario-side-item {
-    @apply block w-full rounded-md border border-transparent px-3 py-2 text-left text-sm font-medium text-muted-foreground no-underline transition hover:border-primary/25 hover:bg-primary/5 hover:text-foreground;
+    @apply flex w-full items-center gap-1.5 rounded-md border border-transparent px-3 py-2 text-left text-sm font-medium text-muted-foreground transition hover:border-primary/25 hover:bg-primary/5 hover:text-foreground;
+  }
+
+  .scenario-side-item-link {
+    @apply min-w-0 flex-1 truncate text-inherit no-underline;
   }
 
   .scenario-side-item--active {

@@ -8,6 +8,7 @@ pub mod dauphine;
 pub mod dauphine_api;
 pub mod dauphine_store;
 pub mod auth;
+pub mod content_update;
 pub mod elo;
 pub mod match_record;
 pub mod migrate;
@@ -37,6 +38,7 @@ pub use match_record::{
 pub use report_template::{ReportTemplate, ReportTemplateStore};
 pub use player::{apply_match, MatchOutcome, Player, RatingUpdate, DEFAULT_RATING};
 pub use scenario::{strip_scenario_prefix, Scenario, ScenarioStore};
+pub use content_update::ContentUpdateStore;
 pub use site_content::{SiteContent, SiteContentStore, RESSOURCES_KEY};
 pub use tts_map::TtsMapStore;
 pub use store::{

@@ -24,28 +24,20 @@ const props = defineProps<{
   pendingLabel?: string
 }>()
 
+/** Padding horizontal du badge (px-2), pour que la largeur fixe contienne le texte. */
+const badgePadRem = 1
+const badgePairGapRem = 0.5
+
 const badgeStyle = computed(() =>
   props.badgeMinCh != null
-    ? { minWidth: `${props.badgeMinCh}ch` }
+    ? { width: `calc(${props.badgeMinCh}ch + ${badgePadRem}rem)` }
     : undefined,
 )
-
-const badgePairGapRem = 0.5
 
 const pairStyle = computed(() =>
   props.badgeMinCh != null
     ? {
-        // minWidth (pas width) : les badges peuvent dépasser badgeMinCh
-        // (ex. « 10 - 10 ») sans se compresser / se superposer.
-        minWidth: `calc(${props.badgeMinCh * 2}ch + ${badgePairGapRem}rem)`,
-      }
-    : undefined,
-)
-
-const inProgressStyle = computed(() =>
-  props.badgeMinCh != null
-    ? {
-        minWidth: `calc(${props.badgeMinCh * 2}ch + ${badgePairGapRem}rem)`,
+        width: `calc(${props.badgeMinCh * 2}ch + ${badgePadRem * 2}rem + ${badgePairGapRem}rem)`,
       }
     : undefined,
 )
@@ -106,8 +98,8 @@ function scoreLabel(objectives: number, survivors: number) {
   >
     <Badge
       variant="secondary"
-      class="justify-center tabular-nums"
-      :style="inProgressStyle"
+      class="w-full justify-center tabular-nums"
+      :style="pairStyle"
     >
       {{ pendingText }}
     </Badge>
