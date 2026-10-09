@@ -2,6 +2,7 @@
 import { computed, ref, watch } from 'vue'
 import { RouterView, useRoute } from 'vue-router'
 import { X } from '@lucide/vue'
+import BottomBar from '@/components/BottomBar.vue'
 import TopBar from '@/components/TopBar.vue'
 import { Toaster } from '@/components/ui/sonner'
 import { Button } from '@/components/ui/button'
@@ -107,6 +108,8 @@ watch(forcedSideImageSrc, (forced) => {
           <RouterView />
         </main>
       </div>
+
+      <BottomBar />
     </div>
 
     <Toaster theme="dark" rich-colors position="top-center" class="toaster-overlay" />

@@ -159,7 +159,7 @@ onMounted(async () => {
     </nav>
 
     <div
-      class="grid min-h-0 flex-1 grid-cols-1 items-start gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,20rem)] xl:grid-cols-[minmax(0,1fr)_minmax(0,22rem)]"
+      class="hidden min-h-0 flex-1 grid-cols-1 items-start gap-4 md:grid lg:grid-cols-[minmax(0,1fr)_minmax(0,20rem)] xl:grid-cols-[minmax(0,1fr)_minmax(0,22rem)]"
     >
       <div class="grid min-w-0 gap-4 self-start">
         <Card class="neon-panel">
