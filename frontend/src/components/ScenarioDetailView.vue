@@ -18,6 +18,7 @@ import ImageViewer, {
 } from '@/components/ImageViewer.vue'
 import MarkdownContent from '@/components/MarkdownContent.vue'
 import ContentUpdates from '@/components/ContentUpdates.vue'
+import ScenarioExportMenu from '@/components/ScenarioExportMenu.vue'
 import TtsMapScenarioMenu from '@/components/TtsMapScenarioMenu.vue'
 import { useAdminEditMode } from '@/composables/useAdminEditMode'
 import { withBase } from '@/lib/basePath'
@@ -189,6 +190,10 @@ watch(
           {{ scenario.name }}
         </h2>
         <div class="flex min-w-0 items-center gap-3">
+          <ScenarioExportMenu
+            :scenario="scenario"
+            :rules="ruleGlossary"
+          />
           <ContentUpdates
             kind="scenario"
             :scenario-slug="slug"

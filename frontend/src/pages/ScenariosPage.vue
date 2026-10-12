@@ -28,6 +28,7 @@ import {
   type SecondaryObjective,
 } from '@/types/elo'
 import AdminContentEditor from '@/components/AdminContentEditor.vue'
+import ContentUpdates from '@/components/ContentUpdates.vue'
 import SecondaryObjectiveEditor from '@/components/SecondaryObjectiveEditor.vue'
 import ImageViewer, {
   type ImageViewerItem,
@@ -316,12 +317,11 @@ async function savePreamble(payload: { body: string }) {
 
 async function saveSecondary(
   slug: string,
-  payload: { name?: string; body: string; image: File | null },
+  payload: { name?: string; body: string },
 ) {
   const updated = await updatePackSecondary(DEFAULT_SCENARIO_PACK_SLUG, slug, {
     name: payload.name ?? '',
     body_md: payload.body,
-    image: payload.image,
   })
   secondaries.value = secondaries.value.map((item) =>
     item.slug === slug ? updated : item,
@@ -723,7 +723,6 @@ watch(
               :can-edit="canEditContent"
               :name="secondary.name"
               :body="secondary.body_md"
-              :image-src="secondaryImageSrc(secondary)"
               :rules="commonRules"
               :persist="(payload) => saveSecondary(secondary.slug, payload)"
             >
@@ -749,6 +748,12 @@ watch(
                   {{ secondary.name }}
                 </p>
               </button>
+              <ContentUpdates
+                class="absolute bottom-2 left-2 z-20 max-w-[calc(100%-1rem)]"
+                kind="secondary"
+                overlay
+                :secondary-slug="secondary.slug"
+              />
             </SecondaryObjectiveEditor>
           </div>
 
@@ -761,13 +766,16 @@ watch(
             >
               <CardHeader :class="{ 'pr-24': canEditContent }">
                 <CardTitle class="text-lg">{{ secondary.name }}</CardTitle>
+                <ContentUpdates
+                  kind="secondary"
+                  :secondary-slug="secondary.slug"
+                />
               </CardHeader>
               <CardContent>
                 <SecondaryObjectiveEditor
                   :can-edit="canEditContent"
                   :name="secondary.name"
                   :body="secondary.body_md"
-                  :image-src="secondaryImageSrc(secondary)"
                   :rows="8"
                   :rules="commonRules"
                   :persist="(payload) => saveSecondary(secondary.slug, payload)"

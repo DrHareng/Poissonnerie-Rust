@@ -8,7 +8,6 @@ export type CombatEspritStripItem = {
   slug: string
   name?: string
   bodyMd?: string | null
-  imageUrl?: string | null
   status: PoolSlotStatus
   owner?: 'player1' | 'player2' | null
 }
@@ -100,7 +99,7 @@ function scheduleClose() {
 }
 
 function itemImage(item: CombatEspritStripItem) {
-  return secondaryImageSrc({ slug: item.slug, image_url: item.imageUrl })
+  return secondaryImageSrc(item.slug)
 }
 
 function onClick(item: CombatEspritStripItem) {

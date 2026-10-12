@@ -30,9 +30,6 @@ pub struct SecondaryObjective {
     pub slug: String,
     pub name: String,
     pub body_md: String,
-    /// Image téléversée par un admin. Absente tant que la carte statique est utilisée.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub image_url: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -288,50 +285,26 @@ pub fn get_pack(conn: &Connection, slug: &str) -> Result<Option<ScenarioPack>> {
     Ok(None)
 }
 
-fn secondary_image_url(
-    pack_slug: &str,
-    slug: &str,
-    filename: Option<&str>,
-    updated_at: Option<i64>,
-) -> Option<String> {
-    let filename = filename.map(str::trim).filter(|value| !value.is_empty())?;
-    if filename.contains('/') || filename.contains('\\') || filename.contains("..") {
-        return None;
-    }
-    let version = updated_at.unwrap_or(0);
-    Some(format!(
-        "/api/scenario-packs/{pack_slug}/secondaries/{slug}/image?v={version}"
-    ))
-}
-
-fn map_secondary(
-    pack_slug: &str,
-    row: &rusqlite::Row<'_>,
-) -> rusqlite::Result<SecondaryObjective> {
-    let slug = row_text(row, 1)?;
-    let filename: Option<String> = row.get(4)?;
-    let updated_at: Option<i64> = row.get(5)?;
-    let image_url = secondary_image_url(pack_slug, &slug, filename.as_deref(), updated_at);
+fn map_secondary(row: &rusqlite::Row<'_>) -> rusqlite::Result<SecondaryObjective> {
     Ok(SecondaryObjective {
         id: row.get(0)?,
-        slug,
+        slug: row_text(row, 1)?,
         name: row.get(2)?,
         body_md: row.get(3)?,
-        image_url,
     })
 }
 
 pub fn list_secondaries(conn: &Connection, pack_slug: &str) -> Result<Vec<SecondaryObjective>> {
     let mut stmt = conn.prepare(
         "
-        SELECT so.id, so.slug, so.name, so.body_md, so.image_filename, so.image_updated_at
+        SELECT so.id, so.slug, so.name, so.body_md
         FROM secondary_objectives so
         JOIN scenario_packs p ON p.id = so.pack_id
         WHERE p.slug = ?1
         ORDER BY so.sort_order ASC, so.name ASC
         ",
     )?;
-    let rows = stmt.query_map(params![pack_slug], |row| map_secondary(pack_slug, row))?;
+    let rows = stmt.query_map(params![pack_slug], map_secondary)?;
     rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
 }
 
@@ -342,7 +315,7 @@ fn load_secondary(
 ) -> Result<Option<SecondaryObjective>> {
     let mut stmt = conn.prepare(
         "
-        SELECT so.id, so.slug, so.name, so.body_md, so.image_filename, so.image_updated_at
+        SELECT so.id, so.slug, so.name, so.body_md
         FROM secondary_objectives so
         JOIN scenario_packs p ON p.id = so.pack_id
         WHERE p.slug = ?1 AND so.slug = ?2
@@ -350,31 +323,9 @@ fn load_secondary(
     )?;
     let mut rows = stmt.query(params![pack_slug, secondary_slug])?;
     if let Some(row) = rows.next()? {
-        return Ok(Some(map_secondary(pack_slug, row)?));
+        return Ok(Some(map_secondary(row)?));
     }
     Ok(None)
-}
-
-/// `None` si l'objectif n'existe pas. `Some(None)` s'il n'a pas encore d'image téléversée.
-pub fn find_secondary_image_filename(
-    conn: &Connection,
-    pack_slug: &str,
-    secondary_slug: &str,
-) -> Result<Option<Option<String>>> {
-    let mut stmt = conn.prepare(
-        "
-        SELECT so.image_filename
-        FROM secondary_objectives so
-        JOIN scenario_packs p ON p.id = so.pack_id
-        WHERE p.slug = ?1 AND so.slug = ?2
-        ",
-    )?;
-    let mut rows = stmt.query(params![pack_slug, secondary_slug])?;
-    let Some(row) = rows.next()? else {
-        return Ok(None);
-    };
-    let filename: Option<String> = row.get(0)?;
-    Ok(Some(filename.filter(|value| !value.trim().is_empty())))
 }
 
 pub fn list_common_rules(conn: &Connection, pack_slug: &str) -> Result<Vec<CommonRule>> {
@@ -522,36 +473,16 @@ pub fn update_secondary(
     secondary_slug: &str,
     name: &str,
     body_md: &str,
-    image: Option<(&str, i64)>,
 ) -> Result<Option<SecondaryObjective>> {
-    let updated = if let Some((filename, updated_at)) = image {
-        conn.execute(
-            "
-            UPDATE secondary_objectives
-            SET name = ?1, body_md = ?2, image_filename = ?3, image_updated_at = ?4
-            WHERE slug = ?5
-              AND pack_id = (SELECT id FROM scenario_packs WHERE slug = ?6)
-            ",
-            params![
-                name.trim(),
-                body_md,
-                filename,
-                updated_at,
-                secondary_slug,
-                pack_slug
-            ],
-        )?
-    } else {
-        conn.execute(
-            "
-            UPDATE secondary_objectives
-            SET name = ?1, body_md = ?2
-            WHERE slug = ?3
-              AND pack_id = (SELECT id FROM scenario_packs WHERE slug = ?4)
-            ",
-            params![name.trim(), body_md, secondary_slug, pack_slug],
-        )?
-    };
+    let updated = conn.execute(
+        "
+        UPDATE secondary_objectives
+        SET name = ?1, body_md = ?2
+        WHERE slug = ?3
+          AND pack_id = (SELECT id FROM scenario_packs WHERE slug = ?4)
+        ",
+        params![name.trim(), body_md, secondary_slug, pack_slug],
+    )?;
     if updated == 0 {
         return Ok(None);
     }

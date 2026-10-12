@@ -856,8 +856,6 @@ fn migrate_scenario_pack_schema(conn: &Connection) -> Result<()> {
             name TEXT NOT NULL,
             body_md TEXT NOT NULL DEFAULT '',
             sort_order INTEGER NOT NULL DEFAULT 0,
-            image_filename TEXT,
-            image_updated_at INTEGER,
             UNIQUE(pack_id, slug)
         );
 
@@ -901,19 +899,6 @@ fn migrate_scenario_pack_schema(conn: &Connection) -> Result<()> {
             ",
         )?;
     }
-
-    add_column_if_missing(
-        conn,
-        "secondary_objectives",
-        "image_filename",
-        "ALTER TABLE secondary_objectives ADD COLUMN image_filename TEXT",
-    )?;
-    add_column_if_missing(
-        conn,
-        "secondary_objectives",
-        "image_updated_at",
-        "ALTER TABLE secondary_objectives ADD COLUMN image_updated_at INTEGER",
-    )?;
 
     crate::scenario_pack::seed_default_pack_if_needed(conn)?;
     crate::scenario_pack::sync_map_filenames(conn)?;

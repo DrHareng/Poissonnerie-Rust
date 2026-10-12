@@ -728,6 +728,29 @@ export function createScenarioUpdate(
   )
 }
 
+export function fetchSecondaryUpdates(
+  packSlug: string,
+  secondarySlug: string,
+): Promise<ContentUpdate[]> {
+  return request(
+    `/api/scenario-packs/${encodeURIComponent(packSlug)}/secondaries/${encodeURIComponent(secondarySlug)}/updates`,
+  )
+}
+
+export function createSecondaryUpdate(
+  packSlug: string,
+  secondarySlug: string,
+  description: string,
+): Promise<ContentUpdate> {
+  return request(
+    `/api/scenario-packs/${encodeURIComponent(packSlug)}/secondaries/${encodeURIComponent(secondarySlug)}/updates`,
+    {
+      method: 'POST',
+      body: JSON.stringify({ description }),
+    },
+  )
+}
+
 export function fetchPackScenario(
   packSlug: string,
   scenarioSlug: string,
@@ -747,40 +770,18 @@ export function updateScenarioPack(
   })
 }
 
-export async function updatePackSecondary(
+export function updatePackSecondary(
   packSlug: string,
   secondarySlug: string,
-  payload: { name: string; body_md: string; image?: File | null },
+  payload: { name: string; body_md: string },
 ): Promise<SecondaryObjective> {
-  const sessionId = getNativeSession()
-  const body = new FormData()
-  body.append('name', payload.name)
-  body.append('body_md', payload.body_md)
-  if (payload.image) body.append('image', payload.image)
-  const response = await fetch(
-    withBase(
-      `/api/scenario-packs/${encodeURIComponent(packSlug)}/secondaries/${encodeURIComponent(secondarySlug)}`,
-    ),
+  return request<SecondaryObjective>(
+    `/api/scenario-packs/${encodeURIComponent(packSlug)}/secondaries/${encodeURIComponent(secondarySlug)}`,
     {
-      ...defaultFetchOptions,
       method: 'PATCH',
-      headers: {
-        ...(sessionId ? { 'X-Poissonnerie-Session': sessionId } : {}),
-      },
-      body,
+      body: JSON.stringify(payload),
     },
   )
-  if (!response.ok) {
-    let message = `Erreur HTTP ${response.status}`
-    try {
-      const errorBody = (await response.json()) as ApiError
-      if (errorBody.error) message = errorBody.error
-    } catch {
-      // ignore JSON parse errors
-    }
-    throw new Error(message)
-  }
-  return (await response.json()) as SecondaryObjective
 }
 
 export function updatePackCommonRule(

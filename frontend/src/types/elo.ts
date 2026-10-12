@@ -241,7 +241,6 @@ export interface SecondaryObjective {
   slug: string
   name: string
   body_md: string
-  image_url?: string | null
 }
 
 export interface CommonRule {

@@ -10,6 +10,7 @@ use crate::migrate::{migrate, row_text};
 
 pub const KIND_MAP: &str = "map";
 pub const KIND_SCENARIO: &str = "scenario";
+pub const KIND_SECONDARY: &str = "secondary";
 pub const MAX_DESCRIPTION_CHARS: usize = 4_000;
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
@@ -153,6 +154,28 @@ impl ContentUpdateStore {
         let scenario_id = scenario_id_by_slug(&conn, slug)?;
         insert_update(&conn, KIND_SCENARIO, scenario_id, &description)
     }
+
+    pub fn list_for_secondary(
+        &self,
+        pack_slug: &str,
+        secondary_slug: &str,
+    ) -> Result<Vec<ContentUpdate>> {
+        let conn = self.conn.lock().unwrap();
+        let secondary_id = secondary_id_by_slug(&conn, pack_slug, secondary_slug)?;
+        list_updates(&conn, KIND_SECONDARY, secondary_id)
+    }
+
+    pub fn add_for_secondary(
+        &self,
+        pack_slug: &str,
+        secondary_slug: &str,
+        description: &str,
+    ) -> Result<ContentUpdate> {
+        let description = normalize_description(description)?;
+        let conn = self.conn.lock().unwrap();
+        let secondary_id = secondary_id_by_slug(&conn, pack_slug, secondary_slug)?;
+        insert_update(&conn, KIND_SECONDARY, secondary_id, &description)
+    }
 }
 
 fn normalize_description(description: &str) -> Result<String> {
@@ -190,6 +213,25 @@ fn scenario_id_by_slug(conn: &Connection, slug: &str) -> Result<i64> {
     )
     .optional()?
     .context("scénario introuvable")
+}
+
+fn secondary_id_by_slug(conn: &Connection, pack_slug: &str, secondary_slug: &str) -> Result<i64> {
+    let secondary_slug = secondary_slug.trim();
+    if pack_slug.trim().is_empty() || secondary_slug.is_empty() {
+        bail!("objectif secondaire introuvable");
+    }
+    conn.query_row(
+        "
+        SELECT so.id
+        FROM secondary_objectives so
+        JOIN scenario_packs p ON p.id = so.pack_id
+        WHERE p.slug = ?1 AND so.slug = ?2
+        ",
+        params![pack_slug, secondary_slug],
+        |row| row.get(0),
+    )
+    .optional()?
+    .context("objectif secondaire introuvable")
 }
 
 fn list_updates(conn: &Connection, kind: &str, target_id: i64) -> Result<Vec<ContentUpdate>> {
@@ -319,6 +361,17 @@ mod tests {
         assert_eq!(scenarios[0], scenario);
         assert_eq!(scenarios[1].description, "ancienne");
         assert!(store.list_for_scenario("inconnu").is_err());
+
+        let secondary = store
+            .add_for_secondary("poissonnerie-v2", "enlevement", "Carte mise à jour")
+            .unwrap();
+        let secondaries = store
+            .list_for_secondary("poissonnerie-v2", "enlevement")
+            .unwrap();
+        assert_eq!(secondaries[0], secondary);
+        assert!(store
+            .list_for_secondary("poissonnerie-v2", "inconnu")
+            .is_err());
 
         store.delete_for_map(map_id).unwrap();
         assert!(store.list_for_map(map_id).unwrap().is_empty());

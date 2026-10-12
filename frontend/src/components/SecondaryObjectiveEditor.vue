@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, ref, watch } from 'vue'
+import { ref, watch } from 'vue'
 import { Pencil } from '@lucide/vue'
 import { toast } from 'vue-sonner'
 import { Button } from '@/components/ui/button'
@@ -7,26 +7,18 @@ import { Input } from '@/components/ui/input'
 import MarkdownEditor from '@/components/MarkdownEditor.vue'
 import type { CommonRule } from '@/types/elo'
 
-const MAX_IMAGE_BYTES = 8 * 1024 * 1024
-
 const props = withDefaults(
   defineProps<{
     canEdit: boolean
     body: string
     name: string
-    imageSrc?: string
     rows?: number
     rules?: CommonRule[]
     /** En grille de cartes, le formulaire prend toute la largeur. */
     expand?: boolean
-    persist: (payload: {
-      name?: string
-      body: string
-      image: File | null
-    }) => Promise<void>
+    persist: (payload: { name?: string; body: string }) => Promise<void>
   }>(),
   {
-    imageSrc: undefined,
     rows: 8,
     rules: () => [],
     expand: false,
@@ -37,11 +29,6 @@ const editing = ref(false)
 const saving = ref(false)
 const draftName = ref('')
 const draftBody = ref('')
-const pickedFile = ref<File | null>(null)
-const pickedPreview = ref<string | null>(null)
-const fileInputKey = ref(0)
-
-const previewSrc = computed(() => pickedPreview.value ?? props.imageSrc ?? '')
 
 watch(
   () => [props.name, props.body] as const,
@@ -61,23 +48,9 @@ watch(
   },
 )
 
-onBeforeUnmount(clearPicked)
-
-function revokePicked() {
-  if (pickedPreview.value) URL.revokeObjectURL(pickedPreview.value)
-  pickedPreview.value = null
-  pickedFile.value = null
-}
-
-function clearPicked() {
-  revokePicked()
-  fileInputKey.value += 1
-}
-
 function startEdit() {
   draftName.value = props.name
   draftBody.value = props.body
-  clearPicked()
   editing.value = true
 }
 
@@ -85,33 +58,6 @@ function cancel() {
   editing.value = false
   draftName.value = props.name
   draftBody.value = props.body
-  clearPicked()
-}
-
-function onImageChange(event: Event) {
-  const input = event.target as HTMLInputElement
-  const file = input.files?.[0]
-  revokePicked()
-  if (!file) return
-  const type = file.type.toLowerCase()
-  const accepted =
-    type === 'image/png' ||
-    type === 'image/jpeg' ||
-    type === 'image/gif' ||
-    type === 'image/webp' ||
-    (!type && /\.(png|jpe?g|gif|webp)$/i.test(file.name))
-  if (!accepted) {
-    input.value = ''
-    toast.error('Format d’image non supporté (png, jpg, gif, webp)')
-    return
-  }
-  if (file.size > MAX_IMAGE_BYTES) {
-    input.value = ''
-    toast.error('L’image dépasse 8 Mo')
-    return
-  }
-  pickedFile.value = file
-  pickedPreview.value = URL.createObjectURL(file)
 }
 
 async function save() {
@@ -124,10 +70,8 @@ async function save() {
     await props.persist({
       name: draftName.value.trim(),
       body: draftBody.value,
-      image: pickedFile.value,
     })
     editing.value = false
-    clearPicked()
   } catch (error) {
     toast.error(
       error instanceof Error ? error.message : 'Impossible d’enregistrer',
@@ -158,28 +102,6 @@ async function save() {
 
     <div v-if="editing" class="space-y-3" :class="{ 'neon-panel p-4': expand }">
       <Input v-model="draftName" placeholder="Nom" autocomplete="off" />
-      <div class="flex flex-wrap items-start gap-4">
-        <img
-          v-if="previewSrc"
-          :src="previewSrc"
-          alt=""
-          class="max-h-64 w-auto rounded-md border border-border object-contain"
-        />
-        <div class="min-w-48 flex-1 space-y-2">
-          <p class="text-sm font-medium">Image</p>
-          <input
-            :key="fileInputKey"
-            type="file"
-            accept="image/png,image/jpeg,image/gif,image/webp,.png,.jpg,.jpeg,.gif,.webp"
-            class="border-input file:text-foreground h-8 w-full min-w-0 rounded-lg border bg-transparent px-2.5 py-1 text-sm file:mr-3 file:border-0 file:bg-transparent file:text-sm file:font-medium"
-            @change="onImageChange"
-          />
-          <p class="text-xs text-muted-foreground">
-            Sans nouveau fichier, l’image actuelle est conservée. Un fichier
-            choisi remplace l’existante.
-          </p>
-        </div>
-      </div>
       <MarkdownEditor v-model="draftBody" :rows="rows" :rules="rules" />
       <div class="flex flex-wrap justify-end gap-2">
         <Button

@@ -6,8 +6,10 @@ import { Info, X } from '@lucide/vue'
 import {
   createMapUpdate,
   createScenarioUpdate,
+  createSecondaryUpdate,
   fetchMapUpdates,
   fetchScenarioUpdates,
+  fetchSecondaryUpdates,
 } from '@/lib/api'
 import { DEFAULT_SCENARIO_PACK_SLUG, type ContentUpdate } from '@/types/elo'
 import { useAdminEditMode } from '@/composables/useAdminEditMode'
@@ -21,10 +23,13 @@ import {
 import { Label } from '@/components/ui/label'
 
 const props = defineProps<{
-  kind: 'map' | 'scenario'
+  kind: 'map' | 'scenario' | 'secondary'
   mapId?: number
   scenarioSlug?: string
+  secondarySlug?: string
   refreshKey?: number
+  /** Fond sombre, pour poser le badge sur une carte illustrée. */
+  overlay?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -51,12 +56,21 @@ const latest = computed(() => updates.value[0] ?? null)
 const showBadge = computed(() => {
   if (!ready.value) return false
   if (latest.value) return true
-  return props.kind === 'scenario' && canEditContent.value
+  return canPublish.value
 })
 const canSubmit = computed(
   () => draft.value.trim().length > 0 && !submitting.value,
 )
-const subject = computed(() => (props.kind === 'map' ? 'cette map' : 'ce scénario'))
+const canPublish = computed(
+  () =>
+    canEditContent.value &&
+    (props.kind === 'scenario' || props.kind === 'secondary'),
+)
+const subject = computed(() => {
+  if (props.kind === 'map') return 'cette map'
+  if (props.kind === 'secondary') return 'cet objectif'
+  return 'ce scénario'
+})
 
 const body = typeof document !== 'undefined' ? document.body : null
 const isLocked = useScrollLock(body)
@@ -72,7 +86,8 @@ watch(dialogOpen, (value) => {
 watch(showBadge, (value) => emit('visible', value), { immediate: true })
 
 watch(
-  () => [props.kind, props.mapId, props.scenarioSlug] as const,
+  () =>
+    [props.kind, props.mapId, props.scenarioSlug, props.secondarySlug] as const,
   () => {
     dialogOpen.value = false
     hideTip()
@@ -192,15 +207,22 @@ async function load(background = false) {
   const id = ++requestId
   const mapId = props.mapId
   const scenarioSlug = props.scenarioSlug
+  const secondarySlug = props.secondarySlug
   if (props.kind === 'map' && mapId == null) return
   if (props.kind === 'scenario' && !scenarioSlug) return
+  if (props.kind === 'secondary' && !secondarySlug) return
 
   if (!background) ready.value = false
   try {
     const items =
       props.kind === 'map'
         ? await fetchMapUpdates(mapId!)
-        : await fetchScenarioUpdates(DEFAULT_SCENARIO_PACK_SLUG, scenarioSlug!)
+        : props.kind === 'secondary'
+          ? await fetchSecondaryUpdates(
+              DEFAULT_SCENARIO_PACK_SLUG,
+              secondarySlug!,
+            )
+          : await fetchScenarioUpdates(DEFAULT_SCENARIO_PACK_SLUG, scenarioSlug!)
     if (id !== requestId) return
     updates.value = items
   } catch (error) {
@@ -227,11 +249,17 @@ async function submit() {
     const created =
       props.kind === 'map'
         ? await createMapUpdate(props.mapId!, description)
-        : await createScenarioUpdate(
-            DEFAULT_SCENARIO_PACK_SLUG,
-            props.scenarioSlug!,
-            description,
-          )
+        : props.kind === 'secondary'
+          ? await createSecondaryUpdate(
+              DEFAULT_SCENARIO_PACK_SLUG,
+              props.secondarySlug!,
+              description,
+            )
+          : await createScenarioUpdate(
+              DEFAULT_SCENARIO_PACK_SLUG,
+              props.scenarioSlug!,
+              description,
+            )
     updates.value = [created, ...updates.value.filter((item) => item.id !== created.id)]
     dialogOpen.value = false
     emit('published')
@@ -249,7 +277,11 @@ async function submit() {
 </script>
 
 <template>
-  <div v-if="showBadge" class="flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground">
+  <div
+    v-if="showBadge"
+    class="flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground"
+    :class="{ 'rounded-md bg-black/75 px-2 py-1': overlay }"
+  >
     <template v-if="latest">
       <span class="min-w-0 truncate">
         Dernière mise à jour :
@@ -327,7 +359,7 @@ async function submit() {
         </CardHeader>
         <CardContent class="space-y-4">
           <form
-            v-if="canEditContent && kind === 'scenario'"
+            v-if="canPublish"
             class="space-y-2"
             @submit.prevent="submit"
           >
@@ -350,7 +382,7 @@ async function submit() {
           <p v-if="updates.length === 0" class="text-sm text-muted-foreground">
             Aucune mise à jour pour {{ subject }}.
           </p>
-          <ol v-else class="space-y-3" :class="{ 'border-t border-border/60 pt-4': canEditContent && kind === 'scenario' }">
+          <ol v-else class="space-y-3" :class="{ 'border-t border-border/60 pt-4': canPublish }">
             <li
               v-for="update in updates"
               :key="update.id"

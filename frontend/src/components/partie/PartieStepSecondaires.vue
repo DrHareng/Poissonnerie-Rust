@@ -113,7 +113,6 @@ const stripItems = computed(() => {
       slug: slot.secondary.slug,
       name: slot.secondary.name,
       bodyMd: slot.secondary.body_md,
-      imageUrl: slot.secondary.image_url,
       status: slot.status,
       owner: slot.by
         ? draftPlayerIsSlot1(slot.by, firstPicker.value)
@@ -140,7 +139,6 @@ const stripItems = computed(() => {
         slug,
         name: secondary?.name,
         bodyMd: secondary?.body_md,
-        imageUrl: secondary?.image_url,
         status: 'banned' as const,
         owner: null,
       }
@@ -150,7 +148,6 @@ const stripItems = computed(() => {
         slug,
         name: secondary?.name,
         bodyMd: secondary?.body_md,
-        imageUrl: secondary?.image_url,
         status: 'taken' as const,
         owner: p1.has(slug) ? ('player1' as const) : ('player2' as const),
       }
@@ -159,7 +156,6 @@ const stripItems = computed(() => {
       slug,
       name: secondary?.name,
       bodyMd: secondary?.body_md,
-      imageUrl: secondary?.image_url,
       status: 'available' as const,
       owner: null,
     }

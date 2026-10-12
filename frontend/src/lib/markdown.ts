@@ -290,21 +290,31 @@ function safeTtsMapImagePath(raw: string): string | null {
   return `/api/tts-maps/${match[1]}/pictures/${encodeURIComponent(filename)}`
 }
 
-function renderMarkdownImage(rawFilename: string): string {
-  const trimmed = rawFilename.trim()
+/** Résout `[img]…[img]` vers une URL affichable. `null` si le nom est invalide. */
+export function resolveMarkdownImage(
+  raw: string,
+  alt?: string,
+): { src: string; alt: string } | null {
+  const trimmed = raw.trim()
   const remote = safeHttpUrl(trimmed)
-  if (remote) return renderRemoteImage(remote)
+  if (remote) {
+    return { src: remote, alt: alt?.trim() || altFromUrl(remote) }
+  }
 
   const ttsPath = safeTtsMapImagePath(trimmed)
   if (ttsPath) {
     const filename = decodeURIComponent(ttsPath.split('/').pop() ?? '')
-    return renderImgTag(withBase(ttsPath), filename)
+    return { src: withBase(ttsPath), alt: alt?.trim() || filename }
   }
 
   const file = safeScenarioImageFilename(trimmed)
-  if (!file) {
-    return escapeHtml(`[img]${rawFilename}[img]`)
-  }
-  const src = withBase(`/scenario/${encodeURIComponent(file).replace(/%2F/gi, '')}`)
-  return renderImgTag(src, file)
+  if (!file) return null
+  const src = withBase(`/scenario/${encodeURIComponent(file)}`)
+  return { src, alt: alt?.trim() || file }
+}
+
+function renderMarkdownImage(rawFilename: string): string {
+  const resolved = resolveMarkdownImage(rawFilename)
+  if (!resolved) return escapeHtml(`[img]${rawFilename}[img]`)
+  return renderImgTag(resolved.src, resolved.alt)
 }
