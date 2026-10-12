@@ -8,6 +8,7 @@ export type CombatEspritStripItem = {
   slug: string
   name?: string
   bodyMd?: string | null
+  imageUrl?: string | null
   status: PoolSlotStatus
   owner?: 'player1' | 'player2' | null
 }
@@ -98,6 +99,10 @@ function scheduleClose() {
   }, 120)
 }
 
+function itemImage(item: CombatEspritStripItem) {
+  return secondaryImageSrc({ slug: item.slug, image_url: item.imageUrl })
+}
+
 function onClick(item: CombatEspritStripItem) {
   if (props.selectable && item.status === 'available') {
     emit('select', item.slug)
@@ -155,8 +160,8 @@ onBeforeUnmount(() => {
         v-if="!(hideTaken && (item.status === 'taken' || item.status === 'banned'))"
       >
         <img
-          v-if="secondaryImageSrc(item.slug)"
-          :src="secondaryImageSrc(item.slug)"
+          v-if="itemImage(item)"
+          :src="itemImage(item)"
           :alt="item.name ?? item.slug"
           class="combat-esprit-strip-image"
         />

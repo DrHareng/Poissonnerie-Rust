@@ -19,24 +19,24 @@ const emit = defineEmits<{
   choose: [slug: string]
 }>()
 
-function isClickable(slug: string) {
+function isClickable(secondary: SecondaryObjective) {
   if (props.banned) return false
   if (props.choosable) return true
-  if (props.selectable || props.viewable) return !!secondaryImageSrc(slug)
+  if (props.selectable || props.viewable) return !!secondaryImageSrc(secondary)
   return false
 }
 
-function onImageClick(slug: string) {
+function onImageClick(secondary: SecondaryObjective) {
   if (props.choosable) {
-    emit('choose', slug)
+    emit('choose', secondary.slug)
     return
   }
   if (props.selectable) {
-    emit('select', slug)
+    emit('select', secondary.slug)
     return
   }
-  if (props.viewable && secondaryImageSrc(slug)) {
-    emit('view', slug)
+  if (props.viewable && secondaryImageSrc(secondary)) {
+    emit('view', secondary.slug)
   }
 }
 </script>
@@ -71,18 +71,18 @@ function onImageClick(slug: string) {
         type="button"
         class="block w-full p-0 text-left"
         :class="{
-          'secondary-card--clickable': isClickable(secondary.slug),
+          'secondary-card--clickable': isClickable(secondary),
         }"
-        :disabled="!isClickable(secondary.slug)"
+        :disabled="!isClickable(secondary)"
         :aria-pressed="
           choosable ? selectedSlug === secondary.slug : undefined
         "
         :title="choosable ? `Choisir ${secondary.name}` : undefined"
-        @click="onImageClick(secondary.slug)"
+        @click="onImageClick(secondary)"
       >
         <img
-          v-if="secondaryImageSrc(secondary.slug)"
-          :src="secondaryImageSrc(secondary.slug)"
+          v-if="secondaryImageSrc(secondary)"
+          :src="secondaryImageSrc(secondary)"
           :alt="secondary.name"
           class="secondary-card-image"
         />

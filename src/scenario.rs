@@ -1,4 +1,5 @@
-use std::path::Path;
+use std::fs;
+use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
 use anyhow::{Context, Result};
@@ -34,8 +35,11 @@ pub struct Scenario {
     pub pack_id: Option<i64>,
 }
 
+pub const MAX_SECONDARY_IMAGE_BYTES: usize = 8 * 1024 * 1024;
+
 pub struct ScenarioStore {
     conn: Mutex<Connection>,
+    uploads_root: PathBuf,
 }
 
 impl ScenarioStore {
@@ -51,6 +55,7 @@ impl ScenarioStore {
 
         Ok(Self {
             conn: Mutex::new(conn),
+            uploads_root: uploads_root_from_db(path),
         })
     }
 
@@ -148,9 +153,118 @@ impl ScenarioStore {
         secondary_slug: &str,
         name: &str,
         body_md: &str,
+        image: Option<&[u8]>,
     ) -> Result<Option<crate::scenario_pack::SecondaryObjective>> {
-        let conn = self.conn.lock().unwrap();
-        crate::scenario_pack::update_secondary(&conn, pack_slug, secondary_slug, name, body_md)
+        if let Some(bytes) = image {
+            self.replace_secondary_image(pack_slug, secondary_slug, name, body_md, bytes)
+        } else {
+            let conn = self.conn.lock().unwrap();
+            crate::scenario_pack::update_secondary(
+                &conn,
+                pack_slug,
+                secondary_slug,
+                name,
+                body_md,
+                None,
+            )
+        }
+    }
+
+    pub fn secondary_image_path(
+        &self,
+        pack_slug: &str,
+        secondary_slug: &str,
+    ) -> Result<Option<PathBuf>> {
+        safe_path_slug(pack_slug)?;
+        safe_path_slug(secondary_slug)?;
+        let filename = {
+            let conn = self.conn.lock().unwrap();
+            match crate::scenario_pack::find_secondary_image_filename(
+                &conn,
+                pack_slug,
+                secondary_slug,
+            )? {
+                Some(Some(name)) => name,
+                _ => return Ok(None),
+            }
+        };
+        let filename = safe_stored_filename(&filename)?;
+        let path = self
+            .uploads_root
+            .join("secondaries")
+            .join(pack_slug)
+            .join(filename);
+        if path.is_file() {
+            Ok(Some(path))
+        } else {
+            Ok(None)
+        }
+    }
+
+    fn replace_secondary_image(
+        &self,
+        pack_slug: &str,
+        secondary_slug: &str,
+        name: &str,
+        body_md: &str,
+        bytes: &[u8],
+    ) -> Result<Option<crate::scenario_pack::SecondaryObjective>> {
+        safe_path_slug(pack_slug)?;
+        safe_path_slug(secondary_slug)?;
+        let ext = sniff_secondary_image(bytes)?;
+        let filename = format!("{secondary_slug}.{ext}");
+        let previous = {
+            let conn = self.conn.lock().unwrap();
+            match crate::scenario_pack::find_secondary_image_filename(
+                &conn,
+                pack_slug,
+                secondary_slug,
+            )? {
+                None => return Ok(None),
+                Some(name) => name,
+            }
+        };
+
+        let dir = self.uploads_root.join("secondaries").join(pack_slug);
+        fs::create_dir_all(&dir)
+            .with_context(|| format!("impossible de créer {}", dir.display()))?;
+        let path = dir.join(&filename);
+        fs::write(&path, bytes).with_context(|| format!("impossible d'écrire {}", path.display()))?;
+
+        let updated_at = now_unix();
+        let result = {
+            let conn = self.conn.lock().unwrap();
+            crate::scenario_pack::update_secondary(
+                &conn,
+                pack_slug,
+                secondary_slug,
+                name,
+                body_md,
+                Some((&filename, updated_at)),
+            )
+        };
+        match result {
+            Ok(value) => {
+                if value.is_none() {
+                    if previous.as_deref() != Some(filename.as_str()) {
+                        let _ = fs::remove_file(&path);
+                    }
+                } else if let Some(old) = previous.as_deref() {
+                    if old != filename {
+                        if let Ok(old_name) = safe_stored_filename(old) {
+                            let _ = fs::remove_file(dir.join(old_name));
+                        }
+                    }
+                }
+                Ok(value)
+            }
+            Err(error) => {
+                if previous.as_deref() != Some(filename.as_str()) {
+                    let _ = fs::remove_file(&path);
+                }
+                Err(error)
+            }
+        }
     }
 
     pub fn update_common_rule(
@@ -237,6 +351,65 @@ impl ScenarioStore {
     }
 }
 
+fn uploads_root_from_db(db_path: &Path) -> PathBuf {
+    db_path
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+        .unwrap_or_else(|| Path::new("."))
+        .join("uploads")
+}
+
+fn now_unix() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|duration| duration.as_secs() as i64)
+        .unwrap_or(0)
+}
+
+fn safe_path_slug(slug: &str) -> Result<()> {
+    if slug.is_empty()
+        || slug.len() > 80
+        || !slug
+            .chars()
+            .all(|ch| ch.is_ascii_alphanumeric() || ch == '-')
+    {
+        anyhow::bail!("identifiant invalide");
+    }
+    Ok(())
+}
+
+fn safe_stored_filename(name: &str) -> Result<String> {
+    let trimmed = name.trim();
+    if trimmed.is_empty()
+        || trimmed.contains('/')
+        || trimmed.contains('\\')
+        || trimmed.contains("..")
+        || trimmed.contains('\0')
+    {
+        anyhow::bail!("nom de fichier invalide");
+    }
+    Ok(trimmed.to_string())
+}
+
+fn sniff_secondary_image(bytes: &[u8]) -> Result<&'static str> {
+    if bytes.is_empty() {
+        anyhow::bail!("image vide");
+    }
+    if bytes.len() > MAX_SECONDARY_IMAGE_BYTES {
+        anyhow::bail!("l'image dépasse {MAX_SECONDARY_IMAGE_BYTES} octets");
+    }
+    let format = image::guess_format(bytes).map_err(|_| {
+        anyhow::anyhow!("format d'image non supporté (png, jpg, gif, webp)")
+    })?;
+    match format {
+        image::ImageFormat::Png => Ok("png"),
+        image::ImageFormat::Jpeg => Ok("jpg"),
+        image::ImageFormat::Gif => Ok("gif"),
+        image::ImageFormat::WebP => Ok("webp"),
+        _ => anyhow::bail!("format d'image non supporté (png, jpg, gif, webp)"),
+    }
+}
+
 fn row_to_scenario(row: &rusqlite::Row<'_>) -> rusqlite::Result<Scenario> {
     Ok(Scenario {
         id: row.get(0)?,
@@ -262,5 +435,82 @@ mod tests {
             strip_scenario_prefix("Le combat de l'esprit"),
             "Le combat de l'esprit"
         );
+    }
+
+    #[test]
+    fn update_secondary_overwrites_text_and_image() {
+        let dir = std::env::temp_dir().join(format!(
+            "poissonnerie-secondary-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let store = ScenarioStore::open(&dir.join("test.db")).unwrap();
+        let pack = crate::scenario_pack::DEFAULT_PACK_SLUG;
+
+        let png = encode_image(image::ImageFormat::Png);
+        let updated = store
+            .update_secondary(pack, "enlevement", "Enlèvement modifié", "nouveau texte", Some(&png))
+            .unwrap()
+            .unwrap();
+        assert_eq!(updated.name, "Enlèvement modifié");
+        assert_eq!(updated.body_md, "nouveau texte");
+        let image_url = updated.image_url.expect("image");
+        assert!(image_url.contains("/secondaries/enlevement/image?v="));
+
+        let png_path = store.secondary_image_path(pack, "enlevement").unwrap().unwrap();
+        assert_eq!(
+            png_path.extension().and_then(|ext| ext.to_str()),
+            Some("png")
+        );
+
+        let jpeg = encode_image(image::ImageFormat::Jpeg);
+        let replaced = store
+            .update_secondary(pack, "enlevement", "Encore", "texte jpeg", Some(&jpeg))
+            .unwrap()
+            .unwrap();
+        assert!(replaced.image_url.is_some());
+        assert!(!png_path.exists());
+        let jpeg_path = store.secondary_image_path(pack, "enlevement").unwrap().unwrap();
+        assert_eq!(
+            jpeg_path.extension().and_then(|ext| ext.to_str()),
+            Some("jpg")
+        );
+
+        let text_only = store
+            .update_secondary(pack, "enlevement", "Texte seul", "inchangé", None)
+            .unwrap()
+            .unwrap();
+        assert_eq!(text_only.name, "Texte seul");
+        assert_eq!(text_only.body_md, "inchangé");
+        assert!(text_only.image_url.is_some());
+        assert!(jpeg_path.exists());
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    fn encode_image(format: image::ImageFormat) -> Vec<u8> {
+        let image = if format == image::ImageFormat::Jpeg {
+            image::DynamicImage::ImageRgb8(image::RgbImage::from_pixel(
+                1,
+                1,
+                image::Rgb([4, 5, 6]),
+            ))
+        } else {
+            image::DynamicImage::ImageRgba8(image::RgbaImage::from_pixel(
+                1,
+                1,
+                image::Rgba([1, 2, 3, 255]),
+            ))
+        };
+        let mut bytes = Vec::new();
+        image
+            .write_to(&mut std::io::Cursor::new(&mut bytes), format)
+            .unwrap();
+        bytes
     }
 }

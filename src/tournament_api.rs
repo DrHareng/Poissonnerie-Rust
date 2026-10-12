@@ -1,8 +1,10 @@
 use std::collections::{HashMap, HashSet};
 
 use axum::{
-    extract::{Path, Query, State},
-    http::StatusCode,
+    body::Body,
+    extract::{DefaultBodyLimit, Multipart, Path, Query, State},
+    http::{header, StatusCode},
+    response::Response,
     routing::{get, post},
     Json,
 };
@@ -297,7 +299,16 @@ pub struct RankedPlayerWithStars {
     pub star_count: u32,
 }
 
+const SECONDARY_UPLOAD_LIMIT: usize = 9 * 1024 * 1024;
+
 pub fn tournament_routes() -> axum::Router<AppState> {
+    let secondary_updates = axum::Router::new()
+        .route(
+            "/api/scenario-packs/{slug}/secondaries/{secondary_slug}",
+            axum::routing::patch(update_pack_secondary),
+        )
+        .layer(DefaultBodyLimit::max(SECONDARY_UPLOAD_LIMIT));
+
     axum::Router::new()
         .route("/api/scenarios", get(list_scenarios))
         .route(
@@ -313,12 +324,12 @@ pub fn tournament_routes() -> axum::Router<AppState> {
             get(list_pack_secondaries),
         )
         .route(
-            "/api/scenario-packs/{slug}/common-rules",
-            get(list_pack_common_rules),
+            "/api/scenario-packs/{slug}/secondaries/{secondary_slug}/image",
+            get(serve_secondary_image),
         )
         .route(
-            "/api/scenario-packs/{slug}/secondaries/{secondary_slug}",
-            axum::routing::patch(update_pack_secondary),
+            "/api/scenario-packs/{slug}/common-rules",
+            get(list_pack_common_rules),
         )
         .route(
             "/api/scenario-packs/{slug}/common-rules/{rule_slug}",
@@ -337,6 +348,7 @@ pub fn tournament_routes() -> axum::Router<AppState> {
             get(list_recent_scenario_updates),
         )
         .route("/api/tournaments", get(list_tournaments).post(create_tournament))
+        .merge(secondary_updates)
         .route("/api/users", get(list_users))
         .route(
             "/api/tournaments/{id}",
@@ -546,18 +558,119 @@ async fn update_pack_secondary(
     State(state): State<AppState>,
     session: Session,
     Path((pack_slug, secondary_slug)): Path<(String, String)>,
-    Json(body): Json<crate::scenario_pack::UpdateNamedMdRequest>,
+    multipart: Multipart,
 ) -> Result<Json<crate::scenario_pack::SecondaryObjective>, ApiError> {
     require_admin(&state, &session).await?;
-    if body.name.trim().is_empty() {
+    let form = read_secondary_update(multipart).await?;
+    if form.name.trim().is_empty() {
         return Err(ApiError::bad_request("le nom est requis"));
     }
     state
         .scenarios
-        .update_secondary(&pack_slug, &secondary_slug, &body.name, &body.body_md)
+        .update_secondary(
+            &pack_slug,
+            &secondary_slug,
+            &form.name,
+            &form.body_md,
+            form.image.as_deref(),
+        )
         .map_err(|error| ApiError::bad_request(error.to_string()))?
         .map(Json)
         .ok_or_else(|| ApiError::bad_request("objectif secondaire introuvable"))
+}
+
+async fn serve_secondary_image(
+    State(state): State<AppState>,
+    Path((pack_slug, secondary_slug)): Path<(String, String)>,
+) -> Result<Response, ApiError> {
+    let path = state
+        .scenarios
+        .secondary_image_path(&pack_slug, &secondary_slug)
+        .map_err(|error| ApiError::bad_request(error.to_string()))?
+        .ok_or_else(|| ApiError::bad_request("image introuvable"))?;
+    let bytes = std::fs::read(&path).map_err(|error| ApiError::bad_request(error.to_string()))?;
+    image_response(bytes, image_content_type(&path))
+}
+
+struct SecondaryUpdateForm {
+    name: String,
+    body_md: String,
+    image: Option<Vec<u8>>,
+}
+
+async fn read_secondary_update(mut multipart: Multipart) -> Result<SecondaryUpdateForm, ApiError> {
+    let mut name = None;
+    let mut body_md = None;
+    let mut image = None;
+    while let Some(field) = multipart
+        .next_field()
+        .await
+        .map_err(|error| ApiError::bad_request(error.to_string()))?
+    {
+        match field.name() {
+            Some("name") => {
+                name = Some(
+                    field
+                        .text()
+                        .await
+                        .map_err(|error| ApiError::bad_request(error.to_string()))?,
+                );
+            }
+            Some("body_md") => {
+                body_md = Some(
+                    field
+                        .text()
+                        .await
+                        .map_err(|error| ApiError::bad_request(error.to_string()))?,
+                );
+            }
+            Some("image") => {
+                let bytes = field
+                    .bytes()
+                    .await
+                    .map_err(|error| ApiError::bad_request(error.to_string()))?;
+                if bytes.len() > crate::scenario::MAX_SECONDARY_IMAGE_BYTES {
+                    return Err(ApiError::bad_request(format!(
+                        "l'image dépasse {} octets",
+                        crate::scenario::MAX_SECONDARY_IMAGE_BYTES
+                    )));
+                }
+                if !bytes.is_empty() {
+                    image = Some(bytes.to_vec());
+                }
+            }
+            _ => {}
+        }
+    }
+    Ok(SecondaryUpdateForm {
+        name: name.ok_or_else(|| ApiError::bad_request("le nom est requis"))?,
+        body_md: body_md.ok_or_else(|| ApiError::bad_request("le texte est requis"))?,
+        image,
+    })
+}
+
+fn image_content_type(path: &std::path::Path) -> &'static str {
+    match path
+        .extension()
+        .and_then(|ext| ext.to_str())
+        .map(|ext| ext.to_ascii_lowercase())
+        .as_deref()
+    {
+        Some("png") => "image/png",
+        Some("jpg") | Some("jpeg") => "image/jpeg",
+        Some("gif") => "image/gif",
+        Some("webp") => "image/webp",
+        _ => "application/octet-stream",
+    }
+}
+
+fn image_response(bytes: Vec<u8>, content_type: &'static str) -> Result<Response, ApiError> {
+    Response::builder()
+        .status(StatusCode::OK)
+        .header(header::CONTENT_TYPE, content_type)
+        .header(header::CACHE_CONTROL, "public, max-age=86400")
+        .body(Body::from(bytes))
+        .map_err(|error| ApiError::bad_request(error.to_string()))
 }
 
 async fn update_pack_common_rule(

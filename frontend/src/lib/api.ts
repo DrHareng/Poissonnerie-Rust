@@ -747,18 +747,40 @@ export function updateScenarioPack(
   })
 }
 
-export function updatePackSecondary(
+export async function updatePackSecondary(
   packSlug: string,
   secondarySlug: string,
-  payload: { name: string; body_md: string },
+  payload: { name: string; body_md: string; image?: File | null },
 ): Promise<SecondaryObjective> {
-  return request<SecondaryObjective>(
-    `/api/scenario-packs/${encodeURIComponent(packSlug)}/secondaries/${encodeURIComponent(secondarySlug)}`,
+  const sessionId = getNativeSession()
+  const body = new FormData()
+  body.append('name', payload.name)
+  body.append('body_md', payload.body_md)
+  if (payload.image) body.append('image', payload.image)
+  const response = await fetch(
+    withBase(
+      `/api/scenario-packs/${encodeURIComponent(packSlug)}/secondaries/${encodeURIComponent(secondarySlug)}`,
+    ),
     {
+      ...defaultFetchOptions,
       method: 'PATCH',
-      body: JSON.stringify(payload),
+      headers: {
+        ...(sessionId ? { 'X-Poissonnerie-Session': sessionId } : {}),
+      },
+      body,
     },
   )
+  if (!response.ok) {
+    let message = `Erreur HTTP ${response.status}`
+    try {
+      const errorBody = (await response.json()) as ApiError
+      if (errorBody.error) message = errorBody.error
+    } catch {
+      // ignore JSON parse errors
+    }
+    throw new Error(message)
+  }
+  return (await response.json()) as SecondaryObjective
 }
 
 export function updatePackCommonRule(

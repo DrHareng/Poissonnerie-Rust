@@ -305,6 +305,12 @@ function secondaryBody(slug: string | null | undefined): string {
   return secondaryBySlug(slug)?.body_md ?? ''
 }
 
+function secondaryImage(slug: string | null | undefined): string | undefined {
+  const item = secondaryBySlug(slug)
+  if (item) return secondaryImageSrc(item)
+  return secondaryImageSrc(slug)
+}
+
 function resolveSecondary(slug: string | null | undefined): SecondaryObjective | null {
   return secondaryBySlug(slug)
 }
@@ -610,8 +616,8 @@ onMounted(loadMatch)
                 :body-md="secondaryBody(match.player1_chosen_secondary)"
               >
                 <img
-                  v-if="secondaryImageSrc(match.player1_chosen_secondary)"
-                  :src="secondaryImageSrc(match.player1_chosen_secondary)"
+                  v-if="secondaryImage(match.player1_chosen_secondary)"
+                  :src="secondaryImage(match.player1_chosen_secondary)"
                   :alt="secondaryLabel(match.player1_chosen_secondary)"
                   class="combat-esprit-hand-slot-image"
                 />
@@ -756,8 +762,8 @@ onMounted(loadMatch)
                 :body-md="secondaryBody(match.player2_chosen_secondary)"
               >
                 <img
-                  v-if="secondaryImageSrc(match.player2_chosen_secondary)"
-                  :src="secondaryImageSrc(match.player2_chosen_secondary)"
+                  v-if="secondaryImage(match.player2_chosen_secondary)"
+                  :src="secondaryImage(match.player2_chosen_secondary)"
                   :alt="secondaryLabel(match.player2_chosen_secondary)"
                   class="combat-esprit-hand-slot-image"
                 />

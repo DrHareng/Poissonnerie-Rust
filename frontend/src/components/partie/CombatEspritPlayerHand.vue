@@ -44,8 +44,8 @@ const pickSlots = computed(() =>
         :body-md="ban.body_md"
       >
         <img
-          v-if="secondaryImageSrc(ban.slug)"
-          :src="secondaryImageSrc(ban.slug)"
+          v-if="secondaryImageSrc(ban)"
+          :src="secondaryImageSrc(ban)"
           :alt="ban.name"
           class="combat-esprit-hand-slot-image combat-esprit-hand-slot-image--banned"
         />
@@ -72,8 +72,8 @@ const pickSlots = computed(() =>
         :body-md="card.body_md"
       >
         <img
-          v-if="secondaryImageSrc(card.slug)"
-          :src="secondaryImageSrc(card.slug)"
+          v-if="secondaryImageSrc(card)"
+          :src="secondaryImageSrc(card)"
           :alt="card.name"
           class="combat-esprit-hand-slot-image"
         />

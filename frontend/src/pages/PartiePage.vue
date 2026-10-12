@@ -313,10 +313,9 @@ const myChosenSecondary = computed(() => {
   return secondaries.value.find((item) => item.slug === slug) ?? null
 })
 
-const myChosenSecondaryImage = computed(() => {
-  const slug = myChosenSecondary.value?.slug
-  return slug ? secondaryImageSrc(slug) : undefined
-})
+const myChosenSecondaryImage = computed(() =>
+  secondaryImageSrc(myChosenSecondary.value),
+)
 
 const missionScenarioSlug = computed(() =>
   scenario.value?.mode !== 'other' ? (scenario.value?.slug ?? null) : null,
@@ -343,12 +342,13 @@ function toggleMissionMode() {
 function openMissionSecondaryViewer(slug: string) {
   const items: ImageViewerItem[] = []
   for (const card of myMissionCards.value) {
-    const src = secondaryImageSrc(card.slug)
+    const src = secondaryImageSrc(card)
     if (!src) continue
     items.push({ src, alt: card.name, caption: card.name })
   }
+  const card = myMissionCards.value.find((item) => item.slug === slug)
   const index = items.findIndex(
-    (item) => item.src === secondaryImageSrc(slug),
+    (item) => item.src === secondaryImageSrc(card ?? slug),
   )
   if (items.length === 0) return
   missionImageViewerItems.value = items

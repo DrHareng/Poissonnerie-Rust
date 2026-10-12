@@ -113,6 +113,7 @@ const stripItems = computed(() => {
       slug: slot.secondary.slug,
       name: slot.secondary.name,
       bodyMd: slot.secondary.body_md,
+      imageUrl: slot.secondary.image_url,
       status: slot.status,
       owner: slot.by
         ? draftPlayerIsSlot1(slot.by, firstPicker.value)
@@ -139,6 +140,7 @@ const stripItems = computed(() => {
         slug,
         name: secondary?.name,
         bodyMd: secondary?.body_md,
+        imageUrl: secondary?.image_url,
         status: 'banned' as const,
         owner: null,
       }
@@ -148,6 +150,7 @@ const stripItems = computed(() => {
         slug,
         name: secondary?.name,
         bodyMd: secondary?.body_md,
+        imageUrl: secondary?.image_url,
         status: 'taken' as const,
         owner: p1.has(slug) ? ('player1' as const) : ('player2' as const),
       }
@@ -156,6 +159,7 @@ const stripItems = computed(() => {
       slug,
       name: secondary?.name,
       bodyMd: secondary?.body_md,
+      imageUrl: secondary?.image_url,
       status: 'available' as const,
       owner: null,
     }
@@ -417,8 +421,8 @@ watch(
                 :body-md="player1Ban.body_md"
               >
                 <img
-                  v-if="secondaryImageSrc(player1Ban.slug)"
-                  :src="secondaryImageSrc(player1Ban.slug)"
+                  v-if="secondaryImageSrc(player1Ban)"
+                  :src="secondaryImageSrc(player1Ban)"
                   :alt="player1Ban.name"
                   class="combat-esprit-hand-slot-image combat-esprit-hand-slot-image--banned"
                 />
@@ -447,8 +451,8 @@ watch(
                 :body-md="card.body_md"
               >
                 <img
-                  v-if="secondaryImageSrc(card.slug)"
-                  :src="secondaryImageSrc(card.slug)"
+                  v-if="secondaryImageSrc(card)"
+                  :src="secondaryImageSrc(card)"
                   :alt="card.name"
                   class="combat-esprit-hand-slot-image"
                 />
@@ -496,8 +500,8 @@ watch(
                 :body-md="player2Ban.body_md"
               >
                 <img
-                  v-if="secondaryImageSrc(player2Ban.slug)"
-                  :src="secondaryImageSrc(player2Ban.slug)"
+                  v-if="secondaryImageSrc(player2Ban)"
+                  :src="secondaryImageSrc(player2Ban)"
                   :alt="player2Ban.name"
                   class="combat-esprit-hand-slot-image combat-esprit-hand-slot-image--banned"
                 />
@@ -526,8 +530,8 @@ watch(
                 :body-md="card.body_md"
               >
                 <img
-                  v-if="secondaryImageSrc(card.slug)"
-                  :src="secondaryImageSrc(card.slug)"
+                  v-if="secondaryImageSrc(card)"
+                  :src="secondaryImageSrc(card)"
                   :alt="card.name"
                   class="combat-esprit-hand-slot-image"
                 />

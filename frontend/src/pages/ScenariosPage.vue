@@ -28,6 +28,7 @@ import {
   type SecondaryObjective,
 } from '@/types/elo'
 import AdminContentEditor from '@/components/AdminContentEditor.vue'
+import SecondaryObjectiveEditor from '@/components/SecondaryObjectiveEditor.vue'
 import ImageViewer, {
   type ImageViewerItem,
 } from '@/components/ImageViewer.vue'
@@ -121,7 +122,7 @@ const displayedSecondaries = computed(() => {
 
 const secondaryViewerItems = computed((): ImageViewerItem[] =>
   displayedSecondaries.value.flatMap((secondary) => {
-    const src = secondaryImageSrc(secondary.slug)
+    const src = secondaryImageSrc(secondary)
     if (!src) return []
     return [
       {
@@ -241,7 +242,8 @@ function scrollActiveScenarioIntoView() {
 }
 
 function openSecondaryViewer(slug: string) {
-  const src = secondaryImageSrc(slug)
+  const secondary = displayedSecondaries.value.find((item) => item.slug === slug)
+  const src = secondary ? secondaryImageSrc(secondary) : undefined
   if (!src) return
   const index = secondaryViewerItems.value.findIndex((item) => item.src === src)
   if (index < 0) return
@@ -314,11 +316,12 @@ async function savePreamble(payload: { body: string }) {
 
 async function saveSecondary(
   slug: string,
-  payload: { name?: string; body: string },
+  payload: { name?: string; body: string; image: File | null },
 ) {
   const updated = await updatePackSecondary(DEFAULT_SCENARIO_PACK_SLUG, slug, {
     name: payload.name ?? '',
     body_md: payload.body,
+    image: payload.image,
   })
   secondaries.value = secondaries.value.map((item) =>
     item.slug === slug ? updated : item,
@@ -712,31 +715,41 @@ watch(
             v-else-if="secondaryViewMode === 'cartes'"
             class="secondary-card-grid pb-4"
           >
-            <button
+            <SecondaryObjectiveEditor
               v-for="secondary in displayedSecondaries"
               :id="secondary.slug"
               :key="secondary.id"
-              type="button"
-              class="neon-panel secondary-card shrink-0 overflow-hidden p-0 text-left disabled:cursor-default disabled:opacity-100"
-              :class="{
-                'secondary-card--clickable': !!secondaryImageSrc(secondary.slug),
-              }"
-              :disabled="!secondaryImageSrc(secondary.slug)"
-              @click="openSecondaryViewer(secondary.slug)"
+              expand
+              :can-edit="canEditContent"
+              :name="secondary.name"
+              :body="secondary.body_md"
+              :image-src="secondaryImageSrc(secondary)"
+              :rules="commonRules"
+              :persist="(payload) => saveSecondary(secondary.slug, payload)"
             >
-              <img
-                v-if="secondaryImageSrc(secondary.slug)"
-                :src="secondaryImageSrc(secondary.slug)!"
-                :alt="secondary.name"
-                class="secondary-card-image"
-              />
-              <p
-                v-else
-                class="flex aspect-[5/7] items-center justify-center p-4 text-center text-sm font-semibold"
+              <button
+                type="button"
+                class="neon-panel secondary-card w-full shrink-0 overflow-hidden p-0 text-left disabled:cursor-default disabled:opacity-100"
+                :class="{
+                  'secondary-card--clickable': !!secondaryImageSrc(secondary),
+                }"
+                :disabled="!secondaryImageSrc(secondary)"
+                @click="openSecondaryViewer(secondary.slug)"
               >
-                {{ secondary.name }}
-              </p>
-            </button>
+                <img
+                  v-if="secondaryImageSrc(secondary)"
+                  :src="secondaryImageSrc(secondary)!"
+                  :alt="secondary.name"
+                  class="secondary-card-image"
+                />
+                <p
+                  v-else
+                  class="flex aspect-[5/7] items-center justify-center p-4 text-center text-sm font-semibold"
+                >
+                  {{ secondary.name }}
+                </p>
+              </button>
+            </SecondaryObjectiveEditor>
           </div>
 
           <div v-else class="grid gap-3 pb-4">
@@ -750,16 +763,17 @@ watch(
                 <CardTitle class="text-lg">{{ secondary.name }}</CardTitle>
               </CardHeader>
               <CardContent>
-                <AdminContentEditor
+                <SecondaryObjectiveEditor
                   :can-edit="canEditContent"
                   :name="secondary.name"
                   :body="secondary.body_md"
+                  :image-src="secondaryImageSrc(secondary)"
                   :rows="8"
                   :rules="commonRules"
                   :persist="(payload) => saveSecondary(secondary.slug, payload)"
                 >
                   <MarkdownContent :source="secondary.body_md" />
-                </AdminContentEditor>
+                </SecondaryObjectiveEditor>
               </CardContent>
             </Card>
           </div>
