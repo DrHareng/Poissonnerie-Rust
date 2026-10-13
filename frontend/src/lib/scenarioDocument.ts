@@ -12,6 +12,7 @@ export type TextStyle = {
 
 export type Inline =
   | { kind: 'text'; text: string; style: TextStyle }
+  | { kind: 'rule'; slug: string; text: string; style: TextStyle }
   | { kind: 'break' }
   | { kind: 'image'; src: string; alt: string }
 
@@ -21,7 +22,14 @@ export type ListItem = {
 }
 
 export type Block =
-  | { kind: 'heading'; level: 3; inlines: Inline[] }
+  | {
+      kind: 'heading'
+      level: 1 | 2 | 3
+      inlines: Inline[]
+      /** Cible des liens internes (table des matières, mots-clés de règle). */
+      anchor?: string
+      pageBreakBefore?: boolean
+    }
   | { kind: 'paragraph'; inlines: Inline[]; note?: boolean }
   | { kind: 'list'; items: ListItem[] }
   | { kind: 'image'; src: string; alt: string }
@@ -66,6 +74,12 @@ export function markColorRgb(color: MarkColor | undefined): [number, number, num
   ]
 }
 
+/** Nom d’ancre Word/PDF : lettre initiale, 40 caractères maximum. */
+export function ruleAnchorId(slug: string): string {
+  const safe = slug.replace(/[^A-Za-z0-9_]/g, '_').replace(/_+/g, '_')
+  return `rule_${safe || 'x'}`.slice(0, 40)
+}
+
 export function scenarioFilename(title: string): string {
   const cleaned = title
     .replace(/[<>:"/\\|?*\u0000-\u001f]/g, '')
@@ -93,6 +107,7 @@ export function fittedSize(
 export function buildScenarioDocument(
   scenario: ScenarioDetail,
   rules: CommonRule[],
+  options?: { includeCommonRules?: boolean },
 ): ScenarioDoc {
   const labels = new Map<string, string>()
   for (const rule of rules) labels.set(rule.slug, rule.name)
@@ -133,7 +148,12 @@ export function buildScenarioDocument(
   }
   if (scenario.exclusion_zones_md?.trim() || scenario.exclusion_rule?.body_md) {
     deployment.push(
-      plainHeading(scenario.exclusion_rule?.name ?? 'Zones d’exclusion'),
+      plainHeading(
+        scenario.exclusion_rule?.name ?? 'Zones d’exclusion',
+        scenario.exclusion_rule
+          ? ruleAnchorId(scenario.exclusion_rule.slug)
+          : undefined,
+      ),
     )
     if (scenario.exclusion_zones_md?.trim()) {
       deployment.push(
@@ -156,13 +176,13 @@ export function buildScenarioDocument(
   add('Éléments de scénario', scenario.elements_md)
   add('Règles spéciales', scenario.special_rules_md)
 
-  if (scenario.common_rules.length > 0) {
+  if (options?.includeCommonRules !== false && scenario.common_rules.length > 0) {
     const blocks: Block[] = []
     const sorted = [...scenario.common_rules].sort((a, b) =>
       a.name.localeCompare(b.name, 'fr', { sensitivity: 'base' }),
     )
     for (const rule of sorted) {
-      blocks.push(plainHeading(rule.name))
+      blocks.push(plainHeading(rule.name, ruleAnchorId(rule.slug)))
       blocks.push(...parseScenarioMarkdown(rule.body_md, ruleLabel))
     }
     if (blocks.length > 0) sections.push({ title: 'Règles communes', blocks })
@@ -179,8 +199,15 @@ export async function loadScenarioImages(doc: ScenarioDoc): Promise<{
   images: Map<string, ImageAsset>
   missing: number
 }> {
+  return loadBlocksImages(doc.sections.flatMap((section) => section.blocks))
+}
+
+export async function loadBlocksImages(blocks: Block[]): Promise<{
+  images: Map<string, ImageAsset>
+  missing: number
+}> {
   const images = new Map<string, ImageAsset>()
-  const srcs = collectImageSrcs(doc)
+  const srcs = collectBlocksImageSrcs(blocks)
   const loaded = await Promise.all(
     srcs.map(async (src) => ({ src, asset: await loadImageAsset(src) })),
   )
@@ -210,15 +237,16 @@ export function downloadBlob(blob: Blob, filename: string) {
   URL.revokeObjectURL(url)
 }
 
-function plainHeading(text: string): Block {
+function plainHeading(text: string, anchor?: string): Block {
   return {
     kind: 'heading',
     level: 3,
+    anchor,
     inlines: [{ kind: 'text', text, style: { bold: true } }],
   }
 }
 
-function parseScenarioMarkdown(
+export function parseScenarioMarkdown(
   source: string,
   ruleLabel?: (slug: string) => string,
 ): Block[] {
@@ -342,7 +370,7 @@ function parseInline(
     (_full, slugRaw: string, labelRaw?: string) => {
       const slug = slugRaw.trim()
       const label = labelRaw?.trim() || ruleLabel?.(slug) || slug
-      return keep({ kind: 'text', text: label, style: { bold: true } })
+      return keep({ kind: 'rule', slug, text: label, style: { bold: true } })
     },
   )
 
@@ -444,22 +472,20 @@ function tokenizeMarked(work: string, slots: Inline[]): Inline[] {
   return out
 }
 
-function collectImageSrcs(doc: ScenarioDoc): string[] {
+function collectBlocksImageSrcs(blocks: Block[]): string[] {
   const srcs = new Set<string>()
   const visit = (inlines: Inline[]) => {
     for (const inline of inlines) {
       if (inline.kind === 'image') srcs.add(inline.src)
     }
   }
-  for (const section of doc.sections) {
-    for (const block of section.blocks) {
-      if (block.kind === 'image') srcs.add(block.src)
-      if (block.kind === 'paragraph' || block.kind === 'heading') {
-        visit(block.inlines)
-      }
-      if (block.kind === 'list') {
-        for (const item of block.items) visit(item.inlines)
-      }
+  for (const block of blocks) {
+    if (block.kind === 'image') srcs.add(block.src)
+    if (block.kind === 'paragraph' || block.kind === 'heading') {
+      visit(block.inlines)
+    }
+    if (block.kind === 'list') {
+      for (const item of block.items) visit(item.inlines)
     }
   }
   return [...srcs]

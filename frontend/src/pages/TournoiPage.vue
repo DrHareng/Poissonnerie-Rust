@@ -3205,7 +3205,7 @@ onMounted(refresh)
           </Card>
 
           <Card
-            v-if="isAdmin && !detail.pools_finalized_at"
+            v-if="isAdmin"
             class="neon-panel"
           >
             <CardHeader>
@@ -3215,15 +3215,20 @@ onMounted(refresh)
               <CardDescription>
                 <template v-if="tournamentStructure === 'swiss'">
                   {{ poolScenarioSlots.length }} mission(s) pour les rondes suisses.
+                  Le pack reprend les scénarios choisis, dans l’ordre des rondes.
+                </template>
+                <template v-else-if="!detail.pools_finalized_at">
+                  À définir avant de générer les matchs de poule (5 missions A–E).
+                  Le pack reprend les scénarios choisis, dans l’ordre des missions.
                 </template>
                 <template v-else>
-                  À définir avant de générer les matchs de poule (5 missions A–E).
+                  Missions des poules. Le pack reprend les scénarios choisis, dans l’ordre.
                 </template>
               </CardDescription>
             </CardHeader>
             <CardContent>
               <TournamentScenarioPicker
-                title="Missions A–E"
+                :pack-title="detail.name"
                 :slots="poolScenarioSlots"
                 :values="detail.pool_scenarios ?? []"
                 :can-edit="canEditPoolScenarios"

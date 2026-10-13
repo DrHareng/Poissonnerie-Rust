@@ -1,8 +1,10 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
 import { Dices, RefreshCw } from '@lucide/vue'
+import { toast } from 'vue-sonner'
 import { fetchScenarioPack } from '@/lib/api'
 import { shufflePick } from '@/lib/shufflePick'
+import { downloadMissionPack } from '@/lib/tournamentPackDownload'
 import type { ScenarioSummary, TournamentScenarioSlot } from '@/types/elo'
 import { DEFAULT_SCENARIO_PACK_SLUG } from '@/types/elo'
 import { Button } from '@/components/ui/button'
@@ -16,8 +18,10 @@ import {
 } from '@/components/ui/select'
 
 const props = defineProps<{
-  title: string
+  title?: string
   description?: string
+  /** Nom utilisé pour la page de garde du pack de missions. */
+  packTitle?: string
   slots: { key: string; label: string }[]
   values: TournamentScenarioSlot[]
   canEdit: boolean
@@ -30,8 +34,25 @@ const emit = defineEmits<{
 
 const scenarios = ref<ScenarioSummary[]>([])
 const loading = ref(true)
+const exporting = ref<'docx' | 'pdf' | null>(null)
 const localIds = ref<Record<string, string>>({})
 const didAutoDraw = ref(false)
+
+const selectedSlugs = computed(() => {
+  const byId = new Map(scenarios.value.map((scenario) => [String(scenario.id), scenario.slug]))
+  return props.slots.flatMap((slot) => {
+    const slug = byId.get(localIds.value[slot.key] ?? '')
+    return slug ? [slug] : []
+  })
+})
+
+const canDownloadPack = computed(
+  () =>
+    !!props.packTitle?.trim()
+    && !loading.value
+    && !exporting.value
+    && selectedSlugs.value.length > 0,
+)
 
 const bySlot = computed(() => {
   const map = new Map<string, TournamentScenarioSlot>()
@@ -115,6 +136,31 @@ function save() {
   emit('save', ids)
 }
 
+async function downloadPack(format: 'docx' | 'pdf') {
+  const name = props.packTitle?.trim()
+  const slugs = [...selectedSlugs.value]
+  if (!name || slugs.length === 0 || exporting.value) return
+  exporting.value = format
+  try {
+    const missing = await downloadMissionPack(format, name, slugs)
+    if (missing > 0) {
+      toast.message(
+        missing === 1
+          ? 'Une image n’a pas pu être incluse.'
+          : 'Certaines images n’ont pas pu être incluses.',
+      )
+    }
+  } catch (error) {
+    toast.error(
+      error instanceof Error
+        ? error.message
+        : 'Impossible de générer le document',
+    )
+  } finally {
+    exporting.value = null
+  }
+}
+
 function maybeAutoDraw() {
   if (!props.canEdit || loading.value || didAutoDraw.value) return
   if (scenarios.value.length === 0) return
@@ -172,15 +218,21 @@ watch(
 </script>
 
 <template>
-  <div class="grid gap-3 rounded-lg border p-3">
-    <div class="flex flex-wrap items-start justify-between gap-2">
-      <div>
-        <h3 class="font-semibold">{{ title }}</h3>
+  <div
+    class="grid gap-3"
+    :class="{ 'rounded-lg border p-3': title || description }"
+  >
+    <div
+      v-if="title || description || canEdit"
+      class="flex flex-wrap items-start justify-between gap-2"
+    >
+      <div v-if="title || description">
+        <h3 v-if="title" class="font-semibold">{{ title }}</h3>
         <p v-if="description" class="text-sm text-muted-foreground">
           {{ description }}
         </p>
       </div>
-      <div v-if="canEdit" class="flex flex-wrap gap-2">
+      <div v-if="canEdit" class="ml-auto flex flex-wrap gap-2">
         <Button
           size="sm"
           variant="outline"
@@ -236,6 +288,27 @@ watch(
           {{ scenarioName(localIds[slot.key] ?? '') }}
         </p>
       </div>
+    </div>
+
+    <div v-if="packTitle" class="flex flex-wrap gap-2">
+      <Button
+        type="button"
+        size="sm"
+        variant="outline"
+        :disabled="!canDownloadPack"
+        @click="downloadPack('docx')"
+      >
+        {{ exporting === 'docx' ? 'Préparation…' : 'Pack Word' }}
+      </Button>
+      <Button
+        type="button"
+        size="sm"
+        variant="outline"
+        :disabled="!canDownloadPack"
+        @click="downloadPack('pdf')"
+      >
+        {{ exporting === 'pdf' ? 'Préparation…' : 'Pack PDF' }}
+      </Button>
     </div>
   </div>
 </template>

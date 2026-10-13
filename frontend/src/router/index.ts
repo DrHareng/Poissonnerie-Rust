@@ -13,6 +13,7 @@ import TournoiPage from '@/pages/TournoiPage.vue'
 import PartiePage from '@/pages/PartiePage.vue'
 import RessourcesPage from '@/pages/RessourcesPage.vue'
 import AdminPage from '@/pages/AdminPage.vue'
+import AdminPackPage from '@/pages/AdminPackPage.vue'
 import TtsMapReportsPage from '@/pages/TtsMapReportsPage.vue'
 import NotFoundPage from '@/pages/NotFoundPage.vue'
 import { pageTitle } from '@/lib/pageTitle'
@@ -156,6 +157,12 @@ export const router = createRouter({
       name: 'admin',
       component: AdminPage,
       meta: { title: 'Administration' },
+    },
+    {
+      path: '/admin/pack',
+      name: 'admin-pack',
+      component: AdminPackPage,
+      meta: { title: 'Pack de missions' },
     },
     {
       path: '/admin/signalements',

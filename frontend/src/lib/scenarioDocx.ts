@@ -1,19 +1,24 @@
 import {
   AlignmentType,
+  Bookmark,
   Document,
   Footer,
   HeadingLevel,
   ImageRun,
+  InternalHyperlink,
   Packer,
   PageNumber,
   Paragraph,
   TextRun,
+  UnderlineType,
+  type ParagraphChild,
 } from 'docx'
 import {
   downloadBlob,
   fittedSize,
   loadScenarioImages,
   markColorHex,
+  ruleAnchorId,
   scenarioFilename,
   visibleBlocks,
   type ImageAsset,
@@ -32,6 +37,7 @@ export async function downloadScenarioDocx(doc: ScenarioDoc): Promise<number> {
 }
 
 function renderDocx(doc: ScenarioDoc, images: Map<string, ImageAsset>): Document {
+  const anchors = collectAnchors(doc)
   const children: Paragraph[] = [
     new Paragraph({
       heading: HeadingLevel.TITLE,
@@ -89,7 +95,7 @@ function renderDocx(doc: ScenarioDoc, images: Map<string, ImageAsset>): Document
         continue
       }
       if (block.kind === 'image') {
-        children.push(imageParagraph(block.src, block.alt, images, false))
+        children.push(docxImageParagraph(block.src, block.alt, images, false))
         continue
       }
       if (block.kind === 'heading') {
@@ -97,7 +103,10 @@ function renderDocx(doc: ScenarioDoc, images: Map<string, ImageAsset>): Document
           new Paragraph({
             heading: HeadingLevel.HEADING_2,
             spacing: { before: 200, after: 60 },
-            children: runs(block.inlines, images, { size: 24, bold: true }),
+            children: bookmark(
+              block.anchor,
+              docxRuns(block.inlines, images, anchors, { size: 24, bold: true }),
+            ),
           }),
         )
         continue
@@ -110,7 +119,7 @@ function renderDocx(doc: ScenarioDoc, images: Map<string, ImageAsset>): Document
               indent: { left: 420 * (item.depth + 1) },
               children: [
                 new TextRun({ text: '• ', font: FONT, size: 22 }),
-                ...runs(item.inlines, images, { size: 22 }),
+                ...docxRuns(item.inlines, images, anchors, { size: 22 }),
               ],
             }),
           )
@@ -120,7 +129,7 @@ function renderDocx(doc: ScenarioDoc, images: Map<string, ImageAsset>): Document
       children.push(
         new Paragraph({
           spacing: { after: 120 },
-          children: runs(block.inlines, images, {
+          children: docxRuns(block.inlines, images, anchors, {
             size: 22,
             note: block.note,
           }),
@@ -162,7 +171,25 @@ function renderDocx(doc: ScenarioDoc, images: Map<string, ImageAsset>): Document
   })
 }
 
-function imageParagraph(
+function collectAnchors(doc: ScenarioDoc): Set<string> {
+  const anchors = new Set<string>()
+  for (const section of doc.sections) {
+    for (const block of section.blocks) {
+      if (block.kind === 'heading' && block.anchor) anchors.add(block.anchor)
+    }
+  }
+  return anchors
+}
+
+export function bookmark(
+  anchor: string | undefined,
+  children: ParagraphChild[],
+): ParagraphChild[] {
+  if (!anchor) return children
+  return [new Bookmark({ id: anchor, children })]
+}
+
+export function docxImageParagraph(
   src: string,
   alt: string,
   images: Map<string, ImageAsset>,
@@ -202,12 +229,13 @@ function imageParagraph(
   })
 }
 
-function runs(
+export function docxRuns(
   inlines: Inline[],
   images: Map<string, ImageAsset>,
-  options: { size: number; note?: boolean; bold?: boolean },
-): (TextRun | ImageRun)[] {
-  const result: (TextRun | ImageRun)[] = []
+  anchors: Set<string>,
+  options: { size: number; note?: boolean; bold?: boolean; color?: string },
+): ParagraphChild[] {
+  const result: ParagraphChild[] = []
   for (const inline of inlines) {
     if (inline.kind === 'break') {
       result.push(new TextRun({ break: 1 }))
@@ -238,6 +266,10 @@ function runs(
       )
       continue
     }
+    if (inline.kind === 'rule') {
+      result.push(ruleRun(inline.text, inline.slug, anchors, options))
+      continue
+    }
     const style: TextStyle = {
       ...inline.style,
       italic: inline.style.italic || options.note,
@@ -250,7 +282,7 @@ function runs(
         italics: style.italic,
         font: FONT,
         size: options.size,
-        color: markColorHex(style.color) ?? '1A1F24',
+        color: markColorHex(style.color) ?? options.color ?? '1A1F24',
       }),
     )
   }
@@ -258,4 +290,27 @@ function runs(
     result.push(new TextRun({ text: '', font: FONT, size: options.size }))
   }
   return result
+}
+
+function ruleRun(
+  text: string,
+  slug: string,
+  anchors: Set<string>,
+  options: { size: number; note?: boolean },
+): ParagraphChild {
+  const anchor = ruleAnchorId(slug)
+  const linked = anchors.has(anchor)
+  const run = new TextRun({
+    text,
+    bold: true,
+    italics: options.note,
+    font: FONT,
+    size: options.size,
+    color: linked ? '5C6570' : '1A1F24',
+    underline: linked
+      ? { type: UnderlineType.DOTTED, color: '5C6570' }
+      : undefined,
+  })
+  if (!linked) return run
+  return new InternalHyperlink({ anchor, children: [run] })
 }

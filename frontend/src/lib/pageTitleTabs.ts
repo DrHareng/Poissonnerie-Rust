@@ -58,6 +58,11 @@ export const adminTabs: PageTitleTab[] = [
     activeNames: ['admin'],
   },
   {
+    to: { name: 'admin-pack' },
+    label: 'Pack de missions',
+    activeNames: ['admin-pack'],
+  },
+  {
     to: { name: 'admin-tts-reports' },
     label: 'Signalements TTS',
     activeNames: ['admin-tts-reports'],

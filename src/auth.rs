@@ -11,7 +11,7 @@ const DISCORD_USER_URL: &str = "https://discord.com/api/users/@me";
 const DISCORD_USER_GUILDS_URL: &str = "https://discord.com/api/users/@me/guilds";
 const DISCORD_OAUTH_SCOPES: &str = "identify guilds";
 const DISCORD_GUILDS_PAGE_SIZE: usize = 200;
-const DEFAULT_DISCORD_GUILD_ID: &str = "299262973241720832";
+const DEFAULT_DISCORD_GUILD_IDS: &[&str] = &["299262973241720832", "1046515647514951781"];
 
 pub const SESSION_OAUTH_MOBILE: &str = "oauth_mobile";
 pub const SESSION_USER_ID: &str = "user_id";
@@ -74,7 +74,7 @@ pub struct AuthConfig {
     pub client_secret: String,
     pub redirect_uri: String,
     pub frontend_url: String,
-    pub required_guild_id: String,
+    pub required_guild_ids: Vec<String>,
 }
 
 impl AuthConfig {
@@ -88,8 +88,7 @@ impl AuthConfig {
                 .unwrap_or_else(|_| "http://127.0.0.1:3000/api/auth/callback".into()),
             frontend_url: std::env::var("FRONTEND_URL")
                 .unwrap_or_else(|_| "http://127.0.0.1:5173".into()),
-            required_guild_id: std::env::var("DISCORD_GUILD_ID")
-                .unwrap_or_else(|_| DEFAULT_DISCORD_GUILD_ID.into()),
+            required_guild_ids: required_guild_ids_from_env(),
         })
     }
 
@@ -336,7 +335,7 @@ async fn exchange_code(auth: &AuthConfig, code: &str) -> Result<DiscordProfile> 
         .context("réponse token Discord invalide")?;
     let access_token = token_response.access_token;
 
-    ensure_required_guild_membership(&client, &access_token, &auth.required_guild_id).await?;
+    ensure_required_guild_membership(&client, &access_token, &auth.required_guild_ids).await?;
 
     let discord_user = client
         .get(DISCORD_USER_URL)
@@ -363,10 +362,28 @@ async fn exchange_code(auth: &AuthConfig, code: &str) -> Result<DiscordProfile> 
     })
 }
 
+fn required_guild_ids_from_env() -> Vec<String> {
+    let from_env = std::env::var("DISCORD_GUILD_ID").unwrap_or_default();
+    let ids: Vec<String> = from_env
+        .split(',')
+        .map(str::trim)
+        .filter(|id| !id.is_empty())
+        .map(str::to_string)
+        .collect();
+    if ids.is_empty() {
+        DEFAULT_DISCORD_GUILD_IDS
+            .iter()
+            .map(|id| (*id).to_string())
+            .collect()
+    } else {
+        ids
+    }
+}
+
 async fn ensure_required_guild_membership(
     client: &Client,
     access_token: &str,
-    required_guild_id: &str,
+    required_guild_ids: &[String],
 ) -> Result<()> {
     let mut after: Option<String> = None;
 
@@ -397,19 +414,22 @@ async fn ensure_required_guild_membership(
         let guilds = serde_json::from_str::<Vec<DiscordGuildResponse>>(&body)
             .context("réponse serveurs Discord invalide")?;
 
-        if guilds.iter().any(|guild| guild.id == required_guild_id) {
+        if guilds
+            .iter()
+            .any(|guild| required_guild_ids.iter().any(|id| guild.id == *id))
+        {
             return Ok(());
         }
 
         if guilds.len() < DISCORD_GUILDS_PAGE_SIZE {
             anyhow::bail!(
-                "connexion refusée : vous devez être membre du serveur Discord Poissonnerie"
+                "connexion refusée : vous devez être membre d'au moins un des serveurs Discord requis"
             );
         }
 
         let Some(last) = guilds.last() else {
             anyhow::bail!(
-                "connexion refusée : vous devez être membre du serveur Discord Poissonnerie"
+                "connexion refusée : vous devez être membre d'au moins un des serveurs Discord requis"
             );
         };
         after = Some(last.id.clone());
