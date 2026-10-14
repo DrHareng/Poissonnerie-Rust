@@ -3,6 +3,7 @@ import { computed } from 'vue'
 import { useRoute } from 'vue-router'
 import {
   CircleAlert,
+  ClipboardCheck,
   Eye,
   LogIn,
   LogOut,
@@ -22,6 +23,7 @@ import {
 import { useAuth } from '@/composables/useAuth'
 import { useAdminEditMode } from '@/composables/useAdminEditMode'
 import { useMyInProgressMatches } from '@/composables/useMyInProgressMatches'
+import { usePendingConfirmations } from '@/composables/usePendingConfirmations'
 import { useTtsMapReportCount } from '@/composables/useTtsMapReportCount'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
@@ -36,10 +38,18 @@ const {
   menuRoute: inProgressRoute,
 } = useMyInProgressMatches()
 const { count: ttsReportCount } = useTtsMapReportCount()
+const {
+  count: pendingConfirmationCount,
+  menuLabel: pendingConfirmationLabel,
+  menuRoute: pendingConfirmationRoute,
+} = usePendingConfirmations()
 const reportsRoute = { name: 'admin-tts-reports' as const }
 
 const profileBadgeCount = computed(
-  () => inProgressCount.value + ttsReportCount.value,
+  () =>
+    inProgressCount.value
+    + ttsReportCount.value
+    + pendingConfirmationCount.value,
 )
 
 const partieCta = computed(() => {
@@ -124,6 +134,12 @@ async function handleLogout() {
                     {{ inProgressMenuLabel }}
                   </RouterLink>
                 </DropdownMenuItem>
+                <DropdownMenuItem v-if="pendingConfirmationRoute" as-child>
+                  <RouterLink :to="pendingConfirmationRoute" :class="menuItemClass">
+                    <ClipboardCheck class="size-4" />
+                    {{ pendingConfirmationLabel }}
+                  </RouterLink>
+                </DropdownMenuItem>
                 <DropdownMenuItem v-if="isAdmin" as-child>
                   <RouterLink :to="reportsRoute" :class="menuItemClass">
                     <CircleAlert class="size-4" />
@@ -143,7 +159,7 @@ async function handleLogout() {
                   </RouterLink>
                 </DropdownMenuItem>
                 <DropdownMenuSeparator
-                  v-if="hasPlayer || inProgressRoute || isAdmin || isEditMode"
+                  v-if="hasPlayer || inProgressRoute || pendingConfirmationRoute || isAdmin || isEditMode"
                   class="topbar-user-menu-separator"
                 />
                 <DropdownMenuItem :class="menuItemClass" @select="handleLogout">

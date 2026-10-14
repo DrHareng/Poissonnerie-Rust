@@ -75,7 +75,7 @@ const badgeMinCh = computed(() => scoreBadgeMinCh([props.match]))
         :badge-min-ch="badgeMinCh"
       />
       <MatchResultBadges
-        v-else-if="match.status === 'submitted'"
+        v-else-if="match.status === 'submitted' && match.is_forfeit"
         :match="{
           player1_objectives: 0,
           player2_objectives: 0,
@@ -83,7 +83,7 @@ const badgeMinCh = computed(() => scoreBadgeMinCh([props.match]))
           player2_survivors: 0,
           outcome: null,
         }"
-        pending-label="À confirmer"
+        pending-label="Forfait"
         :badge-min-ch="badgeMinCh"
       />
       <MatchResultBadges

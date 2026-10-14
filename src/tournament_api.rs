@@ -21,10 +21,19 @@ use crate::{
 
 use crate::tournament_store::{
     AdminRegisterRequest, CompleteRegistrationListsRequest, CreateTournamentRequest, ForfeitRequest,
-    RegisterRequest, RerollScenarioRequest, SetBracketScenarioPoolRequest, SetPoolScenariosRequest,
-    SetupPoolsRequest, SubmitMatchRequest, UpdateBracketListsRequest,
+    MatchActor, RegisterRequest, RerollScenarioRequest, SetBracketScenarioPoolRequest,
+    SetPoolScenariosRequest, SetupPoolsRequest, SubmitMatchRequest, UpdateBracketListsRequest,
     UpdateTournamentDetailsRequest, UpdateTournamentFormatRequest,
 };
+
+#[derive(Debug, Serialize)]
+struct PendingConfirmationItem {
+    match_id: i64,
+    tournament_id: i64,
+    tournament_name: String,
+    opponent_name: String,
+    opponent_display_name: String,
+}
 
 async fn require_user(state: &AppState, session: &Session) -> Result<User, ApiError> {
     auth::current_user(state.users.as_ref(), session)
@@ -461,6 +470,10 @@ pub fn tournament_routes() -> axum::Router<AppState> {
         .route(
             "/api/tournament-matches/{id}/correct",
             post(correct_tournament_match),
+        )
+        .route(
+            "/api/me/pending-confirmations",
+            get(list_pending_confirmations),
         )
         .route(
             "/api/players/{name}/tournaments",
@@ -1975,15 +1988,57 @@ async fn correct_tournament_match(
     Path(id): Path<i64>,
     Json(payload): Json<SubmitMatchRequest>,
 ) -> Result<Json<crate::tournament::TournamentMatch>, ApiError> {
-    require_admin(&state, &session).await?;
-    let tm = apply_tournament_match_correction(&state, id, &payload)?;
+    let user = require_user(&state, &session).await?;
+    let player_name = linked_player_name(&state, &user)?;
+    let actor = MatchActor {
+        user_id: user.id,
+        is_admin: user.is_admin,
+        player_name,
+    };
+    let tm = apply_tournament_match_correction(&state, id, &payload, Some(&actor))?;
     Ok(Json(tm))
+}
+
+async fn list_pending_confirmations(
+    State(state): State<AppState>,
+    session: Session,
+) -> Result<Json<Vec<PendingConfirmationItem>>, ApiError> {
+    let user = require_user(&state, &session).await?;
+    let Some(player_name) = linked_player_name(&state, &user)? else {
+        return Ok(Json(Vec::new()));
+    };
+    let items = state
+        .tournaments
+        .list_pending_confirmations(&player_name, user.id)
+        .map_err(|error| ApiError::bad_request(error.to_string()))?;
+
+    let board = state.board.lock().unwrap();
+    let resolver = crate::display_name::PlayerDisplayResolver::new(&board, state.users.as_ref());
+    let items = items
+        .into_iter()
+        .map(|item| PendingConfirmationItem {
+            match_id: item.match_id,
+            tournament_id: item.tournament_id,
+            tournament_name: item.tournament_name,
+            opponent_name: item.opponent_name.clone(),
+            opponent_display_name: resolver.resolve(&item.opponent_name),
+        })
+        .collect();
+    Ok(Json(items))
+}
+
+fn linked_player_name(state: &AppState, user: &User) -> Result<Option<String>, ApiError> {
+    let board = state.board.lock().unwrap();
+    Ok(board
+        .get_player_by_discord_username(&user.username)
+        .map(|player| player.name.clone()))
 }
 
 pub(crate) fn apply_tournament_match_correction(
     state: &AppState,
     id: i64,
     payload: &SubmitMatchRequest,
+    actor: Option<&MatchActor>,
 ) -> Result<crate::tournament::TournamentMatch, ApiError> {
     let before = state
         .tournaments
@@ -2000,7 +2055,7 @@ pub(crate) fn apply_tournament_match_correction(
 
     let (tm, _winner_changed) = state
         .tournaments
-        .correct_match_score(id, payload, state.k_factor)
+        .correct_match_score(id, payload, state.k_factor, actor)
         .map_err(|error| ApiError::bad_request(error.to_string()))?;
 
     let new_bracket_snapshot = state

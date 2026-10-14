@@ -17,6 +17,7 @@ import TournamentMatchScoreboard from '@/components/TournamentMatchScoreboard.vu
 import { Button } from '@/components/ui/button'
 import {
   canConfirmTournamentMatch,
+  canCorrectTournamentMatch,
   tournamentMatchScenarioPath,
 } from '@/lib/tournamentMatchDisplay'
 import { scoreBadgeMinCh } from '@/lib/matchResultBadges'
@@ -134,10 +135,11 @@ function confirmLabel(match: TournamentMatch) {
 
 function canCorrect(match: TournamentMatch) {
   return (
-    props.isAdmin
-    && (match.status === 'confirmed' || match.status === 'submitted')
-    && !match.is_forfeit
-    && !isCorrecting(match)
+    !isCorrecting(match)
+    && canCorrectTournamentMatch(match, {
+      canInteract: props.canInteract(match),
+      isAdmin: props.isAdmin,
+    })
   )
 }
 
@@ -201,8 +203,7 @@ function scoreColumnPendingLabel(match: TournamentMatch) {
 function showPendingScore(match: TournamentMatch) {
   return (
     match.is_unplayed
-    || (match.is_forfeit && !match.outcome)
-    || match.status === 'submitted'
+    || match.is_forfeit
     || (match.status === 'scheduled' && Boolean(match.elo_match_id))
   )
 }
@@ -241,8 +242,12 @@ function saveCorrection(match: TournamentMatch) {
     p2: Number(form.p2) || 0,
     s1: Number(form.s1) || 0,
     s2: Number(form.s2) || 0,
-    list1,
-    list2,
+    list1: props.playerHasList2?.(match, 'player1')
+      ? list1
+      : (match.player1_list_slot ?? 1),
+    list2: props.playerHasList2?.(match, 'player2')
+      ? list2
+      : (match.player2_list_slot ?? 1),
   })
   correctingMatchId.value = null
 }
@@ -385,32 +390,40 @@ watch(
                 >
                   Reprendre
                 </Button>
-                <Button
-                  v-else-if="showConfirmButton(match)"
-                  size="sm"
-                  :variant="confirmationReceived(match) ? 'default' : 'outline'"
-                  :class="{ 'btn-confirmation-received': confirmationReceived(match) }"
-                  :disabled="confirmPending(match) || confirmationReceived(match)"
-                  @click="onConfirm(match)"
-                >
-                  {{ confirmLabel(match) }}
-                </Button>
-                <Button
-                  v-else-if="canCorrect(match)"
-                  size="sm"
-                  variant="outline"
-                  @click="startCorrection(match)"
-                >
-                  Corriger
-                </Button>
-                <Button
-                  v-else-if="isAdmin && match.is_forfeit"
-                  size="sm"
-                  variant="outline"
-                  @click="emit('cancelForfeit', match)"
-                >
-                  Annuler FF
-                </Button>
+                <template v-else>
+                  <Button
+                    v-if="showConfirmButton(match)"
+                    size="sm"
+                    :variant="confirmationReceived(match) ? 'default' : 'outline'"
+                    :class="{ 'btn-confirmation-received': confirmationReceived(match) }"
+                    :disabled="confirmPending(match) || confirmationReceived(match)"
+                    @click="onConfirm(match)"
+                  >
+                    {{ confirmLabel(match) }}
+                  </Button>
+                  <Button
+                    v-if="canCorrect(match)"
+                    size="sm"
+                    variant="outline"
+                    @click="startCorrection(match)"
+                  >
+                    Corriger
+                  </Button>
+                  <span
+                    v-if="match.status === 'submitted' && !canConfirm(match) && !match.is_forfeit"
+                    class="pool-match-status-label"
+                  >
+                    En attente
+                  </span>
+                  <Button
+                    v-if="isAdmin && match.is_forfeit"
+                    size="sm"
+                    variant="outline"
+                    @click="emit('cancelForfeit', match)"
+                  >
+                    Annuler FF
+                  </Button>
+                </template>
                 <DropdownMenuRoot v-if="showMatchOptionsMenu(match)">
                   <DropdownMenuTrigger as-child>
                     <Button

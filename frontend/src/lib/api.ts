@@ -1148,6 +1148,18 @@ export function confirmTournamentMatch(matchId: number): Promise<TournamentMatch
   })
 }
 
+export interface PendingMatchConfirmation {
+  match_id: number
+  tournament_id: number
+  tournament_name: string
+  opponent_name: string
+  opponent_display_name: string
+}
+
+export function fetchPendingConfirmations(): Promise<PendingMatchConfirmation[]> {
+  return request<PendingMatchConfirmation[]>('/api/me/pending-confirmations')
+}
+
 export function forfeitTournamentMatch(
   matchId: number,
   forfeit_player: string,

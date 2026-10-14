@@ -51,6 +51,7 @@ import type {
   User,
 } from '@/types/elo'
 import { useAuth } from '@/composables/useAuth'
+import { refreshPendingConfirmations } from '@/composables/usePendingConfirmations'
 import { useAdminEditMode } from '@/composables/useAdminEditMode'
 import { useAppSidePanel } from '@/composables/useAppSidePanel'
 import { useListPage } from '@/composables/useListPage'
@@ -1655,6 +1656,7 @@ async function confirmMatch(match: TournamentMatch) {
     confirmAck.succeed(match.id)
     toast.success(match.is_forfeit ? 'Forfait confirmé' : 'Résultat confirmé')
     await refresh()
+    void refreshPendingConfirmations()
   } catch (error) {
     confirmAck.fail(match.id)
     toast.error(error instanceof Error ? error.message : 'Erreur')
@@ -1685,6 +1687,15 @@ async function correctMatch(match: TournamentMatch, form: TournamentMatchForm) {
     return
   }
 
+  const handsValidationOff =
+    match.status === 'submitted'
+    && match.submitted_by_user_id != null
+    && match.submitted_by_user_id !== user.value?.id
+    && !!player.value
+    && (
+      match.player1?.toLowerCase() === player.value.name.toLowerCase()
+      || match.player2?.toLowerCase() === player.value.name.toLowerCase()
+    )
   await act(
     () =>
       correctTournamentMatch(match.id, {
@@ -1695,8 +1706,11 @@ async function correctMatch(match: TournamentMatch, form: TournamentMatchForm) {
         player1_list_slot: list1,
         player2_list_slot: list2,
       }),
-    'Score corrigé',
+    handsValidationOff
+      ? 'Score corrigé — l’autre joueur doit valider'
+      : 'Score corrigé',
   )
+  void refreshPendingConfirmations()
   delete matchForms.value[match.id]
 }
 

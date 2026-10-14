@@ -2315,7 +2315,7 @@ async fn correct_match(
                 scenario_id: None,
                 scenario_other: None,
             };
-            tournament_api::apply_tournament_match_correction(&state, tm.id, &submit)?;
+            tournament_api::apply_tournament_match_correction(&state, tm.id, &submit, None)?;
 
             let board = state.board.lock().unwrap();
             let record = board

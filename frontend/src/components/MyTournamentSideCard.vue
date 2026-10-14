@@ -5,8 +5,10 @@ import { toast } from 'vue-sonner'
 import {
   completeTournamentRegistrationLists,
   confirmTournamentMatch,
+  correctTournamentMatch,
   startTournamentPartie,
 } from '@/lib/api'
+import { refreshPendingConfirmations } from '@/composables/usePendingConfirmations'
 import { normalizeArmyListCode } from '@/lib/armyList'
 import { COUPE_REQUIRES_NETWORK } from '@/lib/partieOffline'
 import { phaseLabels } from '@/lib/tournamentPhase'
@@ -43,7 +45,7 @@ const emit = defineEmits<{
 }>()
 
 const router = useRouter()
-const { player } = useAuth()
+const { player, user } = useAuth()
 const { showAdminUi: isAdmin } = useAdminEditMode()
 const { isOnline } = useNetworkStatus()
 const confirmAck = useServerConfirmAck()
@@ -220,9 +222,40 @@ async function confirmMatch(match: TournamentMatch) {
     confirmAck.succeed(match.id)
     toast.success(match.is_forfeit ? 'Forfait confirmé' : 'Résultat confirmé')
     emit('refreshed')
+    void refreshPendingConfirmations()
   } catch (error) {
     confirmAck.fail(match.id)
     toast.error(error instanceof Error ? error.message : 'Erreur')
+  }
+}
+
+async function correctMatch(match: TournamentMatch, form: TournamentMatchForm) {
+  const me = player.value?.name?.toLowerCase()
+  const handsValidationOff =
+    match.status === 'submitted'
+    && match.submitted_by_user_id != null
+    && match.submitted_by_user_id !== user.value?.id
+    && !!me
+    && (match.player1?.toLowerCase() === me || match.player2?.toLowerCase() === me)
+  try {
+    await correctTournamentMatch(match.id, {
+      player1_objectives: form.p1,
+      player2_objectives: form.p2,
+      player1_survivors: form.s1,
+      player2_survivors: form.s2,
+      player1_list_slot: form.list1 ?? match.player1_list_slot ?? 1,
+      player2_list_slot: form.list2 ?? match.player2_list_slot ?? 1,
+    })
+    toast.success(
+      handsValidationOff
+        ? 'Score corrigé — l’autre joueur doit valider'
+        : 'Score corrigé',
+    )
+    delete matchForms[match.id]
+    emit('refreshed')
+    void refreshPendingConfirmations()
+  } catch (error) {
+    toast.error(error instanceof Error ? error.message : 'Correction impossible')
   }
 }
 
@@ -355,6 +388,7 @@ function openTournament() {
           @start="startPartie(match)"
           @resume="resumePartie(match)"
           @confirm="confirmMatch(match)"
+          @correct="correctMatch(match, $event)"
         />
       </div>
     </CardContent>

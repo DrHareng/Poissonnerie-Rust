@@ -41,6 +41,24 @@ export function matchHasResult(match: TournamentMatch) {
   )
 }
 
+/** Tant que le résultat n’est pas confirmé, les deux joueurs peuvent le corriger. */
+export function canCorrectTournamentMatch(
+  match: Pick<
+    TournamentMatch,
+    'status' | 'is_forfeit' | 'is_unplayed'
+  >,
+  options: {
+    canInteract: boolean
+    isAdmin: boolean
+  },
+): boolean {
+  if (match.is_forfeit || match.is_unplayed) return false
+  if (options.isAdmin && (match.status === 'confirmed' || match.status === 'submitted')) {
+    return true
+  }
+  return options.canInteract && match.status === 'submitted'
+}
+
 /** L’adversaire (ou un admin) confirme ; l’auteur de la saisie ne voit pas le bouton. */
 export function canConfirmTournamentMatch(
   match: Pick<TournamentMatch, 'status' | 'submitted_by_user_id'>,

@@ -4,7 +4,7 @@ use std::sync::Mutex;
 
 use anyhow::{bail, Context, Result};
 use rusqlite::{params, Connection, OptionalExtension, Transaction};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 use crate::army_list::require_lists;
 use crate::army_list_store::get_or_create_in_conn;
@@ -177,6 +177,22 @@ pub struct SubmitMatchRequest {
     pub scenario_id: Option<i64>,
     #[serde(default)]
     pub scenario_other: Option<String>,
+}
+
+/// Joueur (ou admin) qui corrige un résultat pas encore confirmé.
+#[derive(Debug, Clone)]
+pub struct MatchActor {
+    pub user_id: i64,
+    pub is_admin: bool,
+    pub player_name: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct PendingMatchConfirmation {
+    pub match_id: i64,
+    pub tournament_id: i64,
+    pub tournament_name: String,
+    pub opponent_name: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -2318,6 +2334,52 @@ impl TournamentStore {
         self.get_match(match_id)?.context("match introuvable")
     }
 
+    /// Résultats soumis que ce joueur doit encore valider.
+    pub fn list_pending_confirmations(
+        &self,
+        player_name: &str,
+        user_id: i64,
+    ) -> Result<Vec<PendingMatchConfirmation>> {
+        let key = normalize_name(player_name);
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "
+            SELECT tm.id, tm.tournament_id, t.name, tm.player1, tm.player2
+            FROM tournament_matches tm
+            JOIN tournaments t ON t.id = tm.tournament_id
+            WHERE tm.status = 'submitted'
+              AND (
+                LOWER(TRIM(COALESCE(tm.player1, ''))) = ?1
+                OR LOWER(TRIM(COALESCE(tm.player2, ''))) = ?1
+              )
+              AND (tm.submitted_by_user_id IS NULL OR tm.submitted_by_user_id != ?2)
+            ORDER BY COALESCE(tm.submitted_at, 0) DESC, tm.id DESC
+            ",
+        )?;
+        let rows = stmt.query_map(params![key.clone(), user_id], |row| {
+            let match_id: i64 = row.get(0)?;
+            let tournament_id: i64 = row.get(1)?;
+            let tournament_name: String = row.get(2)?;
+            let player1: Option<String> = row.get(3)?;
+            let player2: Option<String> = row.get(4)?;
+            let opponent_name = if player1
+                .as_deref()
+                .is_some_and(|name| normalize_name(name) == key)
+            {
+                player2.unwrap_or_default()
+            } else {
+                player1.unwrap_or_default()
+            };
+            Ok(PendingMatchConfirmation {
+                match_id,
+                tournament_id,
+                tournament_name,
+                opponent_name,
+            })
+        })?;
+        rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
+    }
+
     pub fn declare_forfeit(
         &self,
         match_id: i64,
@@ -2521,6 +2583,7 @@ impl TournamentStore {
         match_id: i64,
         request: &SubmitMatchRequest,
         k_factor: f64,
+        actor: Option<&MatchActor>,
     ) -> Result<(TournamentMatch, bool)> {
         if request.player1_objectives > 10 || request.player2_objectives > 10 {
             bail!("objectifs invalides");
@@ -2530,6 +2593,24 @@ impl TournamentStore {
         let old = self
             .get_match_in_conn(&conn, match_id)?
             .context("match introuvable")?;
+
+        if let Some(actor) = actor {
+            if !actor.is_admin {
+                if old.status != TournamentMatchStatus::Submitted {
+                    bail!("seuls les matchs en attente de confirmation peuvent être corrigés");
+                }
+                if old.is_forfeit || old.is_unplayed {
+                    bail!("ce résultat ne peut pas être corrigé");
+                }
+                let player_name = actor
+                    .player_name
+                    .as_deref()
+                    .context("compte joueur requis")?;
+                if !player_is_in_match(&old, player_name) {
+                    bail!("seul un participant ou un admin peut corriger");
+                }
+            }
+        }
 
         if old.status != TournamentMatchStatus::Confirmed
             && old.status != TournamentMatchStatus::Submitted
@@ -2566,8 +2647,8 @@ impl TournamentStore {
             _ => bail!("choisissez la liste de chaque joueur (1 ou 2)"),
         };
 
-        // Match encore en attente de confirmation : on met à jour le score sans recalculer
-        // les classements / l'arbre (appliqués à la confirmation).
+        // Match encore en attente : le score est mis à jour, les classements
+        // et l'arbre restent appliqués seulement à la confirmation.
         if old.status == TournamentMatchStatus::Submitted {
             let outcome = outcome_from_objectives(
                 request.player1_objectives,
@@ -2618,6 +2699,53 @@ impl TournamentStore {
                     ],
                 )?;
             }
+
+            let tp1 = tournament_points_for_player(
+                outcome,
+                true,
+                request.player1_objectives,
+                request.player2_objectives,
+                false,
+            );
+            let tp2 = tournament_points_for_player(
+                outcome,
+                false,
+                request.player1_objectives,
+                request.player2_objectives,
+                false,
+            );
+            let (rating1, rating2) = self.ratings_for_match_in_conn(&conn, &old, k_factor)?;
+            let (delta1, delta2) = compute_elo_deltas(rating1, rating2, outcome, k_factor);
+            let now = now_unix();
+            let new_submitter = actor.and_then(|actor| {
+                if submission_should_move(actor, &old) {
+                    Some(actor.user_id)
+                } else {
+                    None
+                }
+            });
+            conn.execute(
+                "
+                UPDATE tournament_matches SET
+                    player1_tournament_points = ?1, player2_tournament_points = ?2,
+                    player1_elo_delta = ?3, player2_elo_delta = ?4,
+                    player1_rating_used = ?5, player2_rating_used = ?6,
+                    submitted_by_user_id = COALESCE(?7, submitted_by_user_id),
+                    submitted_at = CASE WHEN ?7 IS NOT NULL THEN ?8 ELSE submitted_at END
+                WHERE id = ?9
+                ",
+                params![
+                    tp1,
+                    tp2,
+                    delta1,
+                    delta2,
+                    rating1,
+                    rating2,
+                    new_submitter,
+                    now,
+                    match_id,
+                ],
+            )?;
             drop(conn);
             let updated = self
                 .get_match(match_id)?
@@ -4707,6 +4835,28 @@ fn compare_matches_for_recompute(a: &TournamentMatch, b: &TournamentMatch) -> st
         .then(a.id.cmp(&b.id))
 }
 
+fn player_is_in_match(tm: &TournamentMatch, player_name: &str) -> bool {
+    let key = normalize_name(player_name);
+    tm.player1
+        .as_deref()
+        .is_some_and(|name| normalize_name(name) == key)
+        || tm
+            .player2
+            .as_deref()
+            .is_some_and(|name| normalize_name(name) == key)
+}
+
+/// Le joueur qui devait valider devient l'auteur de la saisie.
+fn submission_should_move(actor: &MatchActor, tm: &TournamentMatch) -> bool {
+    if tm.status != TournamentMatchStatus::Submitted {
+        return false;
+    }
+    let Some(name) = actor.player_name.as_deref() else {
+        return false;
+    };
+    player_is_in_match(tm, name) && tm.submitted_by_user_id != Some(actor.user_id)
+}
+
 fn outcome_from_objectives(player1_objectives: u8, player2_objectives: u8) -> MatchOutcome {
     if player1_objectives > player2_objectives {
         MatchOutcome::Player1Win
@@ -5058,7 +5208,7 @@ mod tests {
             scenario_other: None,
         };
 
-        let (updated, _) = store.correct_match_score(1, &request, 32.0).unwrap();
+        let (updated, _) = store.correct_match_score(1, &request, 32.0, None).unwrap();
         assert_eq!(updated.player1_objectives, 3);
         assert_eq!(updated.player2_objectives, 7);
         assert_eq!(updated.player1_survivors, 42);
@@ -5103,7 +5253,7 @@ mod tests {
             scenario_other: None,
         };
 
-        let (updated, _) = store.correct_match_score(1, &request, 32.0).unwrap();
+        let (updated, _) = store.correct_match_score(1, &request, 32.0, None).unwrap();
         assert!(!updated.is_forfeit);
         assert!(!updated.is_unplayed);
         assert!(updated.forfeit_player.is_none());
@@ -5142,12 +5292,78 @@ mod tests {
             scenario_other: None,
         };
 
-        let (updated, _) = store.correct_match_score(1, &request, 32.0).unwrap();
+        let (updated, _) = store.correct_match_score(1, &request, 32.0, None).unwrap();
         assert!(!updated.is_forfeit);
         assert!(!updated.is_unplayed);
         assert_eq!(updated.outcome, Some(MatchOutcome::Draw));
         assert_eq!(updated.player1_tournament_points, 2);
         assert_eq!(updated.player2_tournament_points, 2);
+
+        let _ = fs::remove_file(db_path);
+    }
+
+    #[test]
+    fn correcting_unconfirmed_score_moves_validation_to_the_other_player() {
+        let (db_path, store) = temp_copy_of_db();
+        let before = store.get_match(1).unwrap().unwrap();
+        let player1 = before.player1.clone().unwrap();
+        let player2 = before.player2.clone().unwrap();
+
+        let conn = store.conn.lock().unwrap();
+        conn.execute(
+            "
+            UPDATE tournament_matches
+            SET status = 'submitted', submitted_by_user_id = 10, submitted_at = 1
+            WHERE id = 1
+            ",
+            [],
+        )
+        .unwrap();
+        drop(conn);
+
+        let request = SubmitMatchRequest {
+            player1_objectives: 2,
+            player2_objectives: 9,
+            player1_survivors: 30,
+            player2_survivors: 70,
+            player1_army_id: None,
+            player2_army_id: None,
+            player1_list_slot: None,
+            player2_list_slot: None,
+            scenario_id: None,
+            scenario_other: None,
+        };
+
+        let author = MatchActor {
+            user_id: 10,
+            is_admin: false,
+            player_name: Some(player1.clone()),
+        };
+        let (kept, _) = store
+            .correct_match_score(1, &request, 32.0, Some(&author))
+            .unwrap();
+        assert_eq!(kept.status, TournamentMatchStatus::Submitted);
+        assert_eq!(kept.submitted_by_user_id, Some(10));
+        assert_eq!(kept.player2_objectives, 9);
+
+        let validator = MatchActor {
+            user_id: 20,
+            is_admin: false,
+            player_name: Some(player2),
+        };
+        let (moved, _) = store
+            .correct_match_score(1, &request, 32.0, Some(&validator))
+            .unwrap();
+        assert_eq!(moved.status, TournamentMatchStatus::Submitted);
+        assert_eq!(moved.submitted_by_user_id, Some(20));
+
+        let outsider = MatchActor {
+            user_id: 30,
+            is_admin: false,
+            player_name: Some("personne".to_string()),
+        };
+        let rejected = store.correct_match_score(1, &request, 32.0, Some(&outsider));
+        assert!(rejected.is_err());
 
         let _ = fs::remove_file(db_path);
     }

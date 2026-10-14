@@ -16,6 +16,7 @@ import PlayerLink from '@/components/PlayerLink.vue'
 import { Button } from '@/components/ui/button'
 import {
   canConfirmTournamentMatch,
+  canCorrectTournamentMatch,
   formatMatchRecordedDate,
   tournamentMatchScenarioPath,
 } from '@/lib/tournamentMatchDisplay'
@@ -145,10 +146,18 @@ const confirmButtonLabel = computed(() => {
 
 const canCorrect = computed(
   () =>
-    props.isAdmin
-    && (props.match.status === 'confirmed' || props.match.status === 'submitted')
+    !correcting.value
+    && canCorrectTournamentMatch(props.match, {
+      canInteract: props.canInteract,
+      isAdmin: props.isAdmin,
+    }),
+)
+
+const awaitingOpponentValidation = computed(
+  () =>
+    props.match.status === 'submitted'
     && !props.match.is_forfeit
-    && !correcting.value,
+    && !canConfirm.value,
 )
 
 const canCancelForfeit = computed(
@@ -216,6 +225,7 @@ const showActionsRow = computed(
     hasBothPlayers.value
     && (correcting.value
       || showConfirmButton.value
+      || awaitingOpponentValidation.value
       || (!props.listsReady && props.match.status === 'scheduled' && props.canInteract)),
 )
 
@@ -279,8 +289,12 @@ function saveCorrection() {
     p2: Number(props.form.p2) || 0,
     s1: Number(props.form.s1) || 0,
     s2: Number(props.form.s2) || 0,
-    list1: props.player1HasList2 ? props.form.list1 : 1,
-    list2: props.player2HasList2 ? props.form.list2 : 1,
+    list1: props.player1HasList2
+      ? props.form.list1
+      : (props.match.player1_list_slot ?? 1),
+    list2: props.player2HasList2
+      ? props.form.list2
+      : (props.match.player2_list_slot ?? 1),
   })
 }
 
@@ -624,6 +638,12 @@ function matchPlayerLabel(slot: 'player1' | 'player2') {
           {{ listsReadyMessage || 'Listes d’arbre manquantes.' }}
         </p>
 
+        <p
+          v-if="awaitingOpponentValidation"
+          class="w-full text-xs text-muted-foreground"
+        >
+          En attente de validation par l’autre joueur
+        </p>
         <Button
           v-if="showConfirmButton"
           size="sm"
