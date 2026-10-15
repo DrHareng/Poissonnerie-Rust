@@ -903,6 +903,7 @@ fn migrate_scenario_pack_schema(conn: &Connection) -> Result<()> {
     crate::scenario_pack::seed_default_pack_if_needed(conn)?;
     crate::scenario_pack::sync_map_filenames(conn)?;
     crate::scenario_pack::sync_exclusion_rule_links(conn)?;
+    crate::scenario_pack::sync_civils_prise_reference(conn)?;
 
     Ok(())
 }

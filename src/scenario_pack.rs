@@ -211,6 +211,26 @@ pub fn list_scenario_content_images() -> Result<Vec<String>> {
     Ok(names)
 }
 
+/// « Rallier un civil » fait suivre les règles de prise au civil rallié.
+/// Le lien `[[prise]]` permet à la génération de document de les inclure.
+pub fn sync_civils_prise_reference(conn: &Connection) -> Result<()> {
+    conn.execute(
+        "
+        UPDATE common_rules
+        SET body_md = REPLACE(
+            body_md,
+            'règles de Prise',
+            '[[prise|règles de Prise]]'
+        )
+        WHERE slug = 'civils'
+          AND instr(body_md, '[[prise') = 0
+          AND instr(body_md, 'règles de Prise') > 0
+        ",
+        [],
+    )?;
+    Ok(())
+}
+
 /// Retire « Zones d’exclusion » des liaisons scénario ↔ règles communes
 /// (rappel affiché à part, à côté de la carte).
 pub fn sync_exclusion_rule_links(conn: &Connection) -> Result<()> {
@@ -648,7 +668,7 @@ const COMMON_RULES: &[(&str, &str, &str)] = &[
 
 - **Qui ?** Un combattant en contact avec un civil. Le civil ne doit pas être en contact avec un ennemi ou être Rallié. Interdit aux combattants impétueux (même via Frenzy), isolés, immobilisés, périphériques ou REM.
 - **Quoi ?** Le combattant fait un jet de WIP.
-- **Réussite :** Le Civil est Rallié et répond désormais aux règles de Prise (2, 1 si le combattant fait partie d’une FT). Il ne pourra pas être « ramassé » normalement, seulement par l’action Rallier. L’état Rallié est annulé si le porteur devient impétueux, isolé, immobilisé ou entre en null ou token state."#,
+- **Réussite :** Le Civil est Rallié et répond désormais aux [[prise|règles de Prise]] (2, 1 si le combattant fait partie d’une FT). Il ne pourra pas être « ramassé » normalement, seulement par l’action Rallier. L’état Rallié est annulé si le porteur devient impétueux, isolé, immobilisé ou entre en null ou token state."#,
     ),
     (
         "specialistes",

@@ -1,0 +1,407 @@
+[
+  {
+    "id": 101,
+    "parent_id": 101,
+    "name": "PanOcéanie",
+    "slug": "panoceania",
+    "short_name": "vPanO",
+    "discontinued": false,
+    "faction": "PanOcéanie"
+  },
+  {
+    "id": 102,
+    "parent_id": 101,
+    "name": "L'Armée de choc d'Acontecimento",
+    "slug": "shock-army-of-acontecimento",
+    "short_name": "Acontecimento",
+    "discontinued": true,
+    "faction": "PanOcéanie"
+  },
+  {
+    "id": 103,
+    "parent_id": 101,
+    "name": "Ordres Militaires",
+    "slug": "military-orders",
+    "short_name": "Ordres Militaires",
+    "discontinued": false,
+    "faction": "PanOcéanie"
+  },
+  {
+    "id": 104,
+    "parent_id": 101,
+    "name": "L’Armée Capitale Néotérrienne",
+    "slug": "neoterran-capitaline-army",
+    "short_name": "Neoterra",
+    "discontinued": false,
+    "faction": "PanOcéanie"
+  },
+  {
+    "id": 105,
+    "parent_id": 101,
+    "name": "Varuna Immediate Reaction Division",
+    "slug": "varuna-immediate-reaction-division",
+    "short_name": "Varuna",
+    "discontinued": true,
+    "faction": "PanOcéanie"
+  },
+  {
+    "id": 106,
+    "parent_id": 101,
+    "name": "Svalarheima's Winter Force",
+    "slug": "svalarheima-s-winter-force",
+    "short_name": "Svalarheima",
+    "discontinued": false,
+    "faction": "PanOcéanie"
+  },
+  {
+    "id": 107,
+    "parent_id": 101,
+    "name": "Kestrel Colonial Force",
+    "slug": "kestrel-colonial-force",
+    "short_name": "KFC",
+    "discontinued": false,
+    "faction": "PanOcéanie"
+  },
+  {
+    "id": 201,
+    "parent_id": 201,
+    "name": "Yu Jing",
+    "slug": "yu-jing",
+    "short_name": "vYuJing",
+    "discontinued": false,
+    "faction": "Yu Jing"
+  },
+  {
+    "id": 202,
+    "parent_id": 201,
+    "name": "Le Service Impérial",
+    "slug": "imperial-service",
+    "short_name": "Service Impérial",
+    "discontinued": false,
+    "faction": "Yu Jing"
+  },
+  {
+    "id": 204,
+    "parent_id": 201,
+    "name": "Invincible Army",
+    "slug": "invincible-army",
+    "short_name": "Armée Invincible",
+    "discontinued": false,
+    "faction": "Yu Jing"
+  },
+  {
+    "id": 205,
+    "parent_id": 201,
+    "name": "White Banner",
+    "slug": "white-banner",
+    "short_name": "White Banner",
+    "discontinued": false,
+    "faction": "Yu Jing"
+  },
+  {
+    "id": 301,
+    "parent_id": 301,
+    "name": "Ariadna",
+    "slug": "ariadna",
+    "short_name": "vAriadna",
+    "discontinued": false,
+    "faction": "Ariadna"
+  },
+  {
+    "id": 302,
+    "parent_id": 301,
+    "name": "Caledonian Highlander Army",
+    "slug": "caledonian-highlander-army",
+    "short_name": "Calédoniens",
+    "discontinued": true,
+    "faction": "Ariadna"
+  },
+  {
+    "id": 303,
+    "parent_id": 301,
+    "name": "Force de Réponse Rapide Merovingienne",
+    "slug": "force-de-reponse-rapide-merovingienne",
+    "short_name": "Mérovingiens",
+    "discontinued": false,
+    "faction": "Ariadna"
+  },
+  {
+    "id": 304,
+    "parent_id": 301,
+    "name": "USAriadna Ranger Force",
+    "slug": "usariadna",
+    "short_name": "USA",
+    "discontinued": true,
+    "faction": "Ariadna"
+  },
+  {
+    "id": 305,
+    "parent_id": 301,
+    "name": "Tartary Army Corps",
+    "slug": "tartary",
+    "short_name": "Tartary",
+    "discontinued": false,
+    "faction": "Ariadna"
+  },
+  {
+    "id": 306,
+    "parent_id": 301,
+    "name": "Kosmoflot",
+    "slug": "kosmoflot",
+    "short_name": "Kosmo",
+    "discontinued": false,
+    "faction": "Ariadna"
+  },
+  {
+    "id": 401,
+    "parent_id": 401,
+    "name": "Haqqislam",
+    "slug": "haqqislam",
+    "short_name": "vHaqq",
+    "discontinued": false,
+    "faction": "Haqqislam"
+  },
+  {
+    "id": 402,
+    "parent_id": 401,
+    "name": "Hassassin Bahram",
+    "slug": "hassassin-bahram",
+    "short_name": "HB",
+    "discontinued": false,
+    "faction": "Haqqislam"
+  },
+  {
+    "id": 403,
+    "parent_id": 401,
+    "name": "Qapu Khalqi",
+    "slug": "qapu-khalqi",
+    "short_name": "QK",
+    "discontinued": false,
+    "faction": "Haqqislam"
+  },
+  {
+    "id": 404,
+    "parent_id": 401,
+    "name": "Ramah Taskforce",
+    "slug": "ramah-taskforce",
+    "short_name": "Ramah",
+    "discontinued": false,
+    "faction": "Haqqislam"
+  },
+  {
+    "id": 501,
+    "parent_id": 501,
+    "name": "Nomades",
+    "slug": "nomads",
+    "short_name": "vNomads",
+    "discontinued": false,
+    "faction": "Nomades"
+  },
+  {
+    "id": 502,
+    "parent_id": 501,
+    "name": "Commandement Juridictionnel De Corregidor",
+    "slug": "corregidor",
+    "short_name": "Corregidor",
+    "discontinued": false,
+    "faction": "Nomades"
+  },
+  {
+    "id": 503,
+    "parent_id": 501,
+    "name": "Commandement Juridictionnel De Bakunin",
+    "slug": "bakunin",
+    "short_name": "Bakunin",
+    "discontinued": false,
+    "faction": "Nomades"
+  },
+  {
+    "id": 504,
+    "parent_id": 501,
+    "name": "Commandement Juridictionnel De Tunguska",
+    "slug": "tunguska",
+    "short_name": "Tunguska",
+    "discontinued": false,
+    "faction": "Nomades"
+  },
+  {
+    "id": 601,
+    "parent_id": 601,
+    "name": "Armée Combinée",
+    "slug": "combined-army",
+    "short_name": "vAC",
+    "discontinued": false,
+    "faction": "Armée Combinée"
+  },
+  {
+    "id": 602,
+    "parent_id": 601,
+    "name": "Les Forces d'Agression Morat",
+    "slug": "morat",
+    "short_name": "Morat",
+    "discontinued": false,
+    "faction": "Armée Combinée"
+  },
+  {
+    "id": 603,
+    "parent_id": 601,
+    "name": "Les Forces Expéditionnaires Shasvastii",
+    "slug": "shasvastii",
+    "short_name": "Shasvastii",
+    "discontinued": false,
+    "faction": "Armée Combinée"
+  },
+  {
+    "id": 604,
+    "parent_id": 601,
+    "name": "Onyx Contact Force",
+    "slug": "onyx",
+    "short_name": "Onyx",
+    "discontinued": false,
+    "faction": "Armée Combinée"
+  },
+  {
+    "id": 605,
+    "parent_id": 601,
+    "name": "Next Wave",
+    "slug": "next-wave",
+    "short_name": "Next Wave",
+    "discontinued": false,
+    "faction": "Armée Combinée"
+  },
+  {
+    "id": 701,
+    "parent_id": 701,
+    "name": "Aleph",
+    "slug": "aleph",
+    "short_name": "vAleph",
+    "discontinued": false,
+    "faction": "Aleph"
+  },
+  {
+    "id": 702,
+    "parent_id": 701,
+    "name": "Phalange d’Acier",
+    "slug": "steel-phalanx",
+    "short_name": "SP",
+    "discontinued": false,
+    "faction": "Aleph"
+  },
+  {
+    "id": 703,
+    "parent_id": 701,
+    "name": "Operations Subsection of the SSS",
+    "slug": "operations",
+    "short_name": "OSSSS",
+    "discontinued": false,
+    "faction": "Aleph"
+  },
+  {
+    "id": 801,
+    "parent_id": 801,
+    "name": "Tohaa",
+    "slug": "tohaa",
+    "short_name": "Tohaa",
+    "discontinued": true,
+    "faction": "Tohaa"
+  },
+  {
+    "id": 902,
+    "parent_id": 901,
+    "name": "Druze Bayram Security",
+    "slug": "druze",
+    "short_name": "Druze",
+    "discontinued": false,
+    "faction": "Non-Aligned Armies"
+  },
+  {
+    "id": 904,
+    "parent_id": 901,
+    "name": "Compagnie Ikari",
+    "slug": "ikari",
+    "short_name": "Ikari",
+    "discontinued": false,
+    "faction": "Non-Aligned Armies"
+  },
+  {
+    "id": 905,
+    "parent_id": 901,
+    "name": "Starco. Compagnie Libre de L'étoile",
+    "slug": "starco-free-company-of-the-star",
+    "short_name": "Starco",
+    "discontinued": false,
+    "faction": "Non-Aligned Armies"
+  },
+  {
+    "id": 908,
+    "parent_id": 901,
+    "name": "Compagnie Dahshat",
+    "slug": "dahshat",
+    "short_name": "Dahshat",
+    "discontinued": false,
+    "faction": "Non-Aligned Armies"
+  },
+  {
+    "id": 909,
+    "parent_id": 901,
+    "name": "White Company",
+    "slug": "white-company",
+    "short_name": "White Co",
+    "discontinued": false,
+    "faction": "Non-Aligned Armies"
+  },
+  {
+    "id": 1001,
+    "parent_id": 1001,
+    "name": "O-12",
+    "slug": "o-12",
+    "short_name": "v012",
+    "discontinued": false,
+    "faction": "O-12"
+  },
+  {
+    "id": 1002,
+    "parent_id": 1001,
+    "name": "Starmada, Bureau Aegis Naval Police Department",
+    "slug": "starmada",
+    "short_name": "Starmada",
+    "discontinued": false,
+    "faction": "O-12"
+  },
+  {
+    "id": 1003,
+    "parent_id": 1001,
+    "name": "Torchlight Brigade",
+    "slug": "torchlight-brigade",
+    "short_name": "Torchlight",
+    "discontinued": false,
+    "faction": "O-12"
+  },
+  {
+    "id": 1101,
+    "parent_id": 1101,
+    "name": "JSA",
+    "slug": "jsa",
+    "short_name": "vJSA",
+    "discontinued": false,
+    "faction": "JSA"
+  },
+  {
+    "id": 1102,
+    "parent_id": 1101,
+    "name": "Shindenbutai",
+    "slug": "shindenbutai",
+    "short_name": "Shindenbutai",
+    "discontinued": false,
+    "faction": "JSA"
+  },
+  {
+    "id": 1103,
+    "parent_id": 1101,
+    "name": "Ōban",
+    "slug": "oban",
+    "short_name": "Oban",
+    "discontinued": false,
+    "faction": "JSA"
+  }
+]

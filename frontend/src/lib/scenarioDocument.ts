@@ -178,7 +178,11 @@ export function buildScenarioDocument(
 
   if (options?.includeCommonRules !== false && scenario.common_rules.length > 0) {
     const blocks: Block[] = []
-    const sorted = [...scenario.common_rules].sort((a, b) =>
+    const sorted = expandCommonRules(
+      scenario.common_rules,
+      [...rules, ...scenario.common_rules],
+      ruleLabel,
+    ).sort((a, b) =>
       a.name.localeCompare(b.name, 'fr', { sensitivity: 'base' }),
     )
     for (const rule of sorted) {
@@ -470,6 +474,49 @@ function tokenizeMarked(work: string, slots: Inline[]): Inline[] {
   }
   flush()
   return out
+}
+
+/** Règles citées par `[[slug]]`, y compris celles citées dans le corps d’une règle déjà retenue. */
+export function expandCommonRules(
+  roots: CommonRule[],
+  catalog: CommonRule[],
+  ruleLabel?: (slug: string) => string,
+): CommonRule[] {
+  const bySlug = new Map<string, CommonRule>()
+  for (const rule of catalog) bySlug.set(rule.slug, rule)
+  for (const rule of roots) bySlug.set(rule.slug, rule)
+
+  const used = new Map<string, CommonRule>()
+  const queue = [...roots]
+  while (queue.length > 0) {
+    const rule = queue.shift()
+    if (!rule || used.has(rule.slug)) continue
+    used.set(rule.slug, rule)
+    const body = parseScenarioMarkdown(rule.body_md, ruleLabel)
+    for (const slug of ruleSlugsIn(body)) {
+      const next = bySlug.get(slug)
+      if (next && !used.has(next.slug)) queue.push(next)
+    }
+  }
+  return [...used.values()]
+}
+
+export function ruleSlugsIn(blocks: Block[]): string[] {
+  const slugs: string[] = []
+  const visit = (inlines: Inline[]) => {
+    for (const inline of inlines) {
+      if (inline.kind === 'rule') slugs.push(inline.slug)
+    }
+  }
+  for (const block of blocks) {
+    if (block.kind === 'paragraph' || block.kind === 'heading') {
+      visit(block.inlines)
+    }
+    if (block.kind === 'list') {
+      for (const item of block.items) visit(item.inlines)
+    }
+  }
+  return slugs
 }
 
 function collectBlocksImageSrcs(blocks: Block[]): string[] {

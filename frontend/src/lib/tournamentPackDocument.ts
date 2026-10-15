@@ -2,10 +2,10 @@ import {
   buildScenarioDocument,
   parseScenarioMarkdown,
   ruleAnchorId,
+  ruleSlugsIn,
   visibleBlocks,
   type Block,
   type ImageAsset,
-  type Inline,
 } from '@/lib/scenarioDocument'
 import type {
   CommonRule,
@@ -224,24 +224,6 @@ function collectUsedRules(
   return [...used.values()].sort((left, right) =>
     left.name.localeCompare(right.name, 'fr', { sensitivity: 'base' }),
   )
-}
-
-function ruleSlugsIn(blocks: Block[]): string[] {
-  const slugs: string[] = []
-  const visit = (inlines: Inline[]) => {
-    for (const inline of inlines) {
-      if (inline.kind === 'rule') slugs.push(inline.slug)
-    }
-  }
-  for (const block of blocks) {
-    if (block.kind === 'paragraph' || block.kind === 'heading') {
-      visit(block.inlines)
-    }
-    if (block.kind === 'list') {
-      for (const item of block.items) visit(item.inlines)
-    }
-  }
-  return slugs
 }
 
 function anchorId(prefix: string, slug: string): string {

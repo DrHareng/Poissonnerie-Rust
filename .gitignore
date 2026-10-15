@@ -6,6 +6,15 @@
 /frontend/dist
 /frontend-dauphine/node_modules
 /frontend-dauphine/dist
+/organisateur/target
+/organisateur/frontend/node_modules
+/organisateur/frontend/dist
+/organisateur/frontend/src/pkg
+/organisateur/frontend/android/.gradle
+/organisateur/frontend/android/app/build
+/organisateur/frontend/android/build
+/organisateur/frontend/android/local.properties
+/organisateur/frontend/android/captures
 /frontend/android/.gradle
 /frontend/android/app/build
 /frontend/android/build
