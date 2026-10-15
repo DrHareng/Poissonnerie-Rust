@@ -1,7 +1,7 @@
 use std::collections::{HashMap, HashSet};
 
 use rand::rngs::StdRng;
-use rand::SeedableRng;
+use rand::{Rng, SeedableRng};
 
 use crate::model::{
     default_round_minutes, Action, ByeOption, GameResult, Match, MatchCard, Player, PlayerCard,
@@ -120,7 +120,10 @@ fn dispatch(tournament: &mut Tournament, action: Action) -> Result<(), String> {
             player_b,
             flagged,
         } => set_flag(tournament, player_a, player_b, flagged),
-        Action::Regenerate { seed } => regenerate(tournament, &seed),
+        Action::Regenerate { seed } => {
+            tournament.pending_bye = None;
+            regenerate(tournament, &seed)
+        }
         Action::ReturnToPlayers => return_to_players(tournament),
         Action::ValidatePairing => validate_pairing(tournament),
         Action::SetResult {
@@ -515,8 +518,9 @@ fn plan_round(tournament: &Tournament, seed: u64) -> Result<Plan, String> {
     if pool.is_empty() {
         return Err("Plus aucun joueur en lice.".into());
     }
+    let mut rng = StdRng::seed_from_u64(seed);
     let bye = if pool.len() % 2 == 1 {
-        Some(choose_bye(tournament, &pool)?)
+        Some(choose_bye(tournament, &pool, &mut rng)?)
     } else {
         None
     };
@@ -540,7 +544,6 @@ fn plan_round(tournament: &Tournament, seed: u64) -> Result<Plan, String> {
 
     let forbidden: HashSet<(u32, u32)> = tournament.flagged.iter().copied().collect();
     let (opponents, table_history) = history(tournament);
-    let mut rng = StdRng::seed_from_u64(seed);
     let (pairs, warnings) = if tournament.round <= 1 {
         let pairs = pairing::random_pairing(&pool, &forbidden, tournament.tables, &mut rng)
             .ok_or_else(|| {
@@ -624,7 +627,11 @@ fn apply_plan(tournament: &mut Tournament, plan: Plan) {
     tournament.warnings = plan.warnings;
 }
 
-fn choose_bye(tournament: &Tournament, pool: &[u32]) -> Result<u32, String> {
+fn choose_bye<R: Rng>(
+    tournament: &Tournament,
+    pool: &[u32],
+    rng: &mut R,
+) -> Result<u32, String> {
     let mut eligible: Vec<u32> = pool
         .iter()
         .copied()
@@ -636,10 +643,15 @@ fn choose_bye(tournament: &Tournament, pool: &[u32]) -> Result<u32, String> {
                 .into(),
         );
     }
+    eligible.sort_unstable();
     if let Some(pending) = tournament.pending_bye {
         if eligible.contains(&pending) {
             return Ok(pending);
         }
+    }
+    if tournament.round <= 1 {
+        let index = rng.gen_range(0..eligible.len());
+        return Ok(eligible[index]);
     }
     eligible.sort_by(|left, right| cmp_worst(tournament, *left, *right));
     Ok(eligible[0])
@@ -1234,7 +1246,7 @@ mod tests {
         for name in ["A", "B", "C"] {
             tournament = enroll(tournament, name);
         }
-        tournament = apply(Some(tournament), Action::Start { seed: "7".into() }).unwrap();
+        tournament = apply(Some(tournament), Action::Start { seed: "1".into() }).unwrap();
         assert_eq!(tournament.pending_bye, Some(3));
         tournament = apply(Some(tournament), Action::ValidatePairing).unwrap();
         tournament = score(tournament, "A", 10, 100, "B", 0, 50);
@@ -1463,20 +1475,60 @@ mod tests {
             tournament = enroll(tournament, name);
         }
         tournament = apply(Some(tournament), Action::Start { seed: "1".into() }).unwrap();
-        assert_eq!(tournament.pending_bye, Some(3));
+        let drawn = tournament.pending_bye.expect("bye");
+        let chosen = [1, 2, 3].into_iter().find(|id| *id != drawn).unwrap();
         tournament = apply(
             Some(tournament),
             Action::SetBye {
-                player_id: 1,
+                player_id: chosen,
                 seed: "2".into(),
             },
         )
         .unwrap();
-        assert_eq!(tournament.pending_bye, Some(1));
+        assert_eq!(tournament.pending_bye, Some(chosen));
         assert!(tournament
             .matches
             .iter()
-            .any(|game| { game.is_bye() && game.player1 == 1 }));
+            .any(|game| { game.is_bye() && game.player1 == chosen }));
+    }
+
+    #[test]
+    fn first_round_bye_is_drawn_and_changer_redraws_it() {
+        let mut base = apply(
+            None,
+            Action::Create {
+                id: "draw".into(),
+                name: "Tirage".into(),
+                rounds: 1,
+                tables: 2,
+            },
+        )
+        .unwrap();
+        for name in ["A", "B", "C", "D", "E"] {
+            base = enroll(base, name);
+        }
+        let started = apply(Some(base.clone()), Action::Start { seed: "1".into() }).unwrap();
+        let first = started.pending_bye.expect("bye");
+        let repeated = apply(Some(base.clone()), Action::Start { seed: "1".into() }).unwrap();
+        assert_eq!(repeated.pending_bye, Some(first));
+
+        let mut redrawn = None;
+        for seed in 2..40 {
+            let next = apply(
+                Some(started.clone()),
+                Action::Regenerate {
+                    seed: seed.to_string(),
+                },
+            )
+            .unwrap();
+            if next.pending_bye != Some(first) {
+                redrawn = next.pending_bye;
+                break;
+            }
+        }
+        let other = redrawn.expect("un autre tirage");
+        assert_ne!(other, first);
+        assert!((1..=5).contains(&other));
     }
 
     #[test]
