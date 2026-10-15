@@ -1,8 +1,10 @@
 import { App as CapApp } from '@capacitor/app'
 import { Capacitor } from '@capacitor/core'
+import { closeTopOverlay } from '@/overlay'
 import { router } from '@/router'
 
 export async function handleBack() {
+  if (closeTopOverlay()) return
   if (router.currentRoute.value.path !== '/') {
     const previous = window.history.state?.back
     if (typeof previous === 'string') {

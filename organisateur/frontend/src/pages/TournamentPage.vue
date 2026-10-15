@@ -94,7 +94,7 @@ function askUndo(player: PlayerCard) {
       <router-link class="brand" to="/">
         <img src="/logo.png" alt="" />
         <div class="brand-text">
-          <strong>Organisateur de tournoi Infinity</strong>
+          <strong>Gestion de tournoi Infinity</strong>
           <span>Retour aux tournois</span>
         </div>
       </router-link>

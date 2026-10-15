@@ -20,11 +20,6 @@ const scroller = ref<HTMLElement | null>(null)
 const preview = ref(props.modelValue)
 let settle = 0
 
-function onScrollEnd() {
-  window.clearTimeout(settle)
-  commit()
-}
-
 const values = computed(() => {
   const list: number[] = []
   for (let value = props.min; value <= props.max; value += 1) list.push(value)
@@ -66,11 +61,10 @@ function onScroll() {
   settle = window.setTimeout(commit, 140)
 }
 
-onMounted(() => {
-  preview.value = clamp(props.modelValue)
-  place(props.modelValue)
-  scroller.value?.addEventListener('scrollend', onScrollEnd)
-})
+function onScrollEnd() {
+  window.clearTimeout(settle)
+  commit()
+}
 
 function nudge(delta: number) {
   const value = clamp(props.modelValue + delta)
@@ -78,6 +72,12 @@ function nudge(delta: number) {
   place(value)
   emit('update:modelValue', value)
 }
+
+onMounted(() => {
+  preview.value = clamp(props.modelValue)
+  place(props.modelValue)
+  scroller.value?.addEventListener('scrollend', onScrollEnd)
+})
 
 watch(
   () => props.modelValue,
@@ -94,7 +94,7 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div class="wheel">
+  <div class="wheel-column">
     <span :id="labelId">{{ label }}</span>
     <div class="wheel-window">
       <div
@@ -112,12 +112,7 @@ onBeforeUnmount(() => {
         @keydown.down.prevent="nudge(1)"
       >
         <div class="wheel-pad" />
-        <div
-          v-for="value in values"
-          :key="value"
-          class="wheel-item"
-          :class="{ current: value === preview }"
-        >
+        <div v-for="value in values" :key="value" class="wheel-item" :class="{ current: value === preview }">
           {{ text(value) }}
         </div>
         <div class="wheel-pad" />

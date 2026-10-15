@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, reactive, watch } from 'vue'
+import DurationPicker from '@/components/DurationPicker.vue'
 import SectorialPicker from '@/components/SectorialPicker.vue'
-import WheelPicker from '@/components/WheelPicker.vue'
 import { joinMinutes, splitMinutes } from '@/clock'
 import { armyLogoUrl } from '@/format'
 import type { Sectorial, Tournament, View } from '@/types'
@@ -91,12 +91,17 @@ function askRemove(id: number, name: string) {
             <span>Nom</span>
             <input v-model="meta.name" required maxlength="80" />
           </label>
-          <WheelPicker v-model="meta.tables" :min="1" :max="40" label="Tables" />
+          <label>
+            <span>Tables</span>
+            <input v-model.number="meta.tables" type="number" min="1" max="40" required />
+          </label>
         </div>
-        <div class="meta-line thirds">
-          <WheelPicker v-model="meta.rounds" :min="1" :max="12" label="Rondes" />
-          <WheelPicker v-model="meta.hours" :min="0" :max="12" label="Heures" pad />
-          <WheelPicker v-model="meta.minutes" :min="0" :max="59" label="Minutes" pad />
+        <div class="meta-line halves">
+          <label>
+            <span>Rondes</span>
+            <input v-model.number="meta.rounds" type="number" min="1" max="12" required />
+          </label>
+          <DurationPicker v-model:hours="meta.hours" v-model:minutes="meta.minutes" label="Durée" />
         </div>
       </div>
       <p v-if="tournament.players.length >= 2" class="muted">

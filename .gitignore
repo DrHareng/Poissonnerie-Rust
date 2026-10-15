@@ -14,6 +14,8 @@
 /organisateur/frontend/android/app/build
 /organisateur/frontend/android/build
 /organisateur/frontend/android/local.properties
+/organisateur/frontend/android/keystore.properties
+/organisateur/frontend/android/keystore/
 /organisateur/frontend/android/captures
 /frontend/android/.gradle
 /frontend/android/app/build

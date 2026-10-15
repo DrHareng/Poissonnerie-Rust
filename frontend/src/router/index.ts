@@ -70,11 +70,20 @@ export const router = createRouter({
       meta: { title: 'Liens', tab: 'liens' },
     },
     {
+      path: '/applis',
+      name: 'applis',
+      component: RessourcesPage,
+      meta: { title: 'Applications', tab: 'applis' },
+    },
+    {
       path: '/ressources',
       redirect: (to) => {
         const tab = String(to.query.tab ?? '')
         if (tab === 'liens') {
           return { name: 'links' }
+        }
+        if (tab === 'applis') {
+          return { name: 'applis' }
         }
         const { tab: _tab, ...query } = to.query
         return { name: 'maps', query }

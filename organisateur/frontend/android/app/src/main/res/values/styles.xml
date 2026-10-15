@@ -6,7 +6,15 @@
         <item name="colorPrimary">@color/colorPrimary</item>
         <item name="colorPrimaryDark">@color/colorPrimaryDark</item>
         <item name="colorAccent">@color/colorAccent</item>
-        <item name="android:windowBackground">@drawable/splash</item>
+        <item name="android:background">@null</item>
+        <item name="android:windowBackground">@null</item>
+        <item name="android:colorBackground">@color/splash_background</item>
+        <item name="android:colorBackgroundCacheHint">@null</item>
+        <item name="android:textCursorDrawable">@drawable/text_cursor</item>
+        <item name="android:textSelectHandle">@drawable/text_handle</item>
+        <item name="android:textSelectHandleLeft">@drawable/text_handle_left</item>
+        <item name="android:textSelectHandleRight">@drawable/text_handle_right</item>
+        <item name="android:textSelectHandleWindowStyle">@style/TextHandleWindow</item>
         <item name="android:statusBarColor">@color/splash_background</item>
         <item name="android:navigationBarColor">@color/splash_background</item>
     </style>
@@ -14,15 +22,30 @@
     <style name="AppTheme.NoActionBar" parent="Theme.AppCompat.NoActionBar">
         <item name="windowActionBar">false</item>
         <item name="windowNoTitle">true</item>
-        <item name="android:windowBackground">@drawable/splash</item>
+        <item name="android:background">@null</item>
+        <item name="android:windowBackground">@null</item>
+        <item name="android:colorBackground">@color/splash_background</item>
+        <item name="android:colorBackgroundCacheHint">@null</item>
+        <item name="android:textCursorDrawable">@drawable/text_cursor</item>
+        <item name="android:textSelectHandle">@drawable/text_handle</item>
+        <item name="android:textSelectHandleLeft">@drawable/text_handle_left</item>
+        <item name="android:textSelectHandleRight">@drawable/text_handle_right</item>
+        <item name="android:textSelectHandleWindowStyle">@style/TextHandleWindow</item>
         <item name="android:statusBarColor">@color/splash_background</item>
         <item name="android:navigationBarColor">@color/splash_background</item>
         <item name="android:windowDrawsSystemBarBackgrounds">true</item>
     </style>
 
+    <style name="TextHandleWindow">
+        <item name="android:background">@null</item>
+        <item name="android:popupBackground">@null</item>
+        <item name="android:windowBackground">@null</item>
+        <item name="android:colorBackgroundCacheHint">@null</item>
+    </style>
 
     <style name="AppTheme.NoActionBarLaunch" parent="Theme.SplashScreen">
-        <item name="android:background">@drawable/splash</item>
+        <item name="android:background">@null</item>
+        <item name="android:windowBackground">@color/splash_background</item>
         <item name="windowSplashScreenBackground">@color/splash_background</item>
         <item name="windowSplashScreenAnimatedIcon">@drawable/splash_icon</item>
         <item name="postSplashScreenTheme">@style/AppTheme.NoActionBar</item>

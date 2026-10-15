@@ -6,6 +6,15 @@ import { refreshAuth } from '@/composables/useAuth'
 import { initNativeApp } from '@/lib/nativeApp'
 import { flushPartieOutbox } from '@/lib/partieOffline'
 
+const CHUNK_RELOAD_KEY = 'poissonnerie-chunk-reload'
+
+window.addEventListener('vite:preloadError', (event) => {
+  if (sessionStorage.getItem(CHUNK_RELOAD_KEY) === '1') return
+  event.preventDefault()
+  sessionStorage.setItem(CHUNK_RELOAD_KEY, '1')
+  window.location.reload()
+})
+
 void (async () => {
   await initNativeApp()
   await refreshAuth()
@@ -25,4 +34,5 @@ window.addEventListener('online', () => {
 })
 void syncPendingParties()
 
+sessionStorage.removeItem(CHUNK_RELOAD_KEY)
 createApp(App).use(router).mount('#app')

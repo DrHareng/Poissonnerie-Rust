@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import { onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
-import WheelPicker from '@/components/WheelPicker.vue'
 import { forgetClock } from '@/clock'
 import { deleteTournament, listTournaments, saveTournament, type TournamentListItem } from '@/db'
 import { dispatch } from '@/engine'
@@ -59,7 +58,7 @@ function subtitle(item: TournamentListItem) {
       <div class="brand">
         <img src="/logo.png" alt="" />
         <div class="brand-text">
-          <strong>Organisateur de tournoi Infinity</strong>
+          <strong>Gestion de tournoi Infinity</strong>
           <span>Rondes suisses</span>
         </div>
       </div>
@@ -73,8 +72,14 @@ function subtitle(item: TournamentListItem) {
           <input v-model="form.name" required maxlength="80" placeholder="Coupe du samedi" />
         </label>
         <div class="fields two">
-          <WheelPicker v-model="form.rounds" :min="1" :max="12" label="Rondes" />
-          <WheelPicker v-model="form.tables" :min="1" :max="40" label="Tables" />
+          <label>
+            <span>Rondes</span>
+            <input v-model.number="form.rounds" type="number" min="1" max="12" required />
+          </label>
+          <label>
+            <span>Tables</span>
+            <input v-model.number="form.tables" type="number" min="1" max="40" required />
+          </label>
         </div>
       </div>
       <p v-if="error" class="banner error">{{ error }}</p>

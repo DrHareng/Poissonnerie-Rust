@@ -23,6 +23,21 @@ server {
         proxy_connect_timeout 10s;
     }
 
+    # APK de l'organisateur : fichier réel, pas la page d'accueil.
+    location = /infinity/organisateur.apk {
+        alias /opt/poissonnerie/frontend/dist/organisateur.apk;
+        default_type application/vnd.android.package-archive;
+        add_header Content-Disposition 'attachment; filename="Gestion-de-tournoi-Infinity.apk"';
+        add_header Cache-Control "no-cache";
+    }
+
+    # Fichiers hashés : un chunk absent doit répondre 404, pas index.html.
+    # Sinon le navigateur refuse le module (« error loading dynamically imported module »).
+    location ^~ /infinity/assets/ {
+        alias /opt/poissonnerie/frontend/dist/assets/;
+        add_header Cache-Control "public, max-age=31536000, immutable";
+    }
+
     # Front Vue Infinity (SPA) — alias + fallback named location (évite la boucle try_files)
     location /infinity/ {
         alias /opt/poissonnerie/frontend/dist/;
@@ -35,6 +50,7 @@ server {
 
     location = /infinity/index.html {
         alias /opt/poissonnerie/frontend/dist/index.html;
+        add_header Cache-Control "no-cache";
     }
 
     # API Dauphiné (même backend) /dauphine/api → serveur Rust /api
@@ -49,6 +65,11 @@ server {
         proxy_connect_timeout 10s;
     }
 
+    location ^~ /dauphine/assets/ {
+        alias /opt/poissonnerie/frontend-dauphine/dist/assets/;
+        add_header Cache-Control "public, max-age=31536000, immutable";
+    }
+
     # Front Vue Dauphiné (SPA distincte)
     location /dauphine/ {
         alias /opt/poissonnerie/frontend-dauphine/dist/;
@@ -61,6 +82,7 @@ server {
 
     location = /dauphine/index.html {
         alias /opt/poissonnerie/frontend-dauphine/dist/index.html;
+        add_header Cache-Control "no-cache";
     }
 
     # Optionnel : racine du VPS → app Infinity

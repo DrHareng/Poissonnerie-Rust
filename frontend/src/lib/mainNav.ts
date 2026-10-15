@@ -70,6 +70,7 @@ export const mainNavLinks: MainNavLink[] = [
     children: [
       { to: { name: 'maps' }, label: 'Map TTS' },
       { to: { name: 'links' }, label: 'Liens' },
+      { to: { name: 'applis' }, label: 'Applications' },
     ],
   },
 ]
@@ -92,7 +93,11 @@ export function isMainNavLinkActive(path: string, to: string) {
     return path.startsWith('/scenarios')
   }
   if (to === '/maps') {
-    return path.startsWith('/maps') || path.startsWith('/links')
+    return (
+      path.startsWith('/maps') ||
+      path.startsWith('/links') ||
+      path.startsWith('/applis')
+    )
   }
   return path === to
 }

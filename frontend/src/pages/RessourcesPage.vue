@@ -12,6 +12,7 @@ import RecentMapUpdates from '@/components/RecentMapUpdates.vue'
 import TtsMapsTab from '@/components/TtsMapsTab.vue'
 import { useAdminEditMode } from '@/composables/useAdminEditMode'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
+import { Button } from '@/components/ui/button'
 import {
   Card,
   CardContent,
@@ -19,12 +20,31 @@ import {
   CardTitle,
 } from '@/components/ui/card'
 
-type MapsLinksTabId = 'maps' | 'liens'
+type MapsLinksTabId = 'maps' | 'liens' | 'applis'
+
+const organisateurApkUrl = `${import.meta.env.BASE_URL}organisateur.apk`
 
 const tabs = [
   { id: 'maps' as const, label: 'Map TTS', routeName: 'maps' as const },
   { id: 'liens' as const, label: 'Liens', routeName: 'links' as const },
+  { id: 'applis' as const, label: 'Applications', routeName: 'applis' as const },
 ]
+
+const androidApps = [
+  {
+    name: 'Gestion de tournoi Infinity',
+    description:
+      'Version 1.0. Le téléphone demande d’autoriser l’installation depuis le navigateur.',
+    href: organisateurApkUrl,
+    download: 'Gestion-de-tournoi-Infinity.apk',
+  },
+]
+
+const tabTitles: Record<MapsLinksTabId, string> = {
+  maps: 'Map TTS',
+  liens: 'Liens',
+  applis: 'Applications',
+}
 
 const route = useRoute()
 const router = useRouter()
@@ -38,9 +58,11 @@ const currentMap = ref<{ id: number; slug: string; name: string } | null>(null)
 const updatesVisible = ref(false)
 const updatesRefresh = ref(0)
 
-const activeTab = computed<MapsLinksTabId>(() =>
-  route.name === 'links' ? 'liens' : 'maps',
-)
+const activeTab = computed<MapsLinksTabId>(() => {
+  if (route.name === 'links') return 'liens'
+  if (route.name === 'applis') return 'applis'
+  return 'maps'
+})
 
 const activeTabLabel = computed(() => {
   if (activeTab.value === 'maps' && currentMap.value) {
@@ -55,7 +77,7 @@ function setActiveTab(tab: MapsLinksTabId) {
     return
   }
   currentMap.value = null
-  router.replace({ name: 'links' })
+  router.replace({ name: tab === 'applis' ? 'applis' : 'links' })
 }
 
 async function loadLiens() {
@@ -91,7 +113,7 @@ onMounted(() => {
 })
 
 watch(activeTab, (tab) => {
-  document.title = pageTitle(tab === 'liens' ? 'Liens' : 'Map TTS')
+  document.title = pageTitle(tabTitles[tab])
   if (tab === 'liens') {
     void loadLiens()
   }
@@ -103,7 +125,7 @@ watch(activeTab, (tab) => {
     <nav
       class="page-title-tabs shrink-0"
       :class="{ 'page-title-tabs--with-meta': updatesVisible && activeTab === 'maps' }"
-      aria-label="Maps et liens"
+      aria-label="Maps, liens et applications"
     >
       <div class="page-title-tabs-list">
         <h1 class="sr-only">{{ activeTabLabel }}</h1>
@@ -165,6 +187,36 @@ watch(activeTab, (tab) => {
       @map-change="currentMap = $event"
       @updates-change="updatesRefresh += 1"
     />
+
+    <div
+      v-else-if="activeTab === 'applis'"
+      class="grid min-h-0 flex-1 content-start gap-4 overflow-y-auto"
+    >
+      <Card v-for="app in androidApps" :key="app.name" class="neon-panel">
+        <CardHeader class="pb-2">
+          <CardTitle class="flex items-center gap-2">
+            <span>{{ app.name }}</span>
+            <svg
+              viewBox="0 0 24 24"
+              class="size-5 shrink-0 text-[#3DDC84]"
+              aria-label="Android"
+              role="img"
+            >
+              <path
+                fill="currentColor"
+                d="M6.38 3.97A8.96 8.96 0 0 1 12 2c2.1 0 4.03.72 5.55 1.93l1.22-1.22a1 1 0 0 1 1.42 1.42l-1.13 1.12A8.96 8.96 0 0 1 21 11v1h1a1 1 0 0 1 1 1v2a1 1 0 0 1-1 1h-1v4a2 2 0 0 1-2 2h-1v1a1 1 0 0 1-1 1h-2a1 1 0 0 1-1-1v-1h-2v1a1 1 0 0 1-1 1H8a1 1 0 0 1-1-1v-1H6a2 2 0 0 1-2-2v-4H3a1 1 0 0 1-1-1v-2a1 1 0 0 1 1-1h1v-1c0-1.9.59-3.66 1.59-5.1L4.4 4.17a1 1 0 1 1 1.42-1.42l.56.52zM8.5 9.25a1.25 1.25 0 1 0 0-2.5 1.25 1.25 0 0 0 0 2.5zm7 0a1.25 1.25 0 1 0 0-2.5 1.25 1.25 0 0 0 0 2.5z"
+              />
+            </svg>
+          </CardTitle>
+        </CardHeader>
+        <CardContent class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <p class="text-sm text-muted-foreground">{{ app.description }}</p>
+          <Button as="a" :href="app.href" :download="app.download" class="shrink-0">
+            Télécharger
+          </Button>
+        </CardContent>
+      </Card>
+    </div>
 
     <p v-else-if="loading" class="shrink-0 text-sm text-muted-foreground">
       Chargement…

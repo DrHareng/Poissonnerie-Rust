@@ -11,7 +11,7 @@ import {
   splitMinutes,
   writeClock,
 } from '@/clock'
-import WheelPicker from '@/components/WheelPicker.vue'
+import DurationPicker from '@/components/DurationPicker.vue'
 
 const props = defineProps<{
   tournamentId: string
@@ -263,8 +263,7 @@ watch(() => [props.tournamentId, props.round] as const, restore)
             </button>
           </div>
           <div v-if="open && editing" class="clock-launch">
-            <WheelPicker v-model="hours" :min="0" :max="12" label="Heures" pad />
-            <WheelPicker v-model="mins" :min="0" :max="59" label="Minutes" pad />
+            <DurationPicker v-model:hours="hours" v-model:minutes="mins" label="Durée" />
             <button class="btn primary" type="button" :disabled="!chosen" @click="launch">
               Appliquer
             </button>
@@ -273,8 +272,7 @@ watch(() => [props.tournamentId, props.round] as const, restore)
         </template>
         <template v-else>
           <div class="clock-launch">
-            <WheelPicker v-model="hours" :min="0" :max="12" label="Heures" pad />
-            <WheelPicker v-model="mins" :min="0" :max="59" label="Minutes" pad />
+            <DurationPicker v-model:hours="hours" v-model:minutes="mins" label="Durée" />
             <button class="btn primary" type="button" :disabled="!chosen" @click="launch">
               Lancer la clock
             </button>

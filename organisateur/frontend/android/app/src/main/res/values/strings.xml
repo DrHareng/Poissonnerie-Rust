@@ -1,7 +1,7 @@
 <?xml version='1.0' encoding='utf-8'?>
 <resources>
-    <string name="app_name">Organisateur de tournoi Infinity</string>
-    <string name="title_activity_main">Organisateur de tournoi Infinity</string>
+    <string name="app_name">Gestion de tournoi Infinity</string>
+    <string name="title_activity_main">Gestion de tournoi Infinity</string>
     <string name="package_name">fr.poissonnerie.organisateur</string>
     <string name="custom_url_scheme">fr.poissonnerie.organisateur</string>
 </resources>
