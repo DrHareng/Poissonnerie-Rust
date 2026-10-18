@@ -29,6 +29,8 @@ export type Block =
       /** Cible des liens internes (table des matières, mots-clés de règle). */
       anchor?: string
       pageBreakBefore?: boolean
+      /** Ligne vide après le titre, avant le paragraphe. */
+      blankAfter?: boolean
     }
   | { kind: 'paragraph'; inlines: Inline[]; note?: boolean }
   | { kind: 'list'; items: ListItem[] }
@@ -186,7 +188,7 @@ export function buildScenarioDocument(
       a.name.localeCompare(b.name, 'fr', { sensitivity: 'base' }),
     )
     for (const rule of sorted) {
-      blocks.push(plainHeading(rule.name, ruleAnchorId(rule.slug)))
+      blocks.push(plainHeading(rule.name, ruleAnchorId(rule.slug), true))
       blocks.push(...parseScenarioMarkdown(rule.body_md, ruleLabel))
     }
     if (blocks.length > 0) sections.push({ title: 'Règles communes', blocks })
@@ -241,11 +243,12 @@ export function downloadBlob(blob: Blob, filename: string) {
   URL.revokeObjectURL(url)
 }
 
-function plainHeading(text: string, anchor?: string): Block {
+function plainHeading(text: string, anchor?: string, blankAfter = false): Block {
   return {
     kind: 'heading',
     level: 3,
     anchor,
+    blankAfter: blankAfter || undefined,
     inlines: [{ kind: 'text', text, style: { bold: true } }],
   }
 }

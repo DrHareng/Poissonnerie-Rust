@@ -170,9 +170,7 @@ mod tests {
         assert_eq!(store.list_for_user(1).unwrap().len(), 1);
         assert!(store.list_for_user(2).unwrap().is_empty());
 
-        let updated = store
-            .update(1, created.id, "Court", "## Résumé\n")
-            .unwrap();
+        let updated = store.update(1, created.id, "Court", "## Résumé\n").unwrap();
         assert_eq!(updated.body_md, "## Résumé\n");
         store.delete(1, created.id).unwrap();
         assert!(store.list_for_user(1).unwrap().is_empty());

@@ -212,11 +212,7 @@ impl ArmyStore {
     }
 
     pub fn list_selectable(&self) -> Result<Vec<Army>> {
-        Ok(self
-            .list_all()?
-            .into_iter()
-            .filter(is_listable)
-            .collect())
+        Ok(self.list_all()?.into_iter().filter(is_listable).collect())
     }
 
     pub fn validate_selectable_id(&self, id: u32) -> Result<()> {
@@ -411,10 +407,8 @@ mod tests {
 
     #[test]
     fn store_roundtrip() {
-        let dir = std::env::temp_dir().join(format!(
-            "poissonnerie-army-test-{}",
-            std::process::id()
-        ));
+        let dir =
+            std::env::temp_dir().join(format!("poissonnerie-army-test-{}", std::process::id()));
         let _ = std::fs::create_dir_all(&dir);
         let path = dir.join("armies.db");
 

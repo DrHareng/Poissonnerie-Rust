@@ -200,6 +200,7 @@ function appendBlock(
       rule: block.level === 1 ? 'strong' : block.level === 2 ? 'soft' : undefined,
       accent: block.level === 2,
     })
+    if (block.blankAfter) layout.gap(5)
     return
   }
   if (block.kind === 'list') {

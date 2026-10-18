@@ -20,10 +20,10 @@ use crate::{
 };
 
 use crate::tournament_store::{
-    AdminRegisterRequest, CompleteRegistrationListsRequest, CreateTournamentRequest, ForfeitRequest,
-    MatchActor, RegisterRequest, RerollScenarioRequest, SetBracketScenarioPoolRequest,
-    SetPoolScenariosRequest, SetupPoolsRequest, SubmitMatchRequest, UpdateBracketListsRequest,
-    UpdateTournamentDetailsRequest, UpdateTournamentFormatRequest,
+    AdminRegisterRequest, CompleteRegistrationListsRequest, CreateTournamentRequest,
+    ForfeitRequest, MatchActor, RegisterRequest, RerollScenarioRequest,
+    SetBracketScenarioPoolRequest, SetPoolScenariosRequest, SetupPoolsRequest, SubmitMatchRequest,
+    UpdateBracketListsRequest, UpdateTournamentDetailsRequest, UpdateTournamentFormatRequest,
 };
 
 #[derive(Debug, Serialize)]
@@ -195,13 +195,10 @@ fn mask_registrations(
                 .as_ref()
                 .is_some_and(|s| !s.trim().is_empty());
 
-            let is_own = viewer
-                .player_name
-                .as_ref()
-                .is_some_and(|name| {
-                    crate::store::normalize_name(name)
-                        == crate::store::normalize_name(&registration.player_name)
-                });
+            let is_own = viewer.player_name.as_ref().is_some_and(|name| {
+                crate::store::normalize_name(name)
+                    == crate::store::normalize_name(&registration.player_name)
+            });
 
             let key = crate::store::normalize_name(&registration.player_name);
             if !army_visible.contains(&key) {
@@ -221,10 +218,7 @@ fn mask_registrations(
         .collect()
 }
 
-fn mask_pool_armies(
-    pools: &mut [crate::tournament::Pool],
-    army_visible: &HashSet<String>,
-) {
+fn mask_pool_armies(pools: &mut [crate::tournament::Pool], army_visible: &HashSet<String>) {
     for pool in pools {
         for player in &mut pool.players {
             let key = crate::store::normalize_name(&player.player_name);
@@ -349,7 +343,10 @@ pub fn tournament_routes() -> axum::Router<AppState> {
             "/api/scenario-packs/{slug}/recent-updates",
             get(list_recent_scenario_updates),
         )
-        .route("/api/tournaments", get(list_tournaments).post(create_tournament))
+        .route(
+            "/api/tournaments",
+            get(list_tournaments).post(create_tournament),
+        )
         .route("/api/users", get(list_users))
         .route(
             "/api/tournaments/{id}",
@@ -430,10 +427,7 @@ pub fn tournament_routes() -> axum::Router<AppState> {
             "/api/tournaments/{id}/generate-pool-matches",
             post(generate_pool_matches),
         )
-        .route(
-            "/api/tournaments/{id}/finalize-pools",
-            post(finalize_pools),
-        )
+        .route("/api/tournaments/{id}/finalize-pools", post(finalize_pools))
         .route("/api/tournaments/{id}/setup-bracket", post(setup_bracket))
         .route(
             "/api/tournaments/{id}/generate-bracket",
@@ -681,9 +675,10 @@ async fn list_tournaments(
     session: Session,
 ) -> Result<Json<Vec<crate::tournament::TournamentListEntry>>, ApiError> {
     let viewer = viewer_context(&state, &session).await;
-    let entries = state.tournaments.list_entries().map_err(|error| {
-        ApiError::bad_request(error.to_string())
-    })?;
+    let entries = state
+        .tournaments
+        .list_entries()
+        .map_err(|error| ApiError::bad_request(error.to_string()))?;
 
     let board = state.board.lock().unwrap();
     let resolver = crate::display_name::PlayerDisplayResolver::new(&board, state.users.as_ref());
@@ -695,8 +690,7 @@ async fn list_tournaments(
             .map(|mut entry| {
                 enrich_list_validator_display_name(&state, &mut entry.tournament);
                 for top_entry in &mut entry.top_four {
-                    top_entry.player_display_name =
-                        Some(resolver.resolve(&top_entry.player_name));
+                    top_entry.player_display_name = Some(resolver.resolve(&top_entry.player_name));
                 }
                 for registration in &mut entry.registrations {
                     registration.player_display_name =
@@ -704,10 +698,8 @@ async fn list_tournaments(
                 }
                 for pool in &mut entry.pools {
                     for player in &mut pool.players {
-                        player.player_display_name =
-                            Some(resolver.resolve(&player.player_name));
-                        player.avatar_url =
-                            resolver.resolve_avatar_url(&player.player_name);
+                        player.player_display_name = Some(resolver.resolve(&player.player_name));
+                        player.avatar_url = resolver.resolve_avatar_url(&player.player_name);
                     }
                 }
                 enrich_my_tournament_summary(&state, &viewer, &resolver, &mut entry);
@@ -742,9 +734,7 @@ fn enrich_my_tournament_summary(
     use crate::tournament::RegistrationStatus;
     if !matches!(
         registration.status,
-        RegistrationStatus::Pending
-            | RegistrationStatus::Approved
-            | RegistrationStatus::Waitlisted
+        RegistrationStatus::Pending | RegistrationStatus::Approved | RegistrationStatus::Waitlisted
     ) {
         return;
     }
@@ -775,8 +765,7 @@ fn enrich_my_tournament_summary(
         .tournaments
         .list_registrations(entry.tournament.id)
         .unwrap_or_default();
-    let army_visible =
-        army_visible_player_keys(&entry.tournament, &registrations, &pools);
+    let army_visible = army_visible_player_keys(&entry.tournament, &registrations, &pools);
     let key = crate::store::normalize_name(&registration.player_name);
     if !army_visible.contains(&key) {
         registration.army_id = None;
@@ -789,14 +778,15 @@ fn enrich_my_tournament_summary(
         .unwrap_or_default()
         .into_iter()
         .filter(|tm| {
-            let plays = tm.player1.as_ref().is_some_and(|p| {
-                crate::store::normalize_name(p) == player_key
-            }) || tm.player2.as_ref().is_some_and(|p| {
-                crate::store::normalize_name(p) == player_key
-            });
-            plays
-                && tm.status != TournamentMatchStatus::Confirmed
-                && !tm.is_unplayed
+            let plays = tm
+                .player1
+                .as_ref()
+                .is_some_and(|p| crate::store::normalize_name(p) == player_key)
+                || tm
+                    .player2
+                    .as_ref()
+                    .is_some_and(|p| crate::store::normalize_name(p) == player_key);
+            plays && tm.status != TournamentMatchStatus::Confirmed && !tm.is_unplayed
         })
         .map(|mut tm| {
             if let Some(ref name) = tm.player1 {
@@ -898,11 +888,8 @@ async fn get_tournament(
 
     enrich_list_validator_display_name(&state, &mut detail.tournament);
 
-    let army_visible = army_visible_player_keys(
-        &detail.tournament,
-        &detail.registrations,
-        &detail.pools,
-    );
+    let army_visible =
+        army_visible_player_keys(&detail.tournament, &detail.registrations, &detail.pools);
     detail.registrations = mask_registrations(
         &detail.tournament,
         detail.registrations,
@@ -958,11 +945,14 @@ fn resolve_army_id_from_lists(
         return Ok(army_id);
     }
 
-    let slug1 = crate::army_list::parse_army_list_faction_slug(list1)
-        .ok_or_else(|| ApiError::bad_request("impossible de lire la sectorielle depuis la liste 1"))?;
+    let slug1 = crate::army_list::parse_army_list_faction_slug(list1).ok_or_else(|| {
+        ApiError::bad_request("impossible de lire la sectorielle depuis la liste 1")
+    })?;
     if let Some(list2_code) = crate::army_list::normalize_army_list_code(list2) {
-        let slug2 = crate::army_list::parse_army_list_faction_slug(&list2_code)
-            .ok_or_else(|| ApiError::bad_request("impossible de lire la sectorielle depuis la liste 2"))?;
+        let slug2 =
+            crate::army_list::parse_army_list_faction_slug(&list2_code).ok_or_else(|| {
+                ApiError::bad_request("impossible de lire la sectorielle depuis la liste 2")
+            })?;
         if !slug1.eq_ignore_ascii_case(&slug2) {
             return Err(ApiError::bad_request(
                 "les deux listes doivent appartenir à la même sectorielle",
@@ -1018,8 +1008,9 @@ async fn complete_registration_lists(
         return Ok(Json(registration));
     }
 
-    let (list1, list2) = crate::army_list::require_lists(&payload.army_list_1, &payload.army_list_2)
-        .map_err(|error| ApiError::bad_request(error.to_string()))?;
+    let (list1, list2) =
+        crate::army_list::require_lists(&payload.army_list_1, &payload.army_list_2)
+            .map_err(|error| ApiError::bad_request(error.to_string()))?;
     let list2 = list2.unwrap_or_default();
     let army_id = resolve_army_id_from_lists(&state, &list1, &list2, None)?;
     let registration = state
@@ -1083,9 +1074,9 @@ async fn admin_register(
         .ok_or_else(|| ApiError::bad_request("tournoi introuvable"))?;
 
     let registration = if tournament.status == TournamentStatus::Started {
-        let pool_id = payload.pool_id.ok_or_else(|| {
-            ApiError::bad_request("choisissez une poule pour ajouter ce joueur")
-        })?;
+        let pool_id = payload
+            .pool_id
+            .ok_or_else(|| ApiError::bad_request("choisissez une poule pour ajouter ce joueur"))?;
         let start_rating = {
             let board = state.board.lock().unwrap();
             board
@@ -1145,11 +1136,8 @@ async fn list_registrations(
         user_id: Some(user.id),
         player_name: None,
     };
-    let army_visible = army_visible_player_keys(
-        &detail.tournament,
-        &detail.registrations,
-        &detail.pools,
-    );
+    let army_visible =
+        army_visible_player_keys(&detail.tournament, &detail.registrations, &detail.pools);
     Ok(Json(mask_registrations(
         &detail.tournament,
         detail.registrations,
@@ -1646,7 +1634,10 @@ async fn start_tournament_partie(
             if existing.status == crate::match_record::MatchStatus::InProgress {
                 let resolver =
                     crate::display_name::PlayerDisplayResolver::new(&board, state.users.as_ref());
-                return Ok((StatusCode::OK, Json(resolver.enrich_match(existing.clone()))));
+                return Ok((
+                    StatusCode::OK,
+                    Json(resolver.enrich_match(existing.clone())),
+                ));
             }
         }
     }
@@ -1723,9 +1714,7 @@ async fn start_tournament_partie(
         .validate_selectable_id(army2)
         .map_err(|error| ApiError::bad_request(error.to_string()))?;
 
-    let created_by = caller_player
-        .clone()
-        .unwrap_or_else(|| p1.clone());
+    let created_by = caller_player.clone().unwrap_or_else(|| p1.clone());
 
     let tournament_name = state
         .tournaments
@@ -1758,10 +1747,7 @@ async fn start_tournament_partie(
             )
             .map_err(|error| ApiError::bad_request(error.to_string()))?;
         board.set_match_tournament_context(record.id, tournament_name, pool_name);
-        let record = board
-            .get_match(record.id)
-            .cloned()
-            .unwrap_or(record);
+        let record = board.get_match(record.id).cloned().unwrap_or(record);
         board
             .save(&state.db_path)
             .map_err(|error| ApiError::bad_request(error.to_string()))?;
@@ -1947,12 +1933,7 @@ async fn forfeit_tournament_match(
     }
 
     Ok(Json(
-        state
-            .tournaments
-            .get_match(id)
-            .ok()
-            .flatten()
-            .unwrap_or(tm),
+        state.tournaments.get_match(id).ok().flatten().unwrap_or(tm),
     ))
 }
 
@@ -2163,7 +2144,9 @@ fn apply_tournament_match_to_board(
 
     let p1 = tm.player1.as_ref().unwrap();
     let p2 = tm.player2.as_ref().unwrap();
-    let outcome = tm.outcome.ok_or_else(|| ApiError::bad_request("résultat manquant"))?;
+    let outcome = tm
+        .outcome
+        .ok_or_else(|| ApiError::bad_request("résultat manquant"))?;
 
     let update = RatingUpdate {
         player1_old: tm.player1_rating_used.unwrap_or(0.0),
@@ -2287,14 +2270,18 @@ fn sync_board_after_tournament_correction(
         .collect();
 
     for match_id in match_ids {
-        let (old_d1, old_d2, p1, p2) = old_snapshot
-            .get(&match_id)
-            .cloned()
-            .unwrap_or((0.0, 0.0, String::new(), String::new()));
-        let (new_d1, new_d2, new_p1, new_p2) = new_snapshot
-            .get(&match_id)
-            .cloned()
-            .unwrap_or((0.0, 0.0, String::new(), String::new()));
+        let (old_d1, old_d2, p1, p2) = old_snapshot.get(&match_id).cloned().unwrap_or((
+            0.0,
+            0.0,
+            String::new(),
+            String::new(),
+        ));
+        let (new_d1, new_d2, new_p1, new_p2) = new_snapshot.get(&match_id).cloned().unwrap_or((
+            0.0,
+            0.0,
+            String::new(),
+            String::new(),
+        ));
 
         let p1 = if p1.is_empty() { new_p1 } else { p1 };
         let p2 = if p2.is_empty() { new_p2 } else { p2 };
@@ -2383,9 +2370,7 @@ pub async fn ranking_with_stars(state: &AppState) -> Result<Vec<RankedPlayerWith
             star_count: stars.get(&player.name).copied().unwrap_or(0),
             display_name: resolver.resolve_player(player),
             player: player.clone(),
-            top_armies: board
-                .player_top_armies(&player.name, 3)
-                .unwrap_or_default(),
+            top_armies: board.player_top_armies(&player.name, 3).unwrap_or_default(),
         })
         .collect();
     Ok(ranking)

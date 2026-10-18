@@ -294,6 +294,8 @@ pub fn migrate(conn: &Connection) -> Result<()> {
     migrate_match_reports(conn)?;
     migrate_site_content(conn)?;
     migrate_tts_maps(conn)?;
+    migrate_tts_profiles(conn)?;
+    migrate_tts_figurines(conn)?;
     migrate_content_updates(conn)?;
 
     if column_exists(conn, "matches", "tournament_id")?
@@ -870,17 +872,47 @@ fn migrate_scenario_pack_schema(conn: &Connection) -> Result<()> {
     let upgrading_scenarios = !column_exists(conn, "scenarios", "map_filename")?;
 
     for (column, ddl) in [
-        ("pack_id", "ALTER TABLE scenarios ADD COLUMN pack_id INTEGER REFERENCES scenario_packs(id)"),
+        (
+            "pack_id",
+            "ALTER TABLE scenarios ADD COLUMN pack_id INTEGER REFERENCES scenario_packs(id)",
+        ),
         ("slug", "ALTER TABLE scenarios ADD COLUMN slug TEXT"),
-        ("map_filename", "ALTER TABLE scenarios ADD COLUMN map_filename TEXT"),
-        ("flavor_text", "ALTER TABLE scenarios ADD COLUMN flavor_text TEXT"),
-        ("end_condition_md", "ALTER TABLE scenarios ADD COLUMN end_condition_md TEXT"),
-        ("objectives_md", "ALTER TABLE scenarios ADD COLUMN objectives_md TEXT"),
-        ("deployment_notes_md", "ALTER TABLE scenarios ADD COLUMN deployment_notes_md TEXT"),
-        ("exclusion_zones_md", "ALTER TABLE scenarios ADD COLUMN exclusion_zones_md TEXT"),
-        ("elements_md", "ALTER TABLE scenarios ADD COLUMN elements_md TEXT"),
-        ("special_rules_md", "ALTER TABLE scenarios ADD COLUMN special_rules_md TEXT"),
-        ("sort_order", "ALTER TABLE scenarios ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0"),
+        (
+            "map_filename",
+            "ALTER TABLE scenarios ADD COLUMN map_filename TEXT",
+        ),
+        (
+            "flavor_text",
+            "ALTER TABLE scenarios ADD COLUMN flavor_text TEXT",
+        ),
+        (
+            "end_condition_md",
+            "ALTER TABLE scenarios ADD COLUMN end_condition_md TEXT",
+        ),
+        (
+            "objectives_md",
+            "ALTER TABLE scenarios ADD COLUMN objectives_md TEXT",
+        ),
+        (
+            "deployment_notes_md",
+            "ALTER TABLE scenarios ADD COLUMN deployment_notes_md TEXT",
+        ),
+        (
+            "exclusion_zones_md",
+            "ALTER TABLE scenarios ADD COLUMN exclusion_zones_md TEXT",
+        ),
+        (
+            "elements_md",
+            "ALTER TABLE scenarios ADD COLUMN elements_md TEXT",
+        ),
+        (
+            "special_rules_md",
+            "ALTER TABLE scenarios ADD COLUMN special_rules_md TEXT",
+        ),
+        (
+            "sort_order",
+            "ALTER TABLE scenarios ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0",
+        ),
     ] {
         if !column_exists(conn, "scenarios", column)? {
             conn.execute(ddl, [])?;
@@ -1071,6 +1103,92 @@ fn migrate_site_content(conn: &Connection) -> Result<()> {
     Ok(())
 }
 
+fn migrate_tts_profiles(conn: &Connection) -> Result<()> {
+    conn.execute_batch(
+        "
+        CREATE TABLE IF NOT EXISTS tts_profiles (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            army_id INTEGER REFERENCES armies(id),
+            faction_slug TEXT,
+            faction_label TEXT NOT NULL,
+            isc TEXT NOT NULL,
+            loadout TEXT NOT NULL DEFAULT '',
+            nom_tts TEXT NOT NULL,
+            description_tts TEXT NOT NULL DEFAULT '',
+            silhouette_size TEXT,
+            silhouette_type TEXT,
+            marker_name TEXT,
+            mesh_url TEXT,
+            marker_mesh_url TEXT,
+            source_bag TEXT NOT NULL,
+            source_index INTEGER NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_tts_profiles_army_isc
+            ON tts_profiles(army_id, isc);
+        CREATE INDEX IF NOT EXISTS idx_tts_profiles_isc
+            ON tts_profiles(isc);
+
+        CREATE TABLE IF NOT EXISTS tts_profile_forms (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            profile_id INTEGER NOT NULL REFERENCES tts_profiles(id) ON DELETE CASCADE,
+            state_index INTEGER NOT NULL,
+            isc TEXT NOT NULL,
+            loadout TEXT NOT NULL DEFAULT '',
+            nom_tts TEXT NOT NULL,
+            description_tts TEXT NOT NULL DEFAULT '',
+            silhouette_size TEXT,
+            silhouette_type TEXT,
+            marker_name TEXT,
+            mesh_url TEXT,
+            marker_mesh_url TEXT
+        );
+        CREATE INDEX IF NOT EXISTS idx_tts_profile_forms_profile
+            ON tts_profile_forms(profile_id, state_index);
+
+        CREATE TABLE IF NOT EXISTS tts_profile_sectorials (
+            profile_id INTEGER NOT NULL REFERENCES tts_profiles(id) ON DELETE CASCADE,
+            army_id INTEGER NOT NULL REFERENCES armies(id),
+            PRIMARY KEY (profile_id, army_id)
+        );
+        CREATE INDEX IF NOT EXISTS idx_tts_profile_sectorials_army
+            ON tts_profile_sectorials(army_id);
+
+        CREATE TABLE IF NOT EXISTS tts_profile_traits (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            profile_id INTEGER NOT NULL REFERENCES tts_profiles(id) ON DELETE CASCADE,
+            form_id INTEGER REFERENCES tts_profile_forms(id) ON DELETE CASCADE,
+            kind TEXT NOT NULL,
+            name TEXT NOT NULL,
+            detail TEXT,
+            sort_order INTEGER NOT NULL DEFAULT 0
+        );
+        CREATE INDEX IF NOT EXISTS idx_tts_profile_traits_profile
+            ON tts_profile_traits(profile_id, form_id, sort_order);
+        ",
+    )?;
+    Ok(())
+}
+
+fn migrate_tts_figurines(conn: &Connection) -> Result<()> {
+    conn.execute_batch(
+        "
+        CREATE TABLE IF NOT EXISTS tts_figurines (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            isc TEXT NOT NULL,
+            loadout TEXT NOT NULL DEFAULT '',
+            painter TEXT NOT NULL DEFAULT '',
+            asset_bundle_url TEXT NOT NULL DEFAULT '',
+            photo_filename TEXT,
+            created_at INTEGER NOT NULL,
+            updated_at INTEGER NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_tts_figurines_isc
+            ON tts_figurines(isc, loadout);
+        ",
+    )?;
+    Ok(())
+}
+
 fn migrate_tts_maps(conn: &Connection) -> Result<()> {
     conn.execute_batch(
         "
@@ -1207,12 +1325,7 @@ fn column_exists(conn: &Connection, table: &str, column: &str) -> Result<bool> {
 }
 
 /// `true` si la colonne vient d'être ajoutée.
-fn add_column_if_missing(
-    conn: &Connection,
-    table: &str,
-    column: &str,
-    ddl: &str,
-) -> Result<bool> {
+fn add_column_if_missing(conn: &Connection, table: &str, column: &str, ddl: &str) -> Result<bool> {
     if column_exists(conn, table, column)? {
         return Ok(false);
     }

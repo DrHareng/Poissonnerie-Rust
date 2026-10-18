@@ -102,7 +102,7 @@ function renderDocx(doc: ScenarioDoc, images: Map<string, ImageAsset>): Document
         children.push(
           new Paragraph({
             heading: HeadingLevel.HEADING_2,
-            spacing: { before: 200, after: 60 },
+            spacing: { before: 200, after: block.blankAfter ? 300 : 60 },
             children: bookmark(
               block.anchor,
               docxRuns(block.inlines, images, anchors, { size: 24, bold: true }),

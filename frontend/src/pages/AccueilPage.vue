@@ -22,8 +22,9 @@ import MatchListRow from '@/components/MatchListRow.vue'
 import MarkdownContent from '@/components/MarkdownContent.vue'
 import TournamentPoolScenarioLinks from '@/components/TournamentPoolScenarioLinks.vue'
 import { useArmies } from '@/composables/useArmies'
+import { useAuth } from '@/composables/useAuth'
 import { scoreBadgeMinCh as computeScoreBadgeMinCh } from '@/lib/matchResultBadges'
-import { mainNavLinks } from '@/lib/mainNav'
+import { visibleMainNavLinks } from '@/lib/mainNav'
 import { formatPoolsEndSummary, formatRegistrationSummary, isTournamentPoolsPhase, isTournamentRegistrationPhase, tournamentRegistrationCapacity } from '@/lib/tournamentDisplay'
 import TournamentDescriptionWithRegistrants from '@/components/TournamentDescriptionWithRegistrants.vue'
 import TournamentPoolsPreview from '@/components/TournamentPoolsPreview.vue'
@@ -42,6 +43,7 @@ import {
 } from '@/components/ui/table'
 
 const router = useRouter()
+const { isAdmin } = useAuth()
 const { ensureLoaded, getArmy } = useArmies()
 
 const loading = ref(true)
@@ -49,7 +51,7 @@ const players = ref<RankedPlayer[]>([])
 const tournament = ref<TournamentListEntry | null>(null)
 const matches = ref<MatchRecord[]>([])
 const reports = ref<RecentMatchReport[]>([])
-const navLinks = mainNavLinks
+const navLinks = computed(() => visibleMainNavLinks(isAdmin.value))
 
 const topPlayers = computed(() =>
   players.value

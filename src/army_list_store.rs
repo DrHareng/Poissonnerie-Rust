@@ -7,7 +7,9 @@ use anyhow::{Context, Result};
 use rusqlite::{params, Connection};
 use serde::Serialize;
 
-use crate::army_list::{normalize_army_list_code, parse_army_list_faction_slug, parse_army_list_name};
+use crate::army_list::{
+    normalize_army_list_code, parse_army_list_faction_slug, parse_army_list_name,
+};
 use crate::migrate::migrate;
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
@@ -153,7 +155,8 @@ pub fn get_or_create_in_conn(conn: &Connection, raw: &str) -> Result<ArmyList> {
 }
 
 fn get_by_code_in_conn(conn: &Connection, code: &str) -> Result<Option<ArmyList>> {
-    let mut stmt = conn.prepare("SELECT id, code, army_id, name FROM army_lists WHERE code = ?1")?;
+    let mut stmt =
+        conn.prepare("SELECT id, code, army_id, name FROM army_lists WHERE code = ?1")?;
     let mut rows = stmt.query(params![code])?;
     if let Some(row) = rows.next()? {
         return Ok(Some(map_army_list_row(row)?));
@@ -297,11 +300,7 @@ fn list_stats_by_army_in_conn(
     Ok(groups)
 }
 
-fn list_match_ids_in_conn(
-    conn: &Connection,
-    army_list_id: i64,
-    limit: usize,
-) -> Result<Vec<u64>> {
+fn list_match_ids_in_conn(conn: &Connection, army_list_id: i64, limit: usize) -> Result<Vec<u64>> {
     let limit = limit.clamp(1, 500) as i64;
     let mut stmt = conn.prepare(
         "
@@ -356,7 +355,8 @@ fn map_stats_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<ArmyListStatsEntry
 
 /// Remplit `army_lists.name` depuis le code encodé.
 pub fn backfill_army_list_names(conn: &Connection) -> Result<()> {
-    let mut stmt = conn.prepare("SELECT id, code FROM army_lists WHERE name IS NULL OR trim(name) = ''")?;
+    let mut stmt =
+        conn.prepare("SELECT id, code FROM army_lists WHERE name IS NULL OR trim(name) = ''")?;
     let rows: Vec<(i64, String)> = stmt
         .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?
         .filter_map(|row| row.ok())
@@ -376,8 +376,18 @@ pub fn backfill_army_list_names(conn: &Connection) -> Result<()> {
 
 /// Migration : backfill `army_lists` et FK depuis les codes TEXT existants.
 pub fn backfill_army_list_references(conn: &Connection) -> Result<()> {
-    backfill_codes_from_column(conn, "matches", "player1_army_list_code", "player1_army_list_id")?;
-    backfill_codes_from_column(conn, "matches", "player2_army_list_code", "player2_army_list_id")?;
+    backfill_codes_from_column(
+        conn,
+        "matches",
+        "player1_army_list_code",
+        "player1_army_list_id",
+    )?;
+    backfill_codes_from_column(
+        conn,
+        "matches",
+        "player2_army_list_code",
+        "player2_army_list_id",
+    )?;
     backfill_codes_from_column(
         conn,
         "tournament_matches",

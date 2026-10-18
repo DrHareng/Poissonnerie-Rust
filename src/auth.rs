@@ -80,8 +80,7 @@ pub struct AuthConfig {
 impl AuthConfig {
     pub fn from_env() -> Result<Self> {
         Ok(Self {
-            client_id: std::env::var("DISCORD_CLIENT_ID")
-                .context("DISCORD_CLIENT_ID manquant")?,
+            client_id: std::env::var("DISCORD_CLIENT_ID").context("DISCORD_CLIENT_ID manquant")?,
             client_secret: std::env::var("DISCORD_CLIENT_SECRET")
                 .context("DISCORD_CLIENT_SECRET manquant")?,
             redirect_uri: std::env::var("DISCORD_REDIRECT_URI")
@@ -276,7 +275,10 @@ pub async fn current_user(users: &UserStore, session: &Session) -> Result<Option
 }
 
 pub async fn logout(session: &Session) -> Result<()> {
-    session.flush().await.context("impossible de fermer la session")
+    session
+        .flush()
+        .await
+        .context("impossible de fermer la session")
 }
 
 #[derive(Debug, Deserialize)]

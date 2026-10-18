@@ -54,3 +54,7 @@ path = "src/bin/merge-players.rs"
 [[bin]]
 name = "poissonnerie-fix-tournament-armies"
 path = "src/bin/fix-tournament-armies.rs"
+
+[[bin]]
+name = "poissonnerie-import-tts-profiles"
+path = "src/bin/import-tts-profiles.rs"

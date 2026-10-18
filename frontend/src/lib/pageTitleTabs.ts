@@ -51,6 +51,24 @@ export const tournoisTabs: PageTitleTab[] = [
   },
 ]
 
+export const profilsFigsTabs: PageTitleTab[] = [
+  {
+    to: { name: 'profils-figs-profils' },
+    label: 'Profils',
+    activeNames: ['profils-figs-profils'],
+  },
+  {
+    to: { name: 'profils-figs-figs' },
+    label: 'Figs 3D',
+    activeNames: ['profils-figs-figs'],
+  },
+  {
+    to: { name: 'profils-figs-listes' },
+    label: 'Listes TTS',
+    activeNames: ['profils-figs-listes'],
+  },
+]
+
 export const adminTabs: PageTitleTab[] = [
   {
     to: { name: 'admin' },

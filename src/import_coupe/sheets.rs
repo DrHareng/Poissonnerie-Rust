@@ -1,6 +1,6 @@
 use std::collections::{HashMap, HashSet};
 
-use anyhow::{Context, Result, bail};
+use anyhow::{bail, Context, Result};
 use reqwest::blocking::Client;
 use urlencoding::encode;
 
@@ -53,7 +53,11 @@ pub struct ParsedCoupeSheet {
     pub final_placements: Vec<(String, u32)>,
 }
 
-pub fn fetch_sheet(client: &Client, spreadsheet_id: &str, sheet_name: &str) -> Result<Vec<Vec<String>>> {
+pub fn fetch_sheet(
+    client: &Client,
+    spreadsheet_id: &str,
+    sheet_name: &str,
+) -> Result<Vec<Vec<String>>> {
     let url = format!(
         "https://docs.google.com/spreadsheets/d/{spreadsheet_id}/gviz/tq?tqx=out:csv&sheet={}",
         encode(sheet_name)
@@ -105,10 +109,7 @@ pub fn load_coupe_data(client: &Client, spreadsheet_id: &str) -> Result<ParsedCo
     }
     inscriptions = dedupe_players(inscriptions);
 
-    let mut known: HashSet<String> = inscriptions
-        .iter()
-        .map(|p| normalize_name(p))
-        .collect();
+    let mut known: HashSet<String> = inscriptions.iter().map(|p| normalize_name(p)).collect();
     for key in pool_matches.keys() {
         known.insert(key.0.clone());
         known.insert(key.1.clone());
@@ -378,9 +379,9 @@ fn parse_bracket_from_recap(
         if used[i] {
             continue;
         }
-        if let Some(j) = (i + 1..scores.len()).find(|&j| {
-            !used[j] && pairs_bracket_score(&scores[i], &scores[j])
-        }) {
+        if let Some(j) =
+            (i + 1..scores.len()).find(|&j| !used[j] && pairs_bracket_score(&scores[i], &scores[j]))
+        {
             used[i] = true;
             used[j] = true;
             let a = &scores[i];
@@ -465,13 +466,15 @@ fn read_bracket_score(
     if row[col + 1].is_empty() || row[col + 1].chars().all(|c| c.is_ascii_digit()) {
         return None;
     }
-    if is_noise_name(&row[col + 1]) || is_pool_rank(&row[col + 1]) || is_rank_label(&row[col + 1])
-    {
+    if is_noise_name(&row[col + 1]) || is_pool_rank(&row[col + 1]) || is_rank_label(&row[col + 1]) {
         return None;
     }
     // OP/VP peuvent être vides dans les sheets historiques → 0.
     let obj = row.get(col + 2).and_then(|s| parse_u8_cell(s)).unwrap_or(0);
-    let surv = row.get(col + 3).and_then(|s| parse_u16_cell(s)).unwrap_or(0);
+    let surv = row
+        .get(col + 3)
+        .and_then(|s| parse_u16_cell(s))
+        .unwrap_or(0);
     Some((name, obj, surv, 4))
 }
 
@@ -482,7 +485,12 @@ fn pairs_bracket_score(a: &ScoreCell, b: &ScoreCell) -> bool {
     a.col == b.col && (a.row as i32 - b.row as i32).abs() <= 2
 }
 
-fn find_scenario_between(rows: &[Vec<String>], row_a: usize, row_b: usize, col: usize) -> Option<String> {
+fn find_scenario_between(
+    rows: &[Vec<String>],
+    row_a: usize,
+    row_b: usize,
+    col: usize,
+) -> Option<String> {
     let start = row_a.min(row_b);
     let end = row_a.max(row_b);
     for row in &rows[start..=end.min(rows.len().saturating_sub(1))] {
@@ -527,18 +535,13 @@ fn parse_final_placements(rows: &[Vec<String>]) -> Vec<(String, u32)> {
     let mut out = Vec::new();
     let mut pending: Option<(u32, usize)> = None;
     for row in rows {
-        if let Some((rank, idx)) = row
-            .iter()
-            .enumerate()
-            .skip(start_col)
-            .find_map(|(i, c)| {
-                if is_rank_label(c) {
-                    Some((parse_rank_label(c), i))
-                } else {
-                    None
-                }
-            })
-        {
+        if let Some((rank, idx)) = row.iter().enumerate().skip(start_col).find_map(|(i, c)| {
+            if is_rank_label(c) {
+                Some((parse_rank_label(c), i))
+            } else {
+                None
+            }
+        }) {
             if rank == 99 {
                 continue;
             }
@@ -622,7 +625,6 @@ fn final_classement_start_col(rows: &[Vec<String>]) -> usize {
     14
 }
 
-
 fn is_rank_label(label: &str) -> bool {
     matches!(
         label,
@@ -656,10 +658,7 @@ fn pool_index(letter: char) -> usize {
 }
 
 fn numeric_tail(cells: &[String]) -> Vec<u32> {
-    cells
-        .iter()
-        .filter_map(|c| c.parse::<u32>().ok())
-        .collect()
+    cells.iter().filter_map(|c| c.parse::<u32>().ok()).collect()
 }
 
 fn parse_u8_cell(s: &str) -> Option<u8> {
@@ -738,10 +737,7 @@ fn looks_like_player(name: &str) -> bool {
 
 pub fn validate_parsed(data: &ParsedCoupeSheet) -> Result<()> {
     if data.pools.len() != 4 {
-        bail!(
-            "4 poules attendues, {} trouvées",
-            data.pools.len()
-        );
+        bail!("4 poules attendues, {} trouvées", data.pools.len());
     }
     if data.inscriptions.is_empty() {
         bail!("aucun inscrit trouvé");

@@ -49,14 +49,8 @@ pub fn tts_map_routes() -> Router<AppState> {
             "/api/tts-maps/{id}/pictures/{filename}",
             get(serve_map_picture).delete(delete_map_picture),
         )
-        .route(
-            "/api/tts-map-content-images",
-            get(list_content_images),
-        )
-        .route(
-            "/api/tts-map-reports",
-            get(list_map_reports),
-        )
+        .route("/api/tts-map-content-images", get(list_content_images))
+        .route("/api/tts-map-reports", get(list_map_reports))
         .route("/api/tts-map-updates", get(list_recent_map_updates))
         .route("/api/tts-map-reports/count", get(count_map_reports))
         .route(
@@ -283,7 +277,11 @@ async fn download_map_json(
         return Err(ApiError::bad_request("JSON introuvable"));
     };
     let bytes = std::fs::read(&path).map_err(|_| ApiError::bad_request("JSON introuvable"))?;
-    file_response(bytes, tts_map::mime_from_filename(&filename), Some(&filename))
+    file_response(
+        bytes,
+        tts_map::mime_from_filename(&filename),
+        Some(&filename),
+    )
 }
 
 async fn upload_map_picture(
@@ -370,7 +368,9 @@ async fn create_map_report(
 ) -> Result<Json<TtsMapReport>, ApiError> {
     let user = require_user(&state, &session).await?;
     let (description, file) = read_report_upload(multipart).await?;
-    let image = file.as_ref().map(|(name, bytes)| (name.as_str(), bytes.as_slice()));
+    let image = file
+        .as_ref()
+        .map(|(name, bytes)| (name.as_str(), bytes.as_slice()));
     state
         .tts_maps
         .create_report(id, user.id, &description, image)
@@ -502,7 +502,11 @@ async fn download_variant_json(
         return Err(ApiError::bad_request("JSON introuvable"));
     };
     let bytes = std::fs::read(&path).map_err(|_| ApiError::bad_request("JSON introuvable"))?;
-    file_response(bytes, tts_map::mime_from_filename(&filename), Some(&filename))
+    file_response(
+        bytes,
+        tts_map::mime_from_filename(&filename),
+        Some(&filename),
+    )
 }
 
 async fn delete_map_variant(

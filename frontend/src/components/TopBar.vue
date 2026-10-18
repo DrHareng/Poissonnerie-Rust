@@ -29,7 +29,7 @@ import { useTtsMapReportCount } from '@/composables/useTtsMapReportCount'
 import { withBase } from '@/lib/basePath'
 import {
   isMainNavLinkActive,
-  mainNavLinks,
+  visibleMainNavLinks,
   type MainNavLink,
 } from '@/lib/mainNav'
 import { Button } from '@/components/ui/button'
@@ -60,7 +60,7 @@ const profileBadgeCount = computed(
     + pendingConfirmationCount.value,
 )
 
-const links = mainNavLinks
+const links = computed(() => visibleMainNavLinks(isAdmin.value))
 
 const activePath = computed(() => route.path)
 const openFlyout = ref<string | null>(null)

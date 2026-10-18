@@ -67,12 +67,10 @@ mod tests {
 
     #[test]
     fn upset_gives_larger_gain_than_expected_win() {
-        let (_, underdog_new) =
-            update_ratings(1600.0, 1400.0, MatchScore::Loss, DEFAULT_K_FACTOR);
+        let (_, underdog_new) = update_ratings(1600.0, 1400.0, MatchScore::Loss, DEFAULT_K_FACTOR);
         let underdog_gain = underdog_new - 1400.0;
 
-        let (favorite_new, _) =
-            update_ratings(1600.0, 1400.0, MatchScore::Win, DEFAULT_K_FACTOR);
+        let (favorite_new, _) = update_ratings(1600.0, 1400.0, MatchScore::Win, DEFAULT_K_FACTOR);
         let favorite_gain = favorite_new - 1600.0;
 
         assert!(underdog_gain > favorite_gain);

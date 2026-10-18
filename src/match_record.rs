@@ -296,10 +296,14 @@ impl MatchRecord {
 pub fn normalize_client_uuid(value: &str) -> anyhow::Result<String> {
     let trimmed = value.trim().to_ascii_lowercase();
     let valid = trimmed.len() == 36
-        && trimmed.as_bytes().iter().enumerate().all(|(index, byte)| match index {
-            8 | 13 | 18 | 23 => *byte == b'-',
-            _ => byte.is_ascii_hexdigit(),
-        });
+        && trimmed
+            .as_bytes()
+            .iter()
+            .enumerate()
+            .all(|(index, byte)| match index {
+                8 | 13 | 18 | 23 => *byte == b'-',
+                _ => byte.is_ascii_hexdigit(),
+            });
     if !valid {
         anyhow::bail!("identifiant de partie hors ligne invalide");
     }

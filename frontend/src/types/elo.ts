@@ -581,3 +581,108 @@ export interface TtsMapVariant {
   created_at: number
   updated_at: number
 }
+
+export interface TtsProfileSummary {
+  id: number
+  army_id: number | null
+  faction_label: string
+  isc: string
+  loadout: string
+  nom_tts: string
+  silhouette_size: string | null
+  silhouette_type: string | null
+  marker_name: string | null
+  form_count: number
+  linked: boolean
+  differences: string
+}
+
+export interface TtsProfileForm {
+  id: number
+  state_index: number
+  isc: string
+  loadout: string
+  nom_tts: string
+  description_tts: string
+  silhouette_size: string | null
+  silhouette_type: string | null
+  marker_name: string | null
+  mesh_url: string | null
+  marker_mesh_url: string | null
+  traits: TtsProfileTrait[]
+}
+
+export interface TtsProfileTrait {
+  kind: string
+  name: string
+  detail: string | null
+}
+
+export interface TtsProfileDetail {
+  id: number
+  army_id: number | null
+  faction_slug: string | null
+  faction_label: string
+  isc: string
+  loadout: string
+  nom_tts: string
+  description_tts: string
+  silhouette_size: string | null
+  silhouette_type: string | null
+  marker_name: string | null
+  mesh_url: string | null
+  marker_mesh_url: string | null
+  forms: TtsProfileForm[]
+  sectorial_ids: number[]
+  traits: TtsProfileTrait[]
+}
+
+export interface TtsFigurine {
+  id: number
+  isc: string
+  loadout: string
+  painter: string
+  asset_bundle_url: string
+  photo_url: string | null
+  created_at: number
+  updated_at: number
+}
+
+export interface TtsFigurineWrite {
+  isc: string
+  loadout: string
+  painter: string
+  asset_bundle_url: string
+}
+
+export interface TtsProfileLabel {
+  isc: string
+  loadout: string
+}
+
+export interface TtsProfileArmyCount {
+  army_id: number | null
+  name: string | null
+  slug: string | null
+  count: number
+}
+
+export interface TtsProfileUpdate {
+  army_id: number | null
+  isc: string
+  loadout: string
+  nom_tts: string
+  description_tts: string
+  silhouette_size: string | null
+  marker_name: string | null
+  sectorial_ids: number[]
+  forms: Array<{
+    id: number
+    isc: string
+    loadout: string
+    nom_tts: string
+    description_tts: string
+    silhouette_size: string | null
+    marker_name: string | null
+  }>
+}

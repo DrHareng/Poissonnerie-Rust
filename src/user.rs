@@ -141,7 +141,10 @@ impl UserStore {
         let now = now_unix();
         let conn = self.conn.lock().unwrap();
 
-        if self.get_by_discord_id_in_conn(&conn, &profile.discord_id)?.is_some() {
+        if self
+            .get_by_discord_id_in_conn(&conn, &profile.discord_id)?
+            .is_some()
+        {
             conn.execute(
                 "
                 UPDATE users
@@ -186,11 +189,7 @@ impl UserStore {
             .with_context(|| "utilisateur introuvable après création")
     }
 
-    pub fn update_local_profile(
-        &self,
-        user_id: i64,
-        update: LocalProfileUpdate,
-    ) -> Result<User> {
+    pub fn update_local_profile(&self, user_id: i64, update: LocalProfileUpdate) -> Result<User> {
         let conn = self.conn.lock().unwrap();
         let current = self
             .get_by_id_in_conn(&conn, user_id)?
@@ -217,7 +216,12 @@ impl UserStore {
                 profile_image_id = ?3
             WHERE id = ?4
             ",
-            params![local_display_name, local_avatar_url, profile_image_id, user_id],
+            params![
+                local_display_name,
+                local_avatar_url,
+                profile_image_id,
+                user_id
+            ],
         )?;
 
         self.get_by_id_in_conn(&conn, user_id)?
@@ -230,9 +234,7 @@ impl UserStore {
             .get_by_id_in_conn(&conn, user_id)?
             .with_context(|| "utilisateur introuvable")?;
 
-        let secondary_view_mode = update
-            .secondary_view_mode
-            .or(current.secondary_view_mode);
+        let secondary_view_mode = update.secondary_view_mode.or(current.secondary_view_mode);
         let scenario_slug = update.scenario_slug.or(current.scenario_slug);
         let tts_map_slug = match update.tts_map_slug {
             Some(value) if value.trim().is_empty() => None,
@@ -348,11 +350,7 @@ impl UserStore {
         Ok(None)
     }
 
-    fn get_by_username_in_conn(
-        &self,
-        conn: &Connection,
-        username: &str,
-    ) -> Result<Option<User>> {
+    fn get_by_username_in_conn(&self, conn: &Connection, username: &str) -> Result<Option<User>> {
         let mut stmt = conn.prepare(
             "
             SELECT id, discord_id, username, display_name, avatar_url,
@@ -374,8 +372,8 @@ impl UserStore {
 }
 
 const PROFILE_IMAGE_IDS: &[&str] = &[
-    "side_01", "side_01b", "side_02", "side_03", "side_04", "side_05", "side_06",
-    "side_07", "side_08", "side_09", "side_10", "side_11", "side_12", "side_13",
+    "side_01", "side_01b", "side_02", "side_03", "side_04", "side_05", "side_06", "side_07",
+    "side_08", "side_09", "side_10", "side_11", "side_12", "side_13",
 ];
 
 fn normalize_optional_text(value: Option<String>) -> Option<String> {
@@ -436,10 +434,7 @@ mod tests {
     use super::*;
 
     fn temp_db_path() -> std::path::PathBuf {
-        std::env::temp_dir().join(format!(
-            "poissonnerie-users-test-{}",
-            std::process::id()
-        ))
+        std::env::temp_dir().join(format!("poissonnerie-users-test-{}", std::process::id()))
     }
 
     #[test]

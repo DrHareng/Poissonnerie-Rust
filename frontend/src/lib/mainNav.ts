@@ -2,6 +2,7 @@ import type { Component } from 'vue'
 import type { RouteLocationRaw } from 'vue-router'
 import {
   BookOpen,
+  Boxes,
   Map,
   Podium,
   Swords,
@@ -18,6 +19,8 @@ export type MainNavLink = {
   label: string
   icon: Component
   children?: MainNavChild[]
+  /** Masqué tant que le compte connecté n’est pas admin. */
+  adminOnly?: boolean
 }
 
 /** Liens principaux partagés (topbar desktop + menu accueil mobile). */
@@ -73,7 +76,22 @@ export const mainNavLinks: MainNavLink[] = [
       { to: { name: 'applis' }, label: 'Applications' },
     ],
   },
+  {
+    to: '/profils-figs/profils',
+    label: 'Profils & figs',
+    icon: Boxes,
+    adminOnly: true,
+    children: [
+      { to: { name: 'profils-figs-profils' }, label: 'Profils' },
+      { to: { name: 'profils-figs-figs' }, label: 'Figs 3D' },
+      { to: { name: 'profils-figs-listes' }, label: 'Listes TTS' },
+    ],
+  },
 ]
+
+export function visibleMainNavLinks(isAdmin: boolean): MainNavLink[] {
+  return mainNavLinks.filter((link) => !link.adminOnly || isAdmin)
+}
 
 export function isMainNavLinkActive(path: string, to: string) {
   if (to === '/classement') {
@@ -98,6 +116,9 @@ export function isMainNavLinkActive(path: string, to: string) {
       path.startsWith('/links') ||
       path.startsWith('/applis')
     )
+  }
+  if (to === '/profils-figs/profils') {
+    return path.startsWith('/profils-figs')
   }
   return path === to
 }

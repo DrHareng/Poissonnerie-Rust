@@ -13,17 +13,17 @@ use crate::migrate::{migrate, row_opt_text, row_text};
 use crate::player::MatchOutcome;
 use crate::store::normalize_name;
 use crate::tournament::{
-    army_visible_player_keys, bracket_format_for_pools, bracket_match_winner, bracket_scenario_phases, compute_elo_deltas,
-    compute_bracket_placements, draw_seeded_pools, enrich_top_four_armies,
+    army_visible_player_keys, bracket_format_for_pools, bracket_match_winner,
+    bracket_scenario_phases, compute_bracket_placements, compute_display_status,
+    compute_elo_deltas, compute_top_four, draw_seeded_pools, enrich_top_four_armies,
     expected_pool_scenario_count, placement_label, pool_round_robin_pairs, pool_scenario_letter,
-    pool_scenario_slot_letters, round_of_16_barrage_pairings, sort_pool_standings,
-    suggested_pool_count, tournament_capacity, tournament_points_for_player, BracketFormat,
-    PlayerTournamentResult, Pool, PoolPlayer, RegistrationStatus, Tournament, TournamentDetail,
-    TournamentListEntry, TournamentMatch, TournamentMatchStatus, TournamentPhase,
+    pool_scenario_slot_letters, registration_counts, round_of_16_barrage_pairings,
+    sort_pool_standings, suggested_pool_count, tournament_capacity, tournament_points_for_player,
+    BracketFormat, PlayerTournamentResult, Pool, PoolPlayer, RegistrationStatus, Tournament,
+    TournamentDetail, TournamentListEntry, TournamentMatch, TournamentMatchStatus, TournamentPhase,
     TournamentPlayerSnapshot, TournamentRegistration, TournamentRegistrationPreview,
     TournamentScenarioSlot, TournamentStatus, TournamentStructure, DEFAULT_POOLS_DURATION_SECS,
     DEFAULT_QUALIFIED_PER_POOL, DEFAULT_SWISS_ROUNDS, MAX_POOL_SIZE, MAX_SWISS_ROUNDS,
-    compute_display_status, compute_top_four, registration_counts,
 };
 
 const TOURNAMENT_SELECT: &str = "
@@ -568,7 +568,9 @@ impl TournamentStore {
             .count();
         let registered_count = registration_counts(&registrations).0 as usize;
 
-        let swiss_rounds = request.swiss_rounds.unwrap_or(tournament.swiss_rounds.max(1));
+        let swiss_rounds = request
+            .swiss_rounds
+            .unwrap_or(tournament.swiss_rounds.max(1));
         if !(1..=MAX_SWISS_ROUNDS).contains(&swiss_rounds) {
             bail!("nombre de rondes suisses invalide (1–{MAX_SWISS_ROUNDS})");
         }
@@ -823,7 +825,9 @@ impl TournamentStore {
 
     pub fn open_registration(&self, id: i64) -> Result<Tournament> {
         let conn = self.conn.lock().unwrap();
-        let tournament = self.get_in_conn(&conn, id)?.context("tournoi introuvable")?;
+        let tournament = self
+            .get_in_conn(&conn, id)?
+            .context("tournoi introuvable")?;
         if tournament.status != TournamentStatus::Draft
             && tournament.status != TournamentStatus::RegistrationClosed
         {
@@ -838,7 +842,9 @@ impl TournamentStore {
 
     pub fn close_registration(&self, id: i64) -> Result<Tournament> {
         let conn = self.conn.lock().unwrap();
-        let tournament = self.get_in_conn(&conn, id)?.context("tournoi introuvable")?;
+        let tournament = self
+            .get_in_conn(&conn, id)?
+            .context("tournoi introuvable")?;
         if tournament.status != TournamentStatus::RegistrationOpen {
             bail!("les inscriptions ne sont pas ouvertes");
         }
@@ -867,7 +873,10 @@ impl TournamentStore {
         }
 
         let key = normalize_name(player_name);
-        if self.registration_for_player_in_conn(&conn, tournament_id, &key)?.is_some() {
+        if self
+            .registration_for_player_in_conn(&conn, tournament_id, &key)?
+            .is_some()
+        {
             bail!("vous êtes déjà inscrit à ce tournoi");
         }
 
@@ -965,10 +974,8 @@ impl TournamentStore {
             .transpose()?;
         let army_id = list1_entry.army_id;
         let list2_stored = list2.as_deref().unwrap_or("");
-        let list1_changed =
-            registration.army_list_1.as_deref().unwrap_or("") != list1.as_str();
-        let list2_changed =
-            registration.army_list_2.as_deref().unwrap_or("") != list2_stored;
+        let list1_changed = registration.army_list_1.as_deref().unwrap_or("") != list1.as_str();
+        let list2_changed = registration.army_list_2.as_deref().unwrap_or("") != list2_stored;
         let army_list_1_validated = if list1_changed {
             0_i64
         } else {
@@ -1064,7 +1071,10 @@ impl TournamentStore {
         }
 
         let key = normalize_name(player_name);
-        if self.registration_for_player_in_conn(&conn, tournament_id, &key)?.is_some() {
+        if self
+            .registration_for_player_in_conn(&conn, tournament_id, &key)?
+            .is_some()
+        {
             bail!("ce joueur est déjà inscrit");
         }
 
@@ -1149,7 +1159,10 @@ impl TournamentStore {
         }
 
         let key = normalize_name(player_name);
-        if self.registration_for_player_in_conn(&conn, tournament_id, &key)?.is_some() {
+        if self
+            .registration_for_player_in_conn(&conn, tournament_id, &key)?
+            .is_some()
+        {
             bail!("ce joueur est déjà inscrit");
         }
 
@@ -1322,9 +1335,7 @@ impl TournamentStore {
                     "army_list_2_validated"
                 };
                 conn.execute(
-                    &format!(
-                        "UPDATE tournament_registrations SET {column} = 1 WHERE id = ?1"
-                    ),
+                    &format!("UPDATE tournament_registrations SET {column} = 1 WHERE id = ?1"),
                     params![registration_id],
                 )?;
             }
@@ -1439,7 +1450,12 @@ impl TournamentStore {
             |row| row.get(0),
         )?;
 
-        if registration.army_list_1.as_ref().map(|s| s.is_empty()).unwrap_or(true) {
+        if registration
+            .army_list_1
+            .as_ref()
+            .map(|s| s.is_empty())
+            .unwrap_or(true)
+        {
             bail!("la liste 1 Army est requise pour valider l'inscription");
         }
 
@@ -1504,16 +1520,17 @@ impl TournamentStore {
         }
 
         // pending + approved (waitlist hors scope : acceptation 1 par 1).
-        let starters: Vec<(String, String)> = conn.prepare(
-            "
+        let starters: Vec<(String, String)> = conn
+            .prepare(
+                "
             SELECT player_name_key, player_name FROM tournament_registrations
             WHERE tournament_id = ?1 AND status IN ('approved', 'pending')
             ",
-        )?
-        .query_map(params![tournament_id], |row| {
-            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
-        })?
-        .collect::<Result<Vec<_>, _>>()?;
+            )?
+            .query_map(params![tournament_id], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
 
         if starters.is_empty() {
             bail!("aucun joueur à démarrer");
@@ -1642,10 +1659,7 @@ impl TournamentStore {
             SET status = ?1, started_at = NULL, pools_finalized_at = NULL, pools_end_at = NULL
             WHERE id = ?2
             ",
-            params![
-                TournamentStatus::RegistrationClosed.as_str(),
-                tournament_id
-            ],
+            params![TournamentStatus::RegistrationClosed.as_str(), tournament_id],
         )?;
         tx.commit()?;
 
@@ -1653,7 +1667,11 @@ impl TournamentStore {
             .context("tournoi introuvable")
     }
 
-    pub fn setup_pools(&self, tournament_id: i64, request: &SetupPoolsRequest) -> Result<Vec<Pool>> {
+    pub fn setup_pools(
+        &self,
+        tournament_id: i64,
+        request: &SetupPoolsRequest,
+    ) -> Result<Vec<Pool>> {
         let conn = self.conn.lock().unwrap();
         let tournament = self
             .get_in_conn(&conn, tournament_id)?
@@ -1751,10 +1769,7 @@ impl TournamentStore {
             .collect();
 
         drop(conn);
-        self.setup_pools(
-            tournament_id,
-            &SetupPoolsRequest { pools },
-        )
+        self.setup_pools(tournament_id, &SetupPoolsRequest { pools })
     }
 
     pub fn set_pool_scenarios(
@@ -1777,10 +1792,7 @@ impl TournamentStore {
         self.replace_scenario_kind(tournament_id, "pool", scenario_ids, &slot_refs)
     }
 
-    pub fn draw_pool_scenarios(
-        &self,
-        tournament_id: i64,
-    ) -> Result<Vec<TournamentScenarioSlot>> {
+    pub fn draw_pool_scenarios(&self, tournament_id: i64) -> Result<Vec<TournamentScenarioSlot>> {
         let conn = self.conn.lock().unwrap();
         let tournament = self
             .get_in_conn(&conn, tournament_id)?
@@ -1902,7 +1914,10 @@ impl TournamentStore {
     }
 
     /// Mélange le pool de 4 scénarios et les assigne aux tours d'arbre + matchs.
-    pub fn assign_bracket_scenarios(&self, tournament_id: i64) -> Result<Vec<TournamentScenarioSlot>> {
+    pub fn assign_bracket_scenarios(
+        &self,
+        tournament_id: i64,
+    ) -> Result<Vec<TournamentScenarioSlot>> {
         use rand::seq::SliceRandom;
 
         let conn = self.conn.lock().unwrap();
@@ -1912,10 +1927,7 @@ impl TournamentStore {
         let phases = bracket_scenario_phases(tournament.bracket_format);
         let mut pool = self.list_scenarios_in_conn(&conn, tournament_id, "bracket_pool")?;
         if pool.len() != phases.len() {
-            bail!(
-                "choisissez d'abord {} scénarios pour l'arbre",
-                phases.len()
-            );
+            bail!("choisissez d'abord {} scénarios pour l'arbre", phases.len());
         }
         pool.shuffle(&mut rand::rng());
 
@@ -2065,10 +2077,7 @@ impl TournamentStore {
         self.list_pools_in_conn(&conn, tournament_id)
     }
 
-    pub fn list_registrations(
-        &self,
-        tournament_id: i64,
-    ) -> Result<Vec<TournamentRegistration>> {
+    pub fn list_registrations(&self, tournament_id: i64) -> Result<Vec<TournamentRegistration>> {
         let conn = self.conn.lock().unwrap();
         self.list_registrations_in_conn(&conn, tournament_id)
     }
@@ -2176,10 +2185,10 @@ impl TournamentStore {
 
         let now = now_unix();
         let auto_confirm = is_admin;
-        let player1_army_id = registration_army_id_in_conn(&conn, tm.tournament_id, &p1)?
-            .or(request.player1_army_id);
-        let player2_army_id = registration_army_id_in_conn(&conn, tm.tournament_id, &p2)?
-            .or(request.player2_army_id);
+        let player1_army_id =
+            registration_army_id_in_conn(&conn, tm.tournament_id, &p1)?.or(request.player1_army_id);
+        let player2_army_id =
+            registration_army_id_in_conn(&conn, tm.tournament_id, &p2)?.or(request.player2_army_id);
         let scenario_other = request
             .scenario_other
             .as_deref()
@@ -2188,9 +2197,7 @@ impl TournamentStore {
             .map(str::to_string);
 
         if request.scenario_id.is_some() && scenario_other.is_some() {
-            anyhow::bail!(
-                "choisissez un scénario du catalogue ou un texte libre, pas les deux"
-            );
+            anyhow::bail!("choisissez un scénario du catalogue ou un texte libre, pas les deux");
         }
 
         if let Some(id) = request.scenario_id {
@@ -2254,7 +2261,11 @@ impl TournamentStore {
                 },
                 user_id,
                 now,
-                if auto_confirm { Some(user_id) } else { None::<i64> },
+                if auto_confirm {
+                    Some(user_id)
+                } else {
+                    None::<i64>
+                },
                 if auto_confirm { Some(now) } else { None::<u64> },
                 request.scenario_id,
                 scenario_other,
@@ -2650,10 +2661,8 @@ impl TournamentStore {
         // Match encore en attente : le score est mis à jour, les classements
         // et l'arbre restent appliqués seulement à la confirmation.
         if old.status == TournamentMatchStatus::Submitted {
-            let outcome = outcome_from_objectives(
-                request.player1_objectives,
-                request.player2_objectives,
-            );
+            let outcome =
+                outcome_from_objectives(request.player1_objectives, request.player2_objectives);
             if let Some((code1, code2, id1, id2)) = list_update {
                 conn.execute(
                     "
@@ -2747,9 +2756,7 @@ impl TournamentStore {
                 ],
             )?;
             drop(conn);
-            let updated = self
-                .get_match(match_id)?
-                .context("match introuvable")?;
+            let updated = self.get_match(match_id)?.context("match introuvable")?;
             return Ok((updated, false));
         }
 
@@ -2831,9 +2838,7 @@ impl TournamentStore {
             self.rebuild_bracket_progression(&conn, tournament_id)?;
         }
 
-        let updated = self
-            .get_match(match_id)?
-            .context("match introuvable")?;
+        let updated = self.get_match(match_id)?.context("match introuvable")?;
         Ok((updated, winner_changed))
     }
 
@@ -3050,14 +3055,16 @@ impl TournamentStore {
         phase: TournamentPhase,
         slot: u32,
     ) -> Result<bool> {
-        let status: Option<String> = conn.query_row(
-            "
+        let status: Option<String> = conn
+            .query_row(
+                "
             SELECT status FROM tournament_matches
             WHERE tournament_id = ?1 AND phase = ?2 AND bracket_slot = ?3
             ",
-            params![tournament_id, phase.as_str(), slot],
-            |row| row.get(0),
-        ).optional()?;
+                params![tournament_id, phase.as_str(), slot],
+                |row| row.get(0),
+            )
+            .optional()?;
 
         if status.as_deref() == Some(TournamentMatchStatus::Confirmed.as_str()) {
             return Ok(true);
@@ -3750,20 +3757,8 @@ impl TournamentStore {
         let mut firsts = Vec::new();
         let mut seconds = Vec::new();
         for (_, players) in standings {
-            firsts.push(
-                players
-                    .first()
-                    .context("poule vide")?
-                    .player_name
-                    .clone(),
-            );
-            seconds.push(
-                players
-                    .get(1)
-                    .context("2e manquant")?
-                    .player_name
-                    .clone(),
-            );
+            firsts.push(players.first().context("poule vide")?.player_name.clone());
+            seconds.push(players.get(1).context("2e manquant")?.player_name.clone());
         }
 
         let pairs = [
@@ -3849,7 +3844,9 @@ impl TournamentStore {
 
         if tm.phase == TournamentPhase::RoundOf16
             && matches!(
-                self.get_in_conn(conn, tm.tournament_id)?.unwrap().bracket_format,
+                self.get_in_conn(conn, tm.tournament_id)?
+                    .unwrap()
+                    .bracket_format,
                 BracketFormat::RoundOf16
             )
         {
@@ -3873,11 +3870,7 @@ impl TournamentStore {
             WHERE tournament_id = ?1 AND phase = ?2 AND bracket_slot = ?3
             ",
         )?;
-        let mut rows = stmt.query(params![
-            tm.tournament_id,
-            next_phase.as_str(),
-            next_slot,
-        ])?;
+        let mut rows = stmt.query(params![tm.tournament_id, next_phase.as_str(), next_slot,])?;
 
         if let Some(row) = rows.next()? {
             let id: i64 = row.get(0)?;
@@ -3925,7 +3918,10 @@ impl TournamentStore {
         let top_n = tournament.qualified_per_pool.max(1) as usize;
 
         let mut qualified = std::collections::HashSet::new();
-        for pool in pools.into_iter().filter(|pool| is_group_pool(&tournament, pool)) {
+        for pool in pools
+            .into_iter()
+            .filter(|pool| is_group_pool(&tournament, pool))
+        {
             let mut sorted = pool.players.clone();
             sorted.sort_by(|a, b| {
                 b.points
@@ -3950,11 +3946,7 @@ impl TournamentStore {
         self.assign_final_placements_in_conn(&conn, tournament_id)
     }
 
-    fn assign_final_placements_in_conn(
-        &self,
-        conn: &Connection,
-        tournament_id: i64,
-    ) -> Result<()> {
+    fn assign_final_placements_in_conn(&self, conn: &Connection, tournament_id: i64) -> Result<()> {
         let tournament = self
             .get_in_conn(conn, tournament_id)?
             .context("tournoi introuvable")?;
@@ -4082,7 +4074,10 @@ impl TournamentStore {
         Ok(())
     }
 
-    pub fn player_tournament_results(&self, player_name: &str) -> Result<Vec<PlayerTournamentResult>> {
+    pub fn player_tournament_results(
+        &self,
+        player_name: &str,
+    ) -> Result<Vec<PlayerTournamentResult>> {
         let conn = self.conn.lock().unwrap();
         let key = normalize_name(player_name);
 
@@ -4134,9 +4129,7 @@ impl TournamentStore {
         let conn = self.conn.lock().unwrap();
 
         let completed_ids: Vec<i64> = {
-            let mut stmt = conn.prepare(
-                "SELECT id FROM tournaments WHERE status = 'completed'",
-            )?;
+            let mut stmt = conn.prepare("SELECT id FROM tournaments WHERE status = 'completed'")?;
             let ids = stmt
                 .query_map([], |row| row.get(0))?
                 .collect::<Result<Vec<_>, _>>()?;
@@ -4258,11 +4251,7 @@ impl TournamentStore {
             INSERT INTO pools (tournament_id, name, position)
             VALUES (?1, ?2, ?3)
             ",
-            params![
-                tournament_id,
-                "Poule finale",
-                tournament.pool_count + 1,
-            ],
+            params![tournament_id, "Poule finale", tournament.pool_count + 1,],
         )?;
         let pool_id = conn.last_insert_rowid();
         let mut players = Vec::new();
@@ -4474,11 +4463,7 @@ impl TournamentStore {
         Ok(ids)
     }
 
-    fn pick_random_scenario_excluding(
-        &self,
-        conn: &Connection,
-        exclude: &[i64],
-    ) -> Result<i64> {
+    fn pick_random_scenario_excluding(&self, conn: &Connection, exclude: &[i64]) -> Result<i64> {
         use rand::seq::SliceRandom;
         let mut stmt = conn.prepare(
             "
@@ -4500,10 +4485,7 @@ impl TournamentStore {
                 .query_map([], |row| row.get(0))?
                 .collect::<Result<Vec<_>, _>>()?;
             all.shuffle(&mut rand::rng());
-            return all
-                .into_iter()
-                .next()
-                .context("aucun scénario disponible");
+            return all.into_iter().next().context("aucun scénario disponible");
         }
         ids.shuffle(&mut rand::rng());
         ids.into_iter().next().context("aucun scénario disponible")
@@ -4608,9 +4590,8 @@ impl TournamentStore {
         conn: &Connection,
         tournament_id: i64,
     ) -> Result<Vec<TournamentMatch>> {
-        let mut stmt = conn.prepare(
-            "SELECT id FROM tournament_matches WHERE tournament_id = ?1 ORDER BY id",
-        )?;
+        let mut stmt =
+            conn.prepare("SELECT id FROM tournament_matches WHERE tournament_id = ?1 ORDER BY id")?;
         let ids: Vec<i64> = stmt
             .query_map(params![tournament_id], |row| row.get(0))?
             .collect::<Result<Vec<_>, _>>()?;
@@ -4665,11 +4646,9 @@ impl TournamentStore {
         tm: &mut TournamentMatch,
     ) -> Result<()> {
         if let Some(name) = tm.player1.as_deref() {
-            if let Some(reg) = self.registration_for_player_in_conn(
-                conn,
-                tm.tournament_id,
-                &normalize_name(name),
-            )? {
+            if let Some(reg) =
+                self.registration_for_player_in_conn(conn, tm.tournament_id, &normalize_name(name))?
+            {
                 tm.player1_list_slot = infer_registration_list_slot(
                     &reg,
                     tm.phase,
@@ -4678,11 +4657,9 @@ impl TournamentStore {
             }
         }
         if let Some(name) = tm.player2.as_deref() {
-            if let Some(reg) = self.registration_for_player_in_conn(
-                conn,
-                tm.tournament_id,
-                &normalize_name(name),
-            )? {
+            if let Some(reg) =
+                self.registration_for_player_in_conn(conn, tm.tournament_id, &normalize_name(name))?
+            {
                 tm.player2_list_slot = infer_registration_list_slot(
                     &reg,
                     tm.phase,
@@ -4831,7 +4808,11 @@ fn phase_order(phase: TournamentPhase) -> u8 {
 fn compare_matches_for_recompute(a: &TournamentMatch, b: &TournamentMatch) -> std::cmp::Ordering {
     phase_order(a.phase)
         .cmp(&phase_order(b.phase))
-        .then(a.bracket_slot.unwrap_or(0).cmp(&b.bracket_slot.unwrap_or(0)))
+        .then(
+            a.bracket_slot
+                .unwrap_or(0)
+                .cmp(&b.bracket_slot.unwrap_or(0)),
+        )
         .then(a.id.cmp(&b.id))
 }
 
@@ -5042,8 +5023,7 @@ fn row_to_tournament(row: &rusqlite::Row<'_>) -> rusqlite::Result<Tournament> {
         description: row.get(2)?,
         status: TournamentStatus::parse(&status_str).unwrap_or(TournamentStatus::Draft),
         pool_count: row.get(4)?,
-        bracket_format: BracketFormat::parse(&format_str)
-            .unwrap_or(BracketFormat::QuartersDirect),
+        bracket_format: BracketFormat::parse(&format_str).unwrap_or(BracketFormat::QuartersDirect),
         created_at: row.get(6)?,
         started_at: row.get(7)?,
         pools_finalized_at: row.get(8)?,
@@ -5143,9 +5123,7 @@ fn row_to_tournament_match(row: &rusqlite::Row<'_>) -> rusqlite::Result<Tourname
         player2_army_list_id: row.get(37)?,
         player1_list_slot: None,
         player2_list_slot: None,
-        elo_match_id: row
-            .get::<_, Option<i64>>(38)?
-            .map(|id| id as u64),
+        elo_match_id: row.get::<_, Option<i64>>(38)?.map(|id| id as u64),
     })
 }
 

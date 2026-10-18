@@ -124,6 +124,7 @@ export function buildTournamentPack(input: {
         level: 2,
         text: rule.name,
         anchor: ruleAnchorId(rule.slug),
+        blankAfter: true,
       })
       blocks.push(...parseScenarioMarkdown(rule.body_md, ruleLabel))
     }
@@ -163,6 +164,7 @@ function pushHeading(
     text: string
     anchor?: string
     pageBreakBefore?: boolean
+    blankAfter?: boolean
   },
 ) {
   blocks.push({
@@ -170,6 +172,7 @@ function pushHeading(
     level: options.level,
     anchor: options.anchor,
     pageBreakBefore: options.pageBreakBefore,
+    blankAfter: options.blankAfter,
     inlines: [{ kind: 'text', text: options.text, style: { bold: true } }],
   })
   if (

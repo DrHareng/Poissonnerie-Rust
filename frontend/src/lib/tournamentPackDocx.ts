@@ -219,7 +219,9 @@ function appendBlock(
         pageBreakBefore: block.pageBreakBefore,
         spacing: {
           before: block.pageBreakBefore ? 80 : block.level === 1 ? 320 : block.level === 2 ? 300 : 240,
-          after: block.level === 1 ? 160 : block.level === 2 ? 100 : 60,
+          after:
+            (block.level === 1 ? 160 : block.level === 2 ? 100 : 60) +
+            (block.blankAfter ? 240 : 0),
         },
         shading:
           block.level === 1

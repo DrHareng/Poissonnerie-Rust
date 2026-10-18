@@ -2,10 +2,7 @@
 
 use anyhow::{bail, Context, Result};
 
-const URL_MARKERS: &[&str] = &[
-    "army/list/",
-    "army/infinity/list/",
-];
+const URL_MARKERS: &[&str] = &["army/list/", "army/infinity/list/"];
 
 /// Extrait le code depuis un code brut ou une URL Army (query/hash ignorés).
 /// Décode aussi les séquences percent-encoding (`%3D` → `=`).
@@ -175,7 +172,14 @@ fn from_hex(byte: u8) -> Option<u8> {
 fn base64_decode(value: &str) -> Option<Vec<u8>> {
     let cleaned: String = value
         .chars()
-        .filter(|c| c.is_ascii_alphanumeric() || *c == '+' || *c == '/' || *c == '=' || *c == '-' || *c == '_')
+        .filter(|c| {
+            c.is_ascii_alphanumeric()
+                || *c == '+'
+                || *c == '/'
+                || *c == '='
+                || *c == '-'
+                || *c == '_'
+        })
         .map(|c| match c {
             '-' => '+',
             '_' => '/',
@@ -236,9 +240,8 @@ mod tests {
 
     #[test]
     fn extracts_code_from_url() {
-        let code = normalize_army_list_code(
-            "https://infinitytheuniverse.com/army/list/abc123?x=1#y",
-        );
+        let code =
+            normalize_army_list_code("https://infinitytheuniverse.com/army/list/abc123?x=1#y");
         assert_eq!(code.as_deref(), Some("abc123"));
     }
 

@@ -109,9 +109,10 @@ impl<'a> PlayerDisplayResolver<'a> {
                 player.army_id = registration_army_id(&detail.registrations, &player.player_name)
                     .or(player.army_id);
                 player.avatar_url = self.resolve_avatar_url(&player.player_name);
-                player.army_matches = player
-                    .army_id
-                    .map(|army_id| self.board.player_army_match_count(&player.player_name, army_id));
+                player.army_matches = player.army_id.map(|army_id| {
+                    self.board
+                        .player_army_match_count(&player.player_name, army_id)
+                });
             }
         }
 
@@ -149,11 +150,7 @@ fn registration_army_id(
 ) -> Option<u32> {
     registrations
         .iter()
-        .find(|registration| {
-            registration
-                .player_name
-                .eq_ignore_ascii_case(player_name)
-        })
+        .find(|registration| registration.player_name.eq_ignore_ascii_case(player_name))
         .and_then(|registration| registration.army_id)
 }
 

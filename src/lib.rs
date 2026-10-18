@@ -1,15 +1,15 @@
-pub mod display_name;
-pub mod import_coupe;
 pub mod api;
 pub mod army;
 pub mod army_list;
 pub mod army_list_store;
+pub mod auth;
+pub mod content_update;
 pub mod dauphine;
 pub mod dauphine_api;
 pub mod dauphine_store;
-pub mod auth;
-pub mod content_update;
+pub mod display_name;
 pub mod elo;
+pub mod import_coupe;
 pub mod match_record;
 pub mod migrate;
 pub mod player;
@@ -19,38 +19,42 @@ pub mod scenario_pack;
 pub mod session_store;
 pub mod site_content;
 pub mod store;
-pub mod tts_map;
-pub mod tts_map_api;
 pub mod tournament;
 pub mod tournament_api;
 pub mod tournament_store;
+pub mod tts_figurine;
+pub mod tts_figurine_api;
+pub mod tts_map;
+pub mod tts_map_api;
+pub mod tts_profile;
+pub mod tts_profile_api;
+pub mod tts_profile_army;
 pub mod user;
 
 pub use api::{default_state, router, AppState};
 pub use army::{default_db_path, Army, ArmyStore};
 pub use army_list_store::{ArmyList, ArmyListStatsGroup, ArmyListStore};
-pub use dauphine_store::DauphineStore;
 pub use auth::AuthConfig;
+pub use content_update::ContentUpdateStore;
+pub use dauphine_store::DauphineStore;
 pub use elo::{expected_score, update_ratings, MatchScore, DEFAULT_K_FACTOR};
 pub use match_record::{
     MatchRecord, MatchReport, MatchScores, MatchStatus, RecentMatchReport, ReportStatus,
 };
-pub use report_template::{ReportTemplate, ReportTemplateStore};
 pub use player::{apply_match, MatchOutcome, Player, RatingUpdate, DEFAULT_RATING};
+pub use report_template::{ReportTemplate, ReportTemplateStore};
 pub use scenario::{strip_scenario_prefix, Scenario, ScenarioStore};
-pub use content_update::ContentUpdateStore;
 pub use site_content::{SiteContent, SiteContentStore, RESSOURCES_KEY};
-pub use tts_map::TtsMapStore;
 pub use store::{
     fix_tournament_player_army, fix_tournament_player_army_opts, merge_players, normalize_name,
-    recompute_elo_from_matches,
-    ArmyMatchStats, ArmyPlayerStats, FixTournamentArmyReport, Leaderboard, MergePlayersReport,
-    PlayerArmyStats, PlayerArmyUsage,
+    recompute_elo_from_matches, ArmyMatchStats, ArmyPlayerStats, FixTournamentArmyReport,
+    Leaderboard, MergePlayersReport, PlayerArmyStats, PlayerArmyUsage,
 };
 pub use tournament::{
-    BracketFormat, PlayerTournamentResult, Pool, Tournament, TournamentDetail,
-    TournamentMatch, TournamentRegistration, TournamentScenarioSlot, TournamentStatus,
+    BracketFormat, PlayerTournamentResult, Pool, Tournament, TournamentDetail, TournamentMatch,
+    TournamentRegistration, TournamentScenarioSlot, TournamentStatus,
 };
 pub use tournament_store::TournamentStore;
+pub use tts_map::TtsMapStore;
 pub use user::User;
 pub use user::UserStore;

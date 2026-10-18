@@ -4,10 +4,15 @@ use std::sync::{Arc, Mutex};
 
 use anyhow::Result;
 use clap::Parser;
-use poissonnerie_elo::{api, ArmyListStore, ArmyStore, AuthConfig, Leaderboard, UserStore, DEFAULT_K_FACTOR};
+use poissonnerie_elo::{
+    api, ArmyListStore, ArmyStore, AuthConfig, Leaderboard, UserStore, DEFAULT_K_FACTOR,
+};
 
 #[derive(Parser)]
-#[command(name = "poissonnerie-server", about = "API REST pour le classement ELO")]
+#[command(
+    name = "poissonnerie-server",
+    about = "API REST pour le classement ELO"
+)]
 struct Args {
     /// Adresse d'écoute
     #[arg(long, default_value = "127.0.0.1:3000")]
@@ -52,6 +57,12 @@ async fn main() -> Result<()> {
         report_templates: Arc::new(poissonnerie_elo::ReportTemplateStore::open(&args.db)?),
         site_content: Arc::new(poissonnerie_elo::SiteContentStore::open(&args.db)?),
         tts_maps: Arc::new(poissonnerie_elo::TtsMapStore::open(&args.db)?),
+        tts_figurines: Arc::new(poissonnerie_elo::tts_figurine::TtsFigurineStore::open(
+            &args.db,
+        )?),
+        tts_profiles: Arc::new(poissonnerie_elo::tts_profile::TtsProfileStore::open(
+            &args.db,
+        )?),
         content_updates: Arc::new(poissonnerie_elo::ContentUpdateStore::open(&args.db)?),
         auth,
         db_path: args.db,

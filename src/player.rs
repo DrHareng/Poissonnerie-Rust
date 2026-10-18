@@ -128,7 +128,12 @@ mod tests {
         let mut alice = Player::new("Alice");
         let mut bob = Player::new("Bob");
 
-        let update = apply_match(&mut alice, &mut bob, MatchOutcome::Player1Win, DEFAULT_K_FACTOR);
+        let update = apply_match(
+            &mut alice,
+            &mut bob,
+            MatchOutcome::Player1Win,
+            DEFAULT_K_FACTOR,
+        );
 
         assert!(update.player1_new > update.player1_old);
         assert!(update.player2_new < update.player2_old);

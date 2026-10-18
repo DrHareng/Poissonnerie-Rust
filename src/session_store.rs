@@ -22,9 +22,8 @@ impl SqliteSessionStore {
     pub fn open(path: impl AsRef<Path>) -> Result<Self> {
         let path = path.as_ref();
         if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent).with_context(|| {
-                format!("impossible de créer le dossier {}", parent.display())
-            })?;
+            std::fs::create_dir_all(parent)
+                .with_context(|| format!("impossible de créer le dossier {}", parent.display()))?;
         }
         let conn = Connection::open(path)
             .with_context(|| format!("impossible d'ouvrir {}", path.display()))?;
@@ -34,7 +33,10 @@ impl SqliteSessionStore {
         })
     }
 
-    fn with_conn<T>(&self, f: impl FnOnce(&Connection) -> session_store::Result<T>) -> session_store::Result<T> {
+    fn with_conn<T>(
+        &self,
+        f: impl FnOnce(&Connection) -> session_store::Result<T>,
+    ) -> session_store::Result<T> {
         let conn = self
             .conn
             .lock()
@@ -50,11 +52,9 @@ impl SessionStore for SqliteSessionStore {
             loop {
                 let id = record.id.to_string();
                 let exists: bool = conn
-                    .query_row(
-                        "SELECT 1 FROM sessions WHERE id = ?1",
-                        params![id],
-                        |_| Ok(true),
-                    )
+                    .query_row("SELECT 1 FROM sessions WHERE id = ?1", params![id], |_| {
+                        Ok(true)
+                    })
                     .optional()
                     .map_err(|error| session_store::Error::Backend(error.to_string()))?
                     .unwrap_or(false);

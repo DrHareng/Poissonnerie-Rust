@@ -1,29 +1,32 @@
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
-use anyhow::{Context, Result, bail};
+use anyhow::{bail, Context, Result};
 use clap::Parser;
 use reqwest::blocking::Client;
 use rusqlite::{params, Connection};
 
-use crate::army::ArmyStore;
 use super::config::CoupeConfig;
 use super::sheets::{
-    self, BracketMatchLine, ParsedCoupeSheet, PoolMatchLine, match_key, validate_parsed,
+    self, match_key, validate_parsed, BracketMatchLine, ParsedCoupeSheet, PoolMatchLine,
 };
+use crate::army::ArmyStore;
 use crate::player::DEFAULT_RATING;
-use crate::store::{Leaderboard, normalize_name};
+use crate::store::{normalize_name, Leaderboard};
 use crate::tournament::TournamentMatch;
 use crate::tournament_store::{
     BracketSlotSetup, CreateTournamentRequest, PoolSetup, SetupBracketRequest, SetupPoolsRequest,
     SubmitMatchRequest, TournamentStore,
 };
-use crate::{DEFAULT_K_FACTOR, MatchOutcome, MatchRecord, MatchScores, RatingUpdate};
+use crate::{MatchOutcome, MatchRecord, MatchScores, RatingUpdate, DEFAULT_K_FACTOR};
 
 const ADMIN_ID: i64 = 1;
 
 #[derive(Parser)]
-#[command(name = "poissonnerie-import-coupe", about = "Import Coupe de la Poissonnerie 5-10")]
+#[command(
+    name = "poissonnerie-import-coupe",
+    about = "Import Coupe de la Poissonnerie 5-10"
+)]
 pub struct ImportCoupeArgs {
     /// Numéro de coupe (5 à 10).
     #[arg(long)]
@@ -55,10 +58,7 @@ pub fn run_import(args: &ImportCoupeArgs, config: &CoupeConfig) -> Result<()> {
     let client = Client::builder()
         .timeout(std::time::Duration::from_secs(60))
         .build()?;
-    println!(
-        "Téléchargement Google Sheet — {}…",
-        config.name
-    );
+    println!("Téléchargement Google Sheet — {}…", config.name);
     let data = sheets::load_coupe_data(&client, config.spreadsheet_id)?;
     validate_parsed(&data)?;
 
@@ -173,10 +173,7 @@ pub fn run_import(args: &ImportCoupeArgs, config: &CoupeConfig) -> Result<()> {
                     .bracket_quarters
                     .get(slot)
                     .and_then(|qf| {
-                        let r16_keys = [
-                            normalize_name(&m.player1),
-                            normalize_name(&m.player2),
-                        ];
+                        let r16_keys = [normalize_name(&m.player1), normalize_name(&m.player2)];
                         [&qf.player1, &qf.player2]
                             .into_iter()
                             .find(|p| !r16_keys.contains(&normalize_name(p)))
@@ -191,7 +188,12 @@ pub fn run_import(args: &ImportCoupeArgs, config: &CoupeConfig) -> Result<()> {
                 }
             })
             .collect();
-        store.setup_bracket(tid, &SetupBracketRequest { matches: bracket_setup })?;
+        store.setup_bracket(
+            tid,
+            &SetupBracketRequest {
+                matches: bracket_setup,
+            },
+        )?;
     } else if data.bracket_quarters.len() == 4 && data.bracket_r16.is_empty() {
         let bracket_setup: Vec<BracketSlotSetup> = data
             .bracket_quarters
@@ -204,7 +206,12 @@ pub fn run_import(args: &ImportCoupeArgs, config: &CoupeConfig) -> Result<()> {
                 quarter_player1: None,
             })
             .collect();
-        store.setup_bracket(tid, &SetupBracketRequest { matches: bracket_setup })?;
+        store.setup_bracket(
+            tid,
+            &SetupBracketRequest {
+                matches: bracket_setup,
+            },
+        )?;
     } else {
         println!(
             "Attention: arbre ambigu (r16={}, qf={}) — génération automatique",
@@ -214,7 +221,10 @@ pub fn run_import(args: &ImportCoupeArgs, config: &CoupeConfig) -> Result<()> {
         store.generate_bracket(tid)?;
     }
 
-    let mut all = store.get_detail(tid)?.context("tournoi introuvable")?.matches;
+    let mut all = store
+        .get_detail(tid)?
+        .context("tournoi introuvable")?
+        .matches;
 
     let qf_players = players_in_lines(&data.bracket_quarters);
     let sf_players = players_in_lines(&data.bracket_semis);
@@ -237,7 +247,10 @@ pub fn run_import(args: &ImportCoupeArgs, config: &CoupeConfig) -> Result<()> {
             submit_bracket_line(&store, &mut board, tm, line, &adv)?;
         }
     }
-    all = store.get_detail(tid)?.context("tournoi introuvable")?.matches;
+    all = store
+        .get_detail(tid)?
+        .context("tournoi introuvable")?
+        .matches;
 
     for line in &data.bracket_quarters {
         if let Ok(tm) = find_match(&all, "quarter", None, &line.player1, &line.player2) {
@@ -246,14 +259,20 @@ pub fn run_import(args: &ImportCoupeArgs, config: &CoupeConfig) -> Result<()> {
             submit_bracket_line(&store, &mut board, tm, line, &adv)?;
         }
     }
-    all = store.get_detail(tid)?.context("tournoi introuvable")?.matches;
+    all = store
+        .get_detail(tid)?
+        .context("tournoi introuvable")?
+        .matches;
 
     for line in &data.bracket_semis {
         if let Ok(tm) = find_match(&all, "semi", None, &line.player1, &line.player2) {
             submit_bracket_line(&store, &mut board, tm, line, &final_players)?;
         }
     }
-    all = store.get_detail(tid)?.context("tournoi introuvable")?.matches;
+    all = store
+        .get_detail(tid)?
+        .context("tournoi introuvable")?
+        .matches;
 
     if let Some(line) = &data.bracket_final {
         if let Ok(tm) = find_match(&all, "final", None, &line.player1, &line.player2) {
@@ -406,10 +425,7 @@ fn ensure_players(board: &mut Leaderboard, names: &[String], db_path: &Path) -> 
 }
 
 fn tournament_exists_by_name(store: &TournamentStore, name: &str) -> Result<bool> {
-    Ok(store
-        .list()?
-        .into_iter()
-        .any(|t| t.name == name))
+    Ok(store.list()?.into_iter().any(|t| t.name == name))
 }
 
 fn cleanup_tournament_by_name(db_path: &Path, name: &str) -> Result<()> {
@@ -447,11 +463,7 @@ fn cleanup_tournament_by_name(db_path: &Path, name: &str) -> Result<()> {
     Ok(())
 }
 
-fn apply_official_pool_standings(
-    db_path: &Path,
-    tid: i64,
-    data: &ParsedCoupeSheet,
-) -> Result<()> {
+fn apply_official_pool_standings(db_path: &Path, tid: i64, data: &ParsedCoupeSheet) -> Result<()> {
     let conn = Connection::open(db_path)?;
     for (key, standing) in &data.pool_standings {
         conn.execute(
@@ -469,11 +481,7 @@ fn apply_official_pool_standings(
     Ok(())
 }
 
-fn ensure_bracket_players_qualify(
-    db_path: &Path,
-    tid: i64,
-    data: &ParsedCoupeSheet,
-) -> Result<()> {
+fn ensure_bracket_players_qualify(db_path: &Path, tid: i64, data: &ParsedCoupeSheet) -> Result<()> {
     let mut needed: HashMap<String, String> = HashMap::new();
     for m in data
         .bracket_r16
@@ -579,19 +587,9 @@ fn submit_bracket_line(
     let db_p2 = tm.player2.as_ref().context("joueur 2 manquant")?;
     let (p1_obj, p2_obj, p1_surv, p2_surv) =
         if normalize_name(db_p1) == normalize_name(&line.player1) {
-            (
-                line.p1_obj,
-                line.p2_obj,
-                line.p1_surv,
-                line.p2_surv,
-            )
+            (line.p1_obj, line.p2_obj, line.p1_surv, line.p2_surv)
         } else {
-            (
-                line.p2_obj,
-                line.p1_obj,
-                line.p2_surv,
-                line.p1_surv,
-            )
+            (line.p2_obj, line.p1_obj, line.p2_surv, line.p1_surv)
         };
 
     // Scores absents du sheet : forfait du joueur qui n'apparaît pas au tour suivant.
@@ -727,7 +725,11 @@ fn find_match<'a>(
 fn rebuild_leaderboard_from_matches(db_path: &Path) -> Result<()> {
     let conn = Connection::open(db_path)?;
     let mut board = Leaderboard::load(db_path)?;
-    let names: Vec<String> = board.ranking().into_iter().map(|p| p.name.clone()).collect();
+    let names: Vec<String> = board
+        .ranking()
+        .into_iter()
+        .map(|p| p.name.clone())
+        .collect();
     for name in &names {
         let player = board.get_player_mut(name)?;
         player.rating = DEFAULT_RATING;

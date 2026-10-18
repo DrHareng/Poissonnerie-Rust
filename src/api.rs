@@ -16,16 +16,19 @@ use time::Duration;
 use tower_http::cors::{AllowHeaders, AllowMethods, AllowOrigin, CorsLayer};
 use tower_sessions::{cookie::SameSite, Expiry, Session, SessionManagerLayer};
 
-use crate::{
-    auth::{self, AuthConfig, CallbackQuery},
-    dauphine_api, default_db_path, scenario::ScenarioStore, session_store::SqliteSessionStore,
-    tts_map_api, tournament_api, ArmyListStore, ArmyStore, ContentUpdateStore, DauphineStore,
-    Leaderboard, MatchOutcome, MatchRecord, MatchScores, Player, ReportStatus, ReportTemplateStore,
-    SiteContentStore, TtsMapStore, TournamentStore, User, UserStore, DEFAULT_K_FACTOR, RESSOURCES_KEY,
-};
 use crate::army_list_store::ArmyListStatsGroup;
 use crate::tournament::TournamentStatus;
 use crate::user::{LocalProfileUpdate, UiPrefsUpdate, UserResponse};
+use crate::{
+    auth::{self, AuthConfig, CallbackQuery},
+    dauphine_api, default_db_path,
+    scenario::ScenarioStore,
+    session_store::SqliteSessionStore,
+    tournament_api, tts_figurine_api, tts_map_api, tts_profile_api, ArmyListStore, ArmyStore,
+    ContentUpdateStore, DauphineStore, Leaderboard, MatchOutcome, MatchRecord, MatchScores, Player,
+    ReportStatus, ReportTemplateStore, SiteContentStore, TournamentStore, TtsMapStore, User,
+    UserStore, DEFAULT_K_FACTOR, RESSOURCES_KEY,
+};
 
 const SESSION_INACTIVITY_DAYS: i64 = 30;
 
@@ -41,6 +44,8 @@ pub struct AppState {
     pub report_templates: Arc<ReportTemplateStore>,
     pub site_content: Arc<SiteContentStore>,
     pub tts_maps: Arc<TtsMapStore>,
+    pub tts_figurines: Arc<crate::tts_figurine::TtsFigurineStore>,
+    pub tts_profiles: Arc<crate::tts_profile::TtsProfileStore>,
     pub content_updates: Arc<ContentUpdateStore>,
     pub auth: Option<AuthConfig>,
     pub db_path: PathBuf,
@@ -409,7 +414,9 @@ pub fn router(state: AppState) -> Result<Router> {
         .with_path("/")
         // Lax est requis pour OAuth Discord (retour cross-site en top-level GET).
         .with_same_site(SameSite::Lax)
-        .with_expiry(Expiry::OnInactivity(Duration::days(SESSION_INACTIVITY_DAYS)));
+        .with_expiry(Expiry::OnInactivity(Duration::days(
+            SESSION_INACTIVITY_DAYS,
+        )));
 
     Ok(Router::new()
         .route("/api/auth/discord", get(discord_login))
@@ -432,17 +439,25 @@ pub fn router(state: AppState) -> Result<Router> {
         .route("/api/admin/accounts", get(admin_accounts))
         .route("/api/admin/player-link", post(link_player_account))
         .route("/api/admin/players/merge", post(merge_player_accounts))
-        .route("/api/admin/players/{name}", delete(delete_unused_player_account))
+        .route(
+            "/api/admin/players/{name}",
+            delete(delete_unused_player_account),
+        )
         .route("/api/players/{name}", get(get_player))
         .route("/api/players/{name}/armies", get(get_player_armies))
         .route("/api/players/{name}/matches", get(get_player_matches))
         .route("/api/matches", get(list_matches).post(record_match))
         .route("/api/matches/start", post(start_match))
         .route("/api/matches/sync", post(sync_partie))
-        .route("/api/matches/mine/in-progress", get(list_my_in_progress_matches))
+        .route(
+            "/api/matches/mine/in-progress",
+            get(list_my_in_progress_matches),
+        )
         .route(
             "/api/matches/{id}",
-            get(get_match).delete(delete_match).patch(update_match_progress),
+            get(get_match)
+                .delete(delete_match)
+                .patch(update_match_progress),
         )
         .route("/api/matches/{id}/complete", post(complete_match))
         .route("/api/matches/{id}/correct", post(correct_match))
@@ -458,9 +473,14 @@ pub fn router(state: AppState) -> Result<Router> {
             patch(update_report_template).delete(delete_report_template),
         )
         .route("/api/health", get(health))
-        .route("/api/ressources", get(get_ressources).patch(update_ressources))
+        .route(
+            "/api/ressources",
+            get(get_ressources).patch(update_ressources),
+        )
         .merge(tournament_api::tournament_routes())
         .merge(tts_map_api::tts_map_routes())
+        .merge(tts_figurine_api::tts_figurine_routes())
+        .merge(tts_profile_api::tts_profile_routes())
         .merge(dauphine_api::dauphine_routes())
         .layer(cors_layer())
         .layer(session_layer)
@@ -527,7 +547,10 @@ async fn discord_login(
         .auth
         .as_ref()
         .ok_or_else(|| ApiError::bad_request("authentification Discord non configurée"))?;
-    let mobile = matches!(query.mobile.to_ascii_lowercase().as_str(), "1" | "true" | "yes");
+    let mobile = matches!(
+        query.mobile.to_ascii_lowercase().as_str(),
+        "1" | "true" | "yes"
+    );
     session
         .insert(auth::SESSION_OAUTH_MOBILE, mobile)
         .await
@@ -1036,7 +1059,9 @@ async fn get_ranking(
     Ok(Json(ranking))
 }
 
-async fn get_army_ranking(State(state): State<AppState>) -> Result<Json<Vec<RankedArmy>>, ApiError> {
+async fn get_army_ranking(
+    State(state): State<AppState>,
+) -> Result<Json<Vec<RankedArmy>>, ApiError> {
     let board = state.board.lock().unwrap();
     let ranking = board
         .army_ranking()
@@ -1366,10 +1391,7 @@ fn build_player_profile(
         return response;
     };
 
-    let linked_user = users
-        .get_by_username(discord_username)
-        .ok()
-        .flatten();
+    let linked_user = users.get_by_username(discord_username).ok().flatten();
 
     let Some(linked_user) = linked_user else {
         return response;
@@ -1387,8 +1409,7 @@ fn build_player_profile(
 
     if let Some(viewer) = viewer {
         if let Some(viewer_player) = board.get_player_by_discord_username(&viewer.username) {
-            response.is_own_profile =
-                viewer_player.name.eq_ignore_ascii_case(&player.name);
+            response.is_own_profile = viewer_player.name.eq_ignore_ascii_case(&player.name);
         }
     }
 
@@ -1668,12 +1689,12 @@ async fn merge_player_accounts(
     let keep = payload.keep.trim().to_string();
     let alias = payload.alias.trim().to_string();
     if keep.is_empty() || alias.is_empty() {
-        return Err(ApiError::bad_request("indiquez les deux joueurs à fusionner"));
+        return Err(ApiError::bad_request(
+            "indiquez les deux joueurs à fusionner",
+        ));
     }
     if crate::normalize_name(&keep) == crate::normalize_name(&alias) {
-        return Err(ApiError::bad_request(
-            "choisissez deux joueurs différents",
-        ));
+        return Err(ApiError::bad_request("choisissez deux joueurs différents"));
     }
 
     let mut board = state.board.lock().unwrap();
@@ -1723,31 +1744,30 @@ async fn record_match(
         .filter(|name| !name.is_empty())
         .map(str::to_string);
 
-    let (scenario_id, scenario_other, scenario_name) =
-        match (payload.scenario_id, scenario_other) {
-            (Some(_), Some(_)) => {
-                return Err(ApiError::bad_request(
-                    "choisissez un scénario du catalogue ou un texte libre, pas les deux",
-                ));
-            }
-            (Some(id), None) => {
-                let scenario = state
-                    .scenarios
-                    .get(id)
-                    .map_err(|error| ApiError::bad_request(error.to_string()))?
-                    .ok_or_else(|| ApiError::bad_request("scénario introuvable"))?;
-                state
-                    .scenarios
-                    .increment_usage(id)
-                    .map_err(|error| ApiError::bad_request(error.to_string()))?;
-                (Some(id), None, Some(scenario.name))
-            }
-            (None, Some(other)) => {
-                let label = other.clone();
-                (None, Some(other), Some(label))
-            }
-            (None, None) => (None, None, None),
-        };
+    let (scenario_id, scenario_other, scenario_name) = match (payload.scenario_id, scenario_other) {
+        (Some(_), Some(_)) => {
+            return Err(ApiError::bad_request(
+                "choisissez un scénario du catalogue ou un texte libre, pas les deux",
+            ));
+        }
+        (Some(id), None) => {
+            let scenario = state
+                .scenarios
+                .get(id)
+                .map_err(|error| ApiError::bad_request(error.to_string()))?
+                .ok_or_else(|| ApiError::bad_request("scénario introuvable"))?;
+            state
+                .scenarios
+                .increment_usage(id)
+                .map_err(|error| ApiError::bad_request(error.to_string()))?;
+            (Some(id), None, Some(scenario.name))
+        }
+        (None, Some(other)) => {
+            let label = other.clone();
+            (None, Some(other), Some(label))
+        }
+        (None, None) => (None, None, None),
+    };
 
     let mut board = state.board.lock().unwrap();
     let scores = MatchScores {
@@ -1809,13 +1829,19 @@ async fn start_match(
         board
             .get_player_by_discord_username(&user.username)
             .ok_or_else(|| {
-                ApiError::unauthorized("un profil joueur Poissonnerie est requis pour démarrer une partie")
+                ApiError::unauthorized(
+                    "un profil joueur Poissonnerie est requis pour démarrer une partie",
+                )
             })?
             .name
             .clone()
     };
 
-    let client_uuid = match payload.client_uuid.as_deref().map(str::trim).filter(|value| !value.is_empty())
+    let client_uuid = match payload
+        .client_uuid
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
     {
         Some(value) => Some(
             crate::match_record::normalize_client_uuid(value)
@@ -1842,11 +1868,8 @@ async fn start_match(
         .validate_selectable_id(payload.player2_army_id)
         .map_err(|error| ApiError::bad_request(error.to_string()))?;
 
-    if !payload.player1_secondary_slugs.is_empty()
-        || !payload.player2_secondary_slugs.is_empty()
-    {
-        if payload.player1_secondary_slugs.len() != 3
-            || payload.player2_secondary_slugs.len() != 3
+    if !payload.player1_secondary_slugs.is_empty() || !payload.player2_secondary_slugs.is_empty() {
+        if payload.player1_secondary_slugs.len() != 3 || payload.player2_secondary_slugs.len() != 3
         {
             return Err(ApiError::bad_request(
                 "chaque joueur doit recevoir exactement 3 objectifs secondaires, ou aucun (saisie manuelle)",
@@ -1863,10 +1886,7 @@ async fn start_match(
 
     let (opponent_name, guest_adversaire) = {
         let board = state.board.lock().unwrap();
-        let registered = !player2_raw.is_empty()
-            && board
-                .get_player(player2_raw)
-                .is_ok();
+        let registered = !player2_raw.is_empty() && board.get_player(player2_raw).is_ok();
         if registered {
             (player2_raw.to_string(), None)
         } else {
@@ -2060,7 +2080,12 @@ async fn sync_partie(
             .map_err(|error| ApiError::bad_request(error.to_string()))?;
         if let Some(complete) = payload.complete.as_ref() {
             synced = board
-                .complete_match(existing.id, complete.outcome, state.k_factor, complete_scores(complete))
+                .complete_match(
+                    existing.id,
+                    complete.outcome,
+                    state.k_factor,
+                    complete_scores(complete),
+                )
                 .map_err(|error| ApiError::bad_request(error.to_string()))?;
         }
         board
@@ -2134,7 +2159,12 @@ async fn sync_partie(
         .map_err(|error| ApiError::bad_request(error.to_string()))?;
     if let Some(complete) = payload.complete.as_ref() {
         synced = board
-            .complete_match(created.id, complete.outcome, state.k_factor, complete_scores(complete))
+            .complete_match(
+                created.id,
+                complete.outcome,
+                state.k_factor,
+                complete_scores(complete),
+            )
             .map_err(|error| ApiError::bad_request(error.to_string()))?;
     }
     board
@@ -2187,12 +2217,8 @@ async fn update_match_progress(
         player1_secondary_slugs: payload.player1_secondary_slugs,
         player2_secondary_slugs: payload.player2_secondary_slugs,
         secondary_pool_slugs: payload.secondary_pool_slugs,
-        player1_chosen_secondary: payload
-            .player1_chosen_secondary
-            .map(Some),
-        player2_chosen_secondary: payload
-            .player2_chosen_secondary
-            .map(Some),
+        player1_chosen_secondary: payload.player1_chosen_secondary.map(Some),
+        player2_chosen_secondary: payload.player2_chosen_secondary.map(Some),
         lieutenant_winner: payload.lieutenant_winner,
         lieutenant_winner_choice: payload.lieutenant_winner_choice,
         lieutenant_other_choice: payload.lieutenant_other_choice,
@@ -2358,9 +2384,7 @@ async fn list_my_in_progress_matches(
     } else {
         let player = board
             .get_player_by_discord_username(&user.username)
-            .ok_or_else(|| {
-                ApiError::unauthorized("un profil joueur Poissonnerie est requis")
-            })?;
+            .ok_or_else(|| ApiError::unauthorized("un profil joueur Poissonnerie est requis"))?;
         board
             .in_progress_matches_for_player(&player.name)
             .into_iter()
@@ -2372,11 +2396,7 @@ async fn list_my_in_progress_matches(
     Ok(Json(matches))
 }
 
-fn ensure_match_participant(
-    state: &AppState,
-    user: &User,
-    match_id: u64,
-) -> Result<(), ApiError> {
+fn ensure_match_participant(state: &AppState, user: &User, match_id: u64) -> Result<(), ApiError> {
     if user.is_admin {
         return Ok(());
     }
@@ -2507,13 +2527,7 @@ async fn update_match_army_list(
 
     let mut board = state.board.lock().unwrap();
     board
-        .update_match_army_list(
-            id,
-            &player.name,
-            list.id,
-            &list.code,
-            list.army_id,
-        )
+        .update_match_army_list(id, &player.name, list.id, &list.code, list.army_id)
         .map_err(|error| ApiError::bad_request(error.to_string()))?;
     board
         .save(&state.db_path)
@@ -2624,7 +2638,8 @@ async fn list_army_lists(
         .map_err(|error| ApiError::bad_request(error.to_string()))?;
     {
         let board = state.board.lock().unwrap();
-        let resolver = crate::display_name::PlayerDisplayResolver::new(&board, state.users.as_ref());
+        let resolver =
+            crate::display_name::PlayerDisplayResolver::new(&board, state.users.as_ref());
         for group in &mut groups {
             for entry in &mut group.lists {
                 if let Some(player) = entry.origin_player.as_deref() {
@@ -2636,9 +2651,7 @@ async fn list_army_lists(
     Ok(Json(groups))
 }
 
-async fn list_army_list_armies(
-    State(state): State<AppState>,
-) -> Result<Json<Vec<u32>>, ApiError> {
+async fn list_army_list_armies(State(state): State<AppState>) -> Result<Json<Vec<u32>>, ApiError> {
     let ids = state
         .army_lists
         .army_ids_with_public_lists()
@@ -2710,6 +2723,8 @@ pub fn default_state() -> anyhow::Result<AppState> {
         report_templates: Arc::new(report_templates),
         site_content: Arc::new(site_content),
         tts_maps: Arc::new(tts_maps),
+        tts_figurines: Arc::new(crate::tts_figurine::TtsFigurineStore::open(&db_path)?),
+        tts_profiles: Arc::new(crate::tts_profile::TtsProfileStore::open(&db_path)?),
         content_updates: Arc::new(content_updates),
         auth,
         db_path,

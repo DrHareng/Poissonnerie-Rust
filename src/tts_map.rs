@@ -172,13 +172,7 @@ impl TtsMapStore {
             let filename: String = row.get(2)?;
             Ok((
                 map_id,
-                map_picture(
-                    map_id,
-                    row.get(1)?,
-                    filename,
-                    row.get(3)?,
-                    row.get(4)?,
-                ),
+                map_picture(map_id, row.get(1)?, filename, row.get(3)?, row.get(4)?),
             ))
         })?;
         for item in pictures {
@@ -291,8 +285,14 @@ impl TtsMapStore {
             rows.collect::<Result<Vec<_>, _>>()?
         };
         conn.execute("DELETE FROM tts_map_reports WHERE map_id = ?1", params![id])?;
-        conn.execute("DELETE FROM tts_map_variants WHERE map_id = ?1", params![id])?;
-        conn.execute("DELETE FROM tts_map_pictures WHERE map_id = ?1", params![id])?;
+        conn.execute(
+            "DELETE FROM tts_map_variants WHERE map_id = ?1",
+            params![id],
+        )?;
+        conn.execute(
+            "DELETE FROM tts_map_pictures WHERE map_id = ?1",
+            params![id],
+        )?;
         let n = conn.execute("DELETE FROM tts_maps WHERE id = ?1", params![id])?;
         if n == 0 {
             bail!("map introuvable");
@@ -372,12 +372,7 @@ impl TtsMapStore {
         Ok(Some((self.json_dir(id).join(&filename), filename)))
     }
 
-    pub fn add_picture(
-        &self,
-        id: i64,
-        original_name: &str,
-        bytes: &[u8],
-    ) -> Result<TtsMapDetail> {
+    pub fn add_picture(&self, id: i64, original_name: &str, bytes: &[u8]) -> Result<TtsMapDetail> {
         if bytes.len() > MAX_PICTURE_BYTES {
             bail!("l'image dépasse {MAX_PICTURE_BYTES} octets");
         }
@@ -646,8 +641,9 @@ impl TtsMapStore {
         if let Err(error) = (|| -> Result<()> {
             fs::create_dir_all(&dir)
                 .with_context(|| format!("impossible de créer {}", dir.display()))?;
-            fs::write(dir.join(&filename), bytes)
-                .with_context(|| format!("impossible d'écrire {}", dir.join(&filename).display()))?;
+            fs::write(dir.join(&filename), bytes).with_context(|| {
+                format!("impossible d'écrire {}", dir.join(&filename).display())
+            })?;
             Ok(())
         })() {
             let conn = self.conn.lock().unwrap();
@@ -940,10 +936,7 @@ impl TtsMapStore {
             })?
             .collect::<Result<Vec<_>, _>>()?;
 
-        Ok(Some(TtsMapDetail {
-            pictures,
-            ..map
-        }))
+        Ok(Some(TtsMapDetail { pictures, ..map }))
     }
 
     fn map_dir(&self, id: i64) -> PathBuf {
@@ -1051,8 +1044,8 @@ pub fn ensure_thumbnail(original: &Path) -> Result<PathBuf> {
         fs::create_dir_all(parent)
             .with_context(|| format!("impossible de créer {}", parent.display()))?;
     }
-    let bytes = fs::read(original)
-        .with_context(|| format!("impossible de lire {}", original.display()))?;
+    let bytes =
+        fs::read(original).with_context(|| format!("impossible de lire {}", original.display()))?;
     let img = image::load_from_memory(&bytes)
         .with_context(|| format!("image illisible: {}", original.display()))?;
     let rgb = img.thumbnail(THUMB_MAX_PX, THUMB_MAX_PX).into_rgb8();
@@ -1067,8 +1060,7 @@ pub fn ensure_thumbnail(original: &Path) -> Result<PathBuf> {
             image::ExtendedColorType::Rgb8,
         )
         .context("impossible d'encoder la miniature")?;
-    fs::write(&thumb, out)
-        .with_context(|| format!("impossible d'écrire {}", thumb.display()))?;
+    fs::write(&thumb, out).with_context(|| format!("impossible d'écrire {}", thumb.display()))?;
     Ok(thumb)
 }
 
@@ -1404,9 +1396,7 @@ mod tests {
         assert_eq!(fs::read(&json_path).unwrap(), json);
 
         let png = [0x89, b'P', b'N', b'G', 0, 1, 2, 3];
-        let with_pic = store
-            .add_picture(created.id, "Vue nord.png", &png)
-            .unwrap();
+        let with_pic = store.add_picture(created.id, "Vue nord.png", &png).unwrap();
         assert_eq!(with_pic.pictures.len(), 1);
         assert_eq!(with_pic.pictures[0].filename, "Vue_nord.png");
         let listed = store.list_maps().unwrap();
@@ -1508,20 +1498,12 @@ mod tests {
         let json_path = store.variant_json_path(generic.id).unwrap().unwrap().0;
         assert_eq!(fs::read(&json_path).unwrap(), json);
 
-        assert!(
-            store
-                .create_variant(map.id, scenario_id, None, "dup.json", json)
-                .is_err()
-        );
+        assert!(store
+            .create_variant(map.id, scenario_id, None, "dup.json", json)
+            .is_err());
 
         let tournament_variant = store
-            .create_variant(
-                map.id,
-                scenario_id,
-                Some(tournament_id),
-                "coupe.json",
-                json,
-            )
+            .create_variant(map.id, scenario_id, Some(tournament_id), "coupe.json", json)
             .unwrap();
         assert_eq!(tournament_variant.tournament_id, Some(tournament_id));
         assert_eq!(
@@ -1529,10 +1511,7 @@ mod tests {
             Some("Coupe 4")
         );
         assert_eq!(
-            store
-                .list_variants(Some(map.id), None, None)
-                .unwrap()
-                .len(),
+            store.list_variants(Some(map.id), None, None).unwrap().len(),
             2
         );
         assert_eq!(
@@ -1544,12 +1523,10 @@ mod tests {
         );
 
         store.delete_variants_for_tournament(tournament_id).unwrap();
-        assert!(
-            store
-                .list_variants(None, None, Some(tournament_id))
-                .unwrap()
-                .is_empty()
-        );
+        assert!(store
+            .list_variants(None, None, Some(tournament_id))
+            .unwrap()
+            .is_empty());
 
         store.delete_map(map.id).unwrap();
         assert!(store.list_variants(None, None, None).unwrap().is_empty());

@@ -1,3 +1,4 @@
+import { isListableArmy } from '@/lib/army'
 import type {
   AdminAccounts,
   ApiError,
@@ -31,12 +32,19 @@ import type {
   TournamentRegistration,
   TournamentScenarioSlot,
   TtsContentImage,
+  TtsFigurine,
+  TtsFigurineWrite,
   ContentUpdate,
   MapContentUpdate,
   TtsMapDetail,
   TtsMapReport,
   TtsMapSummary,
   TtsMapVariant,
+  TtsProfileArmyCount,
+  TtsProfileDetail,
+  TtsProfileLabel,
+  TtsProfileSummary,
+  TtsProfileUpdate,
   User,
 } from '@/types/elo'
 import { withBase } from '@/lib/basePath'
@@ -84,7 +92,68 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 export function fetchArmies(): Promise<Army[]> {
-  return request<Army[]>('/api/armies')
+  return request<Army[]>('/api/armies').then((armies) => armies.filter(isListableArmy))
+}
+
+export function fetchTtsProfileArmies(): Promise<TtsProfileArmyCount[]> {
+  return request<TtsProfileArmyCount[]>('/api/tts-profiles/armies')
+}
+
+export function fetchTtsProfileLabels(): Promise<TtsProfileLabel[]> {
+  return request<TtsProfileLabel[]>('/api/tts-profiles/labels')
+}
+
+export function fetchTtsFigurines(): Promise<TtsFigurine[]> {
+  return request<TtsFigurine[]>('/api/tts-figurines')
+}
+
+export function createTtsFigurine(payload: TtsFigurineWrite): Promise<TtsFigurine> {
+  return request<TtsFigurine>('/api/tts-figurines', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  })
+}
+
+export function updateTtsFigurine(id: number, payload: TtsFigurineWrite): Promise<TtsFigurine> {
+  return request<TtsFigurine>(`/api/tts-figurines/${id}`, {
+    method: 'PATCH',
+    body: JSON.stringify(payload),
+  })
+}
+
+export function deleteTtsFigurine(id: number): Promise<void> {
+  return request(`/api/tts-figurines/${id}`, { method: 'DELETE' })
+}
+
+export function uploadTtsFigurinePhoto(id: number, file: File): Promise<TtsFigurine> {
+  return uploadFile(`/api/tts-figurines/${id}/photo`, file)
+}
+
+export function clearTtsFigurinePhoto(id: number): Promise<TtsFigurine> {
+  return request<TtsFigurine>(`/api/tts-figurines/${id}/photo`, { method: 'DELETE' })
+}
+
+export function fetchTtsProfiles(options: {
+  armyId?: number
+  unassigned?: boolean
+  includeFaction?: boolean
+}): Promise<TtsProfileSummary[]> {
+  const params = new URLSearchParams()
+  if (options.unassigned) params.set('unassigned', 'true')
+  if (options.armyId != null) params.set('army_id', String(options.armyId))
+  if (options.includeFaction === false) params.set('include_faction', 'false')
+  return request<TtsProfileSummary[]>(`/api/tts-profiles?${params}`)
+}
+
+export function fetchTtsProfile(id: number): Promise<TtsProfileDetail> {
+  return request<TtsProfileDetail>(`/api/tts-profiles/${id}`)
+}
+
+export function updateTtsProfile(id: number, payload: TtsProfileUpdate): Promise<TtsProfileDetail> {
+  return request<TtsProfileDetail>(`/api/tts-profiles/${id}`, {
+    method: 'PATCH',
+    body: JSON.stringify(payload),
+  })
 }
 
 export function fetchRanking(): Promise<RankedPlayer[]> {

@@ -72,6 +72,7 @@ function renderPdf(doc: ScenarioDoc, images: Map<string, ImageAsset>): jsPDF {
         before: 2,
         anchor: block.anchor,
       })
+      if (block.blankAfter) layout.gap(5)
       continue
     }
       if (block.kind === 'list') {

@@ -492,7 +492,9 @@ pub fn round_of_16_barrage_pairings(
     }
 
     let first = |index: usize| -> Option<&str> {
-        pool_standings[index].first().map(|player| player.player_name.as_str())
+        pool_standings[index]
+            .first()
+            .map(|player| player.player_name.as_str())
     };
     let second = |index: usize| -> Option<&str> {
         pool_standings[index]
@@ -774,9 +776,7 @@ pub fn placement_label(placement: u32) -> String {
 fn phase_losers(matches: &[TournamentMatch], phase: TournamentPhase) -> Vec<String> {
     let mut losers: Vec<(u32, String)> = matches
         .iter()
-        .filter(|m| {
-            m.phase == phase && m.status == TournamentMatchStatus::Confirmed
-        })
+        .filter(|m| m.phase == phase && m.status == TournamentMatchStatus::Confirmed)
         .filter_map(|m| {
             let loser = bracket_match_loser(m)?;
             Some((m.bracket_slot.unwrap_or(0), loser))
@@ -801,9 +801,10 @@ pub fn compute_bracket_placements(
         placements.entry(name).or_insert(placement);
     };
 
-    if let Some(final_match) = matches.iter().find(|m| {
-        m.phase == TournamentPhase::Final && m.status == TournamentMatchStatus::Confirmed
-    }) {
+    if let Some(final_match) = matches
+        .iter()
+        .find(|m| m.phase == TournamentPhase::Final && m.status == TournamentMatchStatus::Confirmed)
+    {
         if let (Some(winner), Some(loser)) = (
             bracket_match_winner(final_match),
             bracket_match_loser(final_match),
@@ -986,7 +987,11 @@ pub fn draw_seeded_pools(players: &[(String, f64)], pool_count: usize) -> Vec<Ve
 pub fn bracket_scenario_phases(format: BracketFormat) -> Vec<TournamentPhase> {
     match format {
         BracketFormat::QuartersDirect => {
-            vec![TournamentPhase::Quarter, TournamentPhase::Semi, TournamentPhase::Final]
+            vec![
+                TournamentPhase::Quarter,
+                TournamentPhase::Semi,
+                TournamentPhase::Final,
+            ]
         }
         BracketFormat::RoundOf16 | BracketFormat::RoundOf16Full => vec![
             TournamentPhase::RoundOf16,
@@ -997,10 +1002,7 @@ pub fn bracket_scenario_phases(format: BracketFormat) -> Vec<TournamentPhase> {
     }
 }
 
-pub fn compute_display_status(
-    tournament: &Tournament,
-    matches: &[TournamentMatch],
-) -> String {
+pub fn compute_display_status(tournament: &Tournament, matches: &[TournamentMatch]) -> String {
     match tournament.status {
         TournamentStatus::Draft => "À venir".into(),
         TournamentStatus::RegistrationOpen => "Inscription ouvertes".into(),
@@ -1010,10 +1012,7 @@ pub fn compute_display_status(
     }
 }
 
-fn compute_started_display_status(
-    tournament: &Tournament,
-    matches: &[TournamentMatch],
-) -> String {
+fn compute_started_display_status(tournament: &Tournament, matches: &[TournamentMatch]) -> String {
     match tournament.structure {
         TournamentStructure::Swiss => return "Rondes suisses".into(),
         TournamentStructure::PoolsFinal => {
@@ -1037,10 +1036,7 @@ fn compute_started_display_status(
     ];
 
     for (phase, label) in phases {
-        let phase_matches: Vec<_> = matches
-            .iter()
-            .filter(|m| m.phase == phase)
-            .collect();
+        let phase_matches: Vec<_> = matches.iter().filter(|m| m.phase == phase).collect();
         if phase_matches.is_empty() {
             continue;
         }
@@ -1191,53 +1187,23 @@ mod tests {
     #[test]
     fn tournament_points_examples() {
         assert_eq!(
-            tournament_points_for_player(
-                MatchOutcome::Player1Win,
-                true,
-                6,
-                2,
-                false
-            ),
+            tournament_points_for_player(MatchOutcome::Player1Win, true, 6, 2, false),
             5
         );
         assert_eq!(
-            tournament_points_for_player(
-                MatchOutcome::Player1Win,
-                false,
-                6,
-                2,
-                false
-            ),
+            tournament_points_for_player(MatchOutcome::Player1Win, false, 6, 2, false),
             0
         );
         assert_eq!(
-            tournament_points_for_player(
-                MatchOutcome::Player1Win,
-                true,
-                4,
-                3,
-                false
-            ),
+            tournament_points_for_player(MatchOutcome::Player1Win, true, 4, 3, false),
             4
         );
         assert_eq!(
-            tournament_points_for_player(
-                MatchOutcome::Player1Win,
-                false,
-                4,
-                3,
-                false
-            ),
+            tournament_points_for_player(MatchOutcome::Player1Win, false, 4, 3, false),
             1
         );
         assert_eq!(
-            tournament_points_for_player(
-                MatchOutcome::Draw,
-                true,
-                5,
-                5,
-                false
-            ),
+            tournament_points_for_player(MatchOutcome::Draw, true, 5, 5, false),
             3
         );
     }
@@ -1404,10 +1370,7 @@ mod tests {
             BracketFormat::QuartersDirect
         );
         assert_eq!(bracket_format_for_pools(4, 3), BracketFormat::RoundOf16);
-        assert_eq!(
-            bracket_format_for_pools(8, 2),
-            BracketFormat::RoundOf16Full
-        );
+        assert_eq!(bracket_format_for_pools(8, 2), BracketFormat::RoundOf16Full);
         assert_eq!(bracket_format_for_pools(2, 3), BracketFormat::RoundOf16);
     }
 
@@ -1420,54 +1383,52 @@ mod tests {
 
     #[test]
     fn compute_bracket_placements_includes_forfeit_r16_losers() {
-        let matches = vec![
-            TournamentMatch {
-                id: 1,
-                tournament_id: 1,
-                phase: TournamentPhase::RoundOf16,
-                pool_id: None,
-                bracket_slot: Some(2),
-                player1: Some("Ayadan".into()),
-                player2: Some("Gui Zou".into()),
-                player1_display_name: None,
-                player2_display_name: None,
-                player1_objectives: 0,
-                player2_objectives: 0,
-                player1_survivors: 0,
-                player2_survivors: 0,
-                player1_tournament_points: 0,
-                player2_tournament_points: 0,
-                outcome: Some(MatchOutcome::Player1Win),
-                is_forfeit: true,
-                is_unplayed: false,
-                forfeit_player: Some("Gui Zou".into()),
-                forfeit_player_display_name: None,
-                player1_elo_delta: 0.0,
-                player2_elo_delta: 0.0,
-                player1_rating_used: None,
-                player2_rating_used: None,
-                elo_applied_at: None,
-                status: TournamentMatchStatus::Confirmed,
-                submitted_by_user_id: None,
-                submitted_at: None,
-                confirmed_by_user_id: None,
-                confirmed_at: None,
-                scenario_id: None,
-                scenario_other: None,
-                scenario_name: None,
+        let matches = vec![TournamentMatch {
+            id: 1,
+            tournament_id: 1,
+            phase: TournamentPhase::RoundOf16,
+            pool_id: None,
+            bracket_slot: Some(2),
+            player1: Some("Ayadan".into()),
+            player2: Some("Gui Zou".into()),
+            player1_display_name: None,
+            player2_display_name: None,
+            player1_objectives: 0,
+            player2_objectives: 0,
+            player1_survivors: 0,
+            player2_survivors: 0,
+            player1_tournament_points: 0,
+            player2_tournament_points: 0,
+            outcome: Some(MatchOutcome::Player1Win),
+            is_forfeit: true,
+            is_unplayed: false,
+            forfeit_player: Some("Gui Zou".into()),
+            forfeit_player_display_name: None,
+            player1_elo_delta: 0.0,
+            player2_elo_delta: 0.0,
+            player1_rating_used: None,
+            player2_rating_used: None,
+            elo_applied_at: None,
+            status: TournamentMatchStatus::Confirmed,
+            submitted_by_user_id: None,
+            submitted_at: None,
+            confirmed_by_user_id: None,
+            confirmed_at: None,
+            scenario_id: None,
+            scenario_other: None,
+            scenario_name: None,
             scenario_slug: None,
-                player1_army_id: None,
-                player2_army_id: None,
-                player1_army_list_code: None,
-                player2_army_list_code: None,
+            player1_army_id: None,
+            player2_army_id: None,
+            player1_army_list_code: None,
+            player2_army_list_code: None,
             player1_army_list_id: None,
             player2_army_list_id: None,
             player1_list_slot: None,
             player2_list_slot: None,
-                played_at: None,
-                elo_match_id: None,
-            },
-        ];
+            played_at: None,
+            elo_match_id: None,
+        }];
 
         let placements = compute_bracket_placements(&matches, BracketFormat::RoundOf16);
         assert_eq!(placements.get("Gui Zou"), Some(&9));
@@ -1510,15 +1471,15 @@ mod tests {
                 scenario_id: None,
                 scenario_other: None,
                 scenario_name: None,
-            scenario_slug: None,
+                scenario_slug: None,
                 player1_army_id: None,
                 player2_army_id: None,
                 player1_army_list_code: None,
                 player2_army_list_code: None,
-            player1_army_list_id: None,
-            player2_army_list_id: None,
-            player1_list_slot: None,
-            player2_list_slot: None,
+                player1_army_list_id: None,
+                player2_army_list_id: None,
+                player1_list_slot: None,
+                player2_list_slot: None,
                 played_at: None,
                 elo_match_id: None,
             },
@@ -1556,15 +1517,15 @@ mod tests {
                 scenario_id: None,
                 scenario_other: None,
                 scenario_name: None,
-            scenario_slug: None,
+                scenario_slug: None,
                 player1_army_id: None,
                 player2_army_id: None,
                 player1_army_list_code: None,
                 player2_army_list_code: None,
-            player1_army_list_id: None,
-            player2_army_list_id: None,
-            player1_list_slot: None,
-            player2_list_slot: None,
+                player1_army_list_id: None,
+                player2_army_list_id: None,
+                player1_list_slot: None,
+                player2_list_slot: None,
                 played_at: None,
                 elo_match_id: None,
             },
@@ -1606,11 +1567,7 @@ mod tests {
                 outcome: Some(outcome),
                 is_forfeit,
                 is_unplayed: false,
-                forfeit_player: if is_forfeit {
-                    Some(p2.into())
-                } else {
-                    None
-                },
+                forfeit_player: if is_forfeit { Some(p2.into()) } else { None },
                 forfeit_player_display_name: None,
                 player1_elo_delta: 0.0,
                 player2_elo_delta: 0.0,
@@ -1625,15 +1582,15 @@ mod tests {
                 scenario_id: None,
                 scenario_other: None,
                 scenario_name: None,
-            scenario_slug: None,
+                scenario_slug: None,
                 player1_army_id: None,
                 player2_army_id: None,
                 player1_army_list_code: None,
                 player2_army_list_code: None,
-            player1_army_list_id: None,
-            player2_army_list_id: None,
-            player1_list_slot: None,
-            player2_list_slot: None,
+                player1_army_list_id: None,
+                player2_army_list_id: None,
+                player1_list_slot: None,
+                player2_list_slot: None,
                 played_at: None,
                 elo_match_id: None,
             }
@@ -1674,19 +1631,26 @@ mod tests {
                 scenario_id: None,
                 scenario_other: None,
                 scenario_name: None,
-            scenario_slug: None,
+                scenario_slug: None,
                 player1_army_id: None,
                 player2_army_id: None,
                 player1_army_list_code: None,
                 player2_army_list_code: None,
-            player1_army_list_id: None,
-            player2_army_list_id: None,
-            player1_list_slot: None,
-            player2_list_slot: None,
+                player1_army_list_id: None,
+                player2_army_list_id: None,
+                player1_list_slot: None,
+                player2_list_slot: None,
                 played_at: None,
                 elo_match_id: None,
             },
-            semi(1, 0, "Dr Hareng", "Arkille", MatchOutcome::Player1Win, false),
+            semi(
+                1,
+                0,
+                "Dr Hareng",
+                "Arkille",
+                MatchOutcome::Player1Win,
+                false,
+            ),
             semi(2, 1, "Badgage", "Kantain", MatchOutcome::Player1Win, true),
         ];
 

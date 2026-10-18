@@ -101,10 +101,7 @@ impl ScenarioStore {
         Ok(None)
     }
 
-    pub fn pack_page(
-        &self,
-        slug: &str,
-    ) -> Result<Option<crate::scenario_pack::ScenarioPackPage>> {
+    pub fn pack_page(&self, slug: &str) -> Result<Option<crate::scenario_pack::ScenarioPackPage>> {
         let conn = self.conn.lock().unwrap();
         crate::scenario_pack::get_pack_page(&conn, slug)
     }

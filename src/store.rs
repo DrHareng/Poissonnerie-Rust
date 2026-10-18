@@ -243,9 +243,8 @@ impl Leaderboard {
                     WHERE elo_match_id IS NOT NULL
                     ",
                 )?;
-                let rows = stmt.query_map([], |row| {
-                    Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)?))
-                })?;
+                let rows =
+                    stmt.query_map([], |row| Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)?)))?;
                 let mut links = Vec::new();
                 for row in rows {
                     links.push(row?);
@@ -372,7 +371,8 @@ impl Leaderboard {
             }
         }
 
-        tx.commit().context("impossible de valider la transaction")?;
+        tx.commit()
+            .context("impossible de valider la transaction")?;
         Ok(())
     }
 
@@ -461,8 +461,7 @@ impl Leaderboard {
                         player.discord_username = None;
                     }
                 }
-                self.players.get_mut(&key).unwrap().discord_username =
-                    Some(username.to_string());
+                self.players.get_mut(&key).unwrap().discord_username = Some(username.to_string());
             }
         }
 
@@ -1187,7 +1186,9 @@ impl Leaderboard {
             } else {
                 self.players
                     .get(&key2)
-                    .with_context(|| format!("joueur introuvable : {}", self.matches[index].player2))?
+                    .with_context(|| {
+                        format!("joueur introuvable : {}", self.matches[index].player2)
+                    })?
                     .rating
             };
             if counts_for_elo {
@@ -1515,7 +1516,9 @@ impl Leaderboard {
                     .as_ref()
                     .is_some_and(|report| report.status == ReportStatus::Published)
                 {
-                    existing.as_ref().and_then(|report| report.published_at)
+                    existing
+                        .as_ref()
+                        .and_then(|report| report.published_at)
                         .or(Some(now))
                 } else {
                     Some(now)
@@ -1544,7 +1547,11 @@ impl Leaderboard {
         Ok(record.clone())
     }
 
-    pub fn recent_published_reports(&self, limit: usize, offset: usize) -> (Vec<RecentMatchReport>, usize) {
+    pub fn recent_published_reports(
+        &self,
+        limit: usize,
+        offset: usize,
+    ) -> (Vec<RecentMatchReport>, usize) {
         let mut items = Vec::new();
         for record in &self.matches {
             push_recent_report(&mut items, record, true);
@@ -1584,7 +1591,14 @@ impl Leaderboard {
         army_list_code: &str,
         army_id: u32,
     ) -> Result<MatchRecord> {
-        self.update_match_army_list_inner(id, player_name, army_list_id, army_list_code, army_id, false)
+        self.update_match_army_list_inner(
+            id,
+            player_name,
+            army_list_id,
+            army_list_code,
+            army_id,
+            false,
+        )
     }
 
     /// Correction admin d'un match de tournoi déjà validé : autorise le changement de liste.
@@ -1596,7 +1610,14 @@ impl Leaderboard {
         army_list_code: &str,
         army_id: u32,
     ) -> Result<MatchRecord> {
-        self.update_match_army_list_inner(id, player_name, army_list_id, army_list_code, army_id, true)
+        self.update_match_army_list_inner(
+            id,
+            player_name,
+            army_list_id,
+            army_list_code,
+            army_id,
+            true,
+        )
     }
 
     fn update_match_army_list_inner(
@@ -1867,7 +1888,11 @@ impl Leaderboard {
                 .partial_cmp(&left.win_rate())
                 .unwrap_or(std::cmp::Ordering::Equal)
                 .then_with(|| right.total().cmp(&left.total()))
-                .then_with(|| left.player_name.to_lowercase().cmp(&right.player_name.to_lowercase()))
+                .then_with(|| {
+                    left.player_name
+                        .to_lowercase()
+                        .cmp(&right.player_name.to_lowercase())
+                })
         });
         ranking
     }
@@ -1936,8 +1961,7 @@ impl Leaderboard {
         self.matches
             .iter()
             .filter(|record| {
-                record.player1_army_id == Some(army_id)
-                    || record.player2_army_id == Some(army_id)
+                record.player1_army_id == Some(army_id) || record.player2_army_id == Some(army_id)
             })
             .take(limit)
             .collect()
@@ -1964,10 +1988,7 @@ fn outcome_to_str(outcome: MatchOutcome) -> &'static str {
 }
 
 fn outcome_option_to_str(outcome: Option<MatchOutcome>) -> String {
-    outcome
-        .map(outcome_to_str)
-        .unwrap_or("")
-        .to_string()
+    outcome.map(outcome_to_str).unwrap_or("").to_string()
 }
 
 fn row_to_match(row: &rusqlite::Row<'_>) -> rusqlite::Result<MatchRecord> {
@@ -2157,11 +2178,7 @@ fn push_recent_report(items: &mut Vec<RecentMatchReport>, record: &MatchRecord, 
     });
 }
 
-fn adjust_player_match_count(
-    player: &mut Player,
-    score: crate::elo::MatchScore,
-    delta: i32,
-) {
+fn adjust_player_match_count(player: &mut Player, score: crate::elo::MatchScore, delta: i32) {
     match score {
         crate::elo::MatchScore::Win => {
             player.wins = (player.wins as i32 + delta).max(0) as u32;
@@ -2231,9 +2248,7 @@ pub fn fix_tournament_player_army_opts(
         .ok();
 
     if canonical_name.is_none() {
-        bail!(
-            "joueur « {player_name} » introuvable dans le tournoi {tournament_id}"
-        );
+        bail!("joueur « {player_name} » introuvable dans le tournoi {tournament_id}");
     }
 
     let name = canonical_name.as_deref().unwrap_or(player_name);
@@ -2419,12 +2434,7 @@ pub fn merge_players(
             INSERT INTO players (name_key, name, rating, wins, draws, losses, discord_username)
             VALUES (?1, ?2, ?3, 0, 0, 0, ?4)
             ",
-            params![
-                keep_key,
-                keep_name,
-                crate::player::DEFAULT_RATING,
-                discord,
-            ],
+            params![keep_key, keep_name, crate::player::DEFAULT_RATING, discord,],
         )?;
     } else {
         tx.execute(
@@ -2493,11 +2503,20 @@ pub fn merge_players(
             )?;
         }
 
-        rewrite_keyed_player_rows(&tx, "tournament_registrations", alias_key, keep_name, &keep_key)?;
+        rewrite_keyed_player_rows(
+            &tx,
+            "tournament_registrations",
+            alias_key,
+            keep_name,
+            &keep_key,
+        )?;
         rewrite_keyed_player_rows(&tx, "tournament_players", alias_key, keep_name, &keep_key)?;
         rewrite_keyed_player_rows(&tx, "pool_players", alias_key, keep_name, &keep_key)?;
 
-        tx.execute("DELETE FROM players WHERE name_key = ?1", params![alias_key])?;
+        tx.execute(
+            "DELETE FROM players WHERE name_key = ?1",
+            params![alias_key],
+        )?;
     }
 
     tx.commit()?;
@@ -2535,9 +2554,7 @@ fn rewrite_keyed_player_rows(
         _ => bail!("table non supportée pour fusion : {table}"),
     };
 
-    let sql = format!(
-        "SELECT DISTINCT {scope_column} FROM {table} WHERE player_name_key = ?1"
-    );
+    let sql = format!("SELECT DISTINCT {scope_column} FROM {table} WHERE player_name_key = ?1");
     let scopes: Vec<i64> = {
         let mut stmt = conn.prepare(&sql)?;
         let rows = stmt.query_map(params![alias_key], |row| row.get(0))?;
@@ -2636,9 +2653,7 @@ pub fn recompute_elo_from_matches(
 
     let mut players: HashMap<String, Player> = HashMap::new();
     {
-        let mut stmt = conn.prepare(
-            "SELECT name_key, name, discord_username FROM players",
-        )?;
+        let mut stmt = conn.prepare("SELECT name_key, name, discord_username FROM players")?;
         let rows = stmt.query_map([], |row| {
             let key: String = row.get(0)?;
             let mut player = Player::new(row.get::<_, String>(1)?);
@@ -2783,10 +2798,33 @@ mod tests {
         board.add_player("Alice").unwrap();
         board.add_player("Bob").unwrap();
         board.add_player("Charlie").unwrap();
-        board.record_match("Alice", "Bob", MatchOutcome::Player1Win, 32.0, MatchScores::default(), None, None, None, None, None)
+        board
+            .record_match(
+                "Alice",
+                "Bob",
+                MatchOutcome::Player1Win,
+                32.0,
+                MatchScores::default(),
+                None,
+                None,
+                None,
+                None,
+                None,
+            )
             .unwrap();
         board
-            .record_match("Bob", "Charlie", MatchOutcome::Player2Win, 32.0, MatchScores::default(), None, None, None, None, None)
+            .record_match(
+                "Bob",
+                "Charlie",
+                MatchOutcome::Player2Win,
+                32.0,
+                MatchScores::default(),
+                None,
+                None,
+                None,
+                None,
+                None,
+            )
             .unwrap();
 
         let alice_matches = board.player_matches("Alice", 10).unwrap();
@@ -3008,8 +3046,8 @@ mod tests {
         assert_eq!(stats[1].draws, 0);
         assert_eq!(stats[1].losses, 1);
         assert_eq!(stats[1].total(), 2);
-        let expected_101 = (first.player1_new - first.player1_old)
-            + (second.player1_new - second.player1_old);
+        let expected_101 =
+            (first.player1_new - first.player1_old) + (second.player1_new - second.player1_old);
         assert!((stats[1].elo_delta - expected_101).abs() < 1e-9);
     }
 
@@ -3297,7 +3335,12 @@ mod tests {
         assert!(board.recent_published_reports(10, 0).0.is_empty());
 
         board
-            .update_match_report(recorded.id, "Alice", "version publique", ReportStatus::Published)
+            .update_match_report(
+                recorded.id,
+                "Alice",
+                "version publique",
+                ReportStatus::Published,
+            )
             .unwrap();
         let (recent, total) = board.recent_published_reports(10, 0);
         assert_eq!(total, 1);
@@ -3308,7 +3351,12 @@ mod tests {
         assert!(recent[0].tournament_id.is_none());
 
         board
-            .update_match_report(recorded.id, "Alice", "version publique", ReportStatus::Draft)
+            .update_match_report(
+                recorded.id,
+                "Alice",
+                "version publique",
+                ReportStatus::Draft,
+            )
             .unwrap();
         assert!(board.recent_published_reports(10, 0).0.is_empty());
 
@@ -3320,7 +3368,12 @@ mod tests {
         let _ = fs::remove_file(&path);
         board.save(&path).unwrap();
         let loaded = Leaderboard::load(&path).unwrap();
-        let report = loaded.get_match(recorded.id).unwrap().player1_report.as_ref().unwrap();
+        let report = loaded
+            .get_match(recorded.id)
+            .unwrap()
+            .player1_report
+            .as_ref()
+            .unwrap();
         assert_eq!(report.status, ReportStatus::Draft);
         assert_eq!(report.body_md, "version publique");
         let _ = fs::remove_file(path);
@@ -3400,7 +3453,11 @@ mod tests {
             .link_player_to_discord_username("Alice", Some("alice"))
             .unwrap();
         assert_eq!(
-            board.get_player("Alice").unwrap().discord_username.as_deref(),
+            board
+                .get_player("Alice")
+                .unwrap()
+                .discord_username
+                .as_deref(),
             Some("alice")
         );
 
@@ -3413,9 +3470,7 @@ mod tests {
             Some("alice")
         );
 
-        board
-            .link_player_to_discord_username("Bob", None)
-            .unwrap();
+        board.link_player_to_discord_username("Bob", None).unwrap();
         assert_eq!(board.get_player("Bob").unwrap().discord_username, None);
 
         let error = board

@@ -15,6 +15,7 @@ import RessourcesPage from '@/pages/RessourcesPage.vue'
 import AdminPage from '@/pages/AdminPage.vue'
 import AdminPackPage from '@/pages/AdminPackPage.vue'
 import TtsMapReportsPage from '@/pages/TtsMapReportsPage.vue'
+import ProfilsFigsPage from '@/pages/ProfilsFigsPage.vue'
 import NotFoundPage from '@/pages/NotFoundPage.vue'
 import { pageTitle } from '@/lib/pageTitle'
 
@@ -178,6 +179,28 @@ export const router = createRouter({
       name: 'admin-tts-reports',
       component: TtsMapReportsPage,
       meta: { title: 'Signalements TTS' },
+    },
+    {
+      path: '/profils-figs',
+      redirect: { name: 'profils-figs-profils' },
+    },
+    {
+      path: '/profils-figs/profils',
+      name: 'profils-figs-profils',
+      component: ProfilsFigsPage,
+      meta: { title: 'Profils' },
+    },
+    {
+      path: '/profils-figs/figs',
+      name: 'profils-figs-figs',
+      component: ProfilsFigsPage,
+      meta: { title: 'Figs 3D' },
+    },
+    {
+      path: '/profils-figs/listes',
+      name: 'profils-figs-listes',
+      component: ProfilsFigsPage,
+      meta: { title: 'Listes TTS' },
     },
     {
       path: '/:pathMatch(.*)*',

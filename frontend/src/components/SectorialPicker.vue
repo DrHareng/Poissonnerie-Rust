@@ -19,10 +19,13 @@ const props = withDefaults(
     /** Affiche une option pour vider la sélection (ex. « Toutes »). */
     allowEmpty?: boolean
     emptyLabel?: string
+    /** Affiche la croix qui retire la sectorielle choisie. */
+    clearable?: boolean
   }>(),
   {
     allowEmpty: false,
     emptyLabel: 'Toutes',
+    clearable: true,
   },
 )
 
@@ -86,7 +89,7 @@ const inputValue = computed({
 })
 
 const canClear = computed(() => {
-  if (props.disabled) return false
+  if (!props.clearable || props.disabled) return false
   if (props.modelValue != null && props.modelValue !== '') return true
   return open.value && query.value.trim() !== ''
 })
@@ -164,9 +167,8 @@ function onInput() {
     open.value = true
   }
 
-  // Avec allowEmpty, on ne vide la sélection que via l'option dédiée
-  // (évite de tout recharger pendant la saisie).
-  if (props.allowEmpty) {
+  // Le choix unique reste en place : ouvrir ou filtrer ne le retire pas.
+  if (props.allowEmpty || !props.clearable) {
     return
   }
 
@@ -202,6 +204,7 @@ function clearSelection() {
         :disabled="disabled"
         class="searchable-picker-input"
         @focus="openPicker"
+        @click="openPicker"
         @blur="handleBlur(trigger, dropdown)"
         @keydown="handleKeydown"
       />

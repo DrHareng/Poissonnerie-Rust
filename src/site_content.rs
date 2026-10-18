@@ -144,7 +144,10 @@ mod tests {
         assert!(!initial.body_md.is_empty());
 
         let updated = store
-            .update(RESSOURCES_KEY, "## Nouveau\n\n- [Lien](https://example.com)")
+            .update(
+                RESSOURCES_KEY,
+                "## Nouveau\n\n- [Lien](https://example.com)",
+            )
             .unwrap();
         assert!(updated.body_md.contains("Nouveau"));
         assert_eq!(store.get(RESSOURCES_KEY).unwrap().body_md, updated.body_md);
