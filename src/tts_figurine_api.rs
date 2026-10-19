@@ -46,7 +46,7 @@ pub fn tts_figurine_routes() -> Router<AppState> {
             "/api/tts-figurines/{id}/loadouts",
             get(list_figurine_loadouts),
         )
-        .route("/api/tts-faction-color", get(faction_color))
+        .route("/api/tts-sectorial-color", get(sectorial_color))
         .route("/api/tts-figurines/{id}/object", get(figurine_object))
         .merge(uploads)
 }
@@ -188,17 +188,14 @@ async fn figurine_object(
     ))))
 }
 
-async fn faction_color(
+async fn sectorial_color(
     State(state): State<AppState>,
     Query(query): Query<ArmyQuery>,
 ) -> Result<Json<FactionColorBody>, ApiError> {
-    let faction = faction_army(&state, query.army_id)?;
-    let color = state
-        .tts_profiles
-        .color_for_faction_slug(&faction.slug)
-        .map_err(|error| ApiError::bad_request(error.to_string()))?
-        .unwrap_or_else(|| "FFFFFF".to_string());
-    Ok(Json(FactionColorBody { color }))
+    let army = load_army(&state, query.army_id)?;
+    Ok(Json(FactionColorBody {
+        color: configured_color(&army.slug),
+    }))
 }
 
 fn require_army(state: &AppState, army_id: i64) -> Result<(), ApiError> {
@@ -216,37 +213,22 @@ fn load_army(state: &AppState, army_id: i64) -> Result<crate::army::Army, ApiErr
         .ok_or_else(|| ApiError::bad_request("sectorielle introuvable"))
 }
 
-fn faction_army(state: &AppState, army_id: i64) -> Result<crate::army::Army, ApiError> {
-    let army = load_army(state, army_id)?;
-    if army.parent_id != 0 && army.parent_id != army.id {
-        if let Some(parent) = state
-            .armies
-            .get(army.parent_id)
-            .map_err(|error| ApiError::bad_request(error.to_string()))?
-        {
-            return Ok(parent);
-        }
-    }
-    Ok(army)
-}
-
 fn diffuse_color(
     state: &AppState,
     army_id: i64,
     raw: Option<&str>,
 ) -> Result<tts_object::DiffuseColor, ApiError> {
-    load_army(state, army_id)?;
+    let army = load_army(state, army_id)?;
     if let Some(raw) = raw.map(str::trim).filter(|value| !value.is_empty()) {
         return tts_object::parse_color(raw)
             .ok_or_else(|| ApiError::bad_request("couleur invalide"));
     }
-    let faction = faction_army(state, army_id)?;
-    let hex = state
-        .tts_profiles
-        .color_for_faction_slug(&faction.slug)
-        .map_err(|error| ApiError::bad_request(error.to_string()))?
-        .unwrap_or_else(|| "FFFFFF".to_string());
-    tts_object::parse_color(&hex).ok_or_else(|| ApiError::bad_request("couleur invalide"))
+    tts_object::parse_color(&configured_color(&army.slug))
+        .ok_or_else(|| ApiError::bad_request("couleur invalide"))
+}
+
+fn configured_color(slug: &str) -> String {
+    tts_object::sectorial_color_hex(slug).unwrap_or_else(|| "FFFFFF".to_string())
 }
 
 fn same_isc(left: &str, right: &str) -> bool {

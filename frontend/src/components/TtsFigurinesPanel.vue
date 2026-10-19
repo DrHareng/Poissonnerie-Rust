@@ -15,7 +15,7 @@ import {
   clearTtsFigurinePhoto,
   createTtsFigurine,
   deleteTtsFigurine,
-  fetchTtsFactionColor,
+  fetchTtsSectorialColor,
   fetchTtsFigurineLoadouts,
   fetchTtsFigurineObject,
   fetchTtsFigurines,
@@ -49,7 +49,7 @@ const loadoutsLoading = ref(false)
 const loadoutsError = ref('')
 const selectedProfileId = ref('')
 const color = ref('FFFFFF')
-const factionColor = ref('FFFFFF')
+const sectorialColor = ref('FFFFFF')
 const downloading = ref(false)
 const draft = ref<Draft>(emptyDraft())
 const photoFile = ref<File | null>(null)
@@ -372,13 +372,13 @@ async function loadFactionColor() {
   const armyId = Number(props.armyId)
   if (!armyId) return
   try {
-    const next = (await fetchTtsFactionColor(armyId)).toUpperCase()
+    const next = (await fetchTtsSectorialColor(armyId)).toUpperCase()
     if (Number(props.armyId) !== armyId) return
-    factionColor.value = next
+    sectorialColor.value = next
     color.value = next
   } catch {
     if (Number(props.armyId) !== armyId) return
-    factionColor.value = 'FFFFFF'
+    sectorialColor.value = 'FFFFFF'
     color.value = 'FFFFFF'
   }
 }
@@ -447,13 +447,13 @@ onBeforeUnmount(() => {
             <div class="flex items-center justify-between gap-2">
               <p class="text-sm font-medium">Couleur</p>
               <Button
-                v-if="color.toUpperCase() !== factionColor.toUpperCase()"
+                v-if="color.toUpperCase() !== sectorialColor.toUpperCase()"
                 type="button"
                 variant="ghost"
                 size="sm"
-                @click="color = factionColor"
+                @click="color = sectorialColor"
               >
-                Couleur de la faction
+                Couleur de la sectorielle
               </Button>
             </div>
             <ColorPicker v-model="color" />

@@ -1096,39 +1096,6 @@ impl TtsProfileStore {
         marker_mesh_catalog(&conn)
     }
 
-    /// Couleur la plus fréquente des noms TTS de cette faction, sans `#`.
-    pub fn color_for_faction_slug(&self, slug: &str) -> Result<Option<String>> {
-        let slug = slug.trim();
-        if slug.is_empty() {
-            return Ok(None);
-        }
-        let conn = self.conn.lock().unwrap();
-        let color: Option<String> = conn
-            .query_row(
-                "
-                SELECT substr(nom_tts, 2, 6)
-                FROM tts_profiles
-                WHERE faction_slug = ?1 COLLATE NOCASE
-                  AND substr(nom_tts, 1, 1) = '['
-                  AND substr(nom_tts, 8, 1) = ']'
-                GROUP BY substr(nom_tts, 2, 6)
-                ORDER BY COUNT(*) DESC, substr(nom_tts, 2, 6)
-                LIMIT 1
-                ",
-                params![slug],
-                |row| row.get::<_, String>(0),
-            )
-            .optional()?;
-        Ok(color.and_then(|value| {
-            let hex = value.trim();
-            if hex.len() == 6 && hex.chars().all(|char| char.is_ascii_hexdigit()) {
-                Some(hex.to_ascii_uppercase())
-            } else {
-                None
-            }
-        }))
-    }
-
     pub fn list_labels(&self) -> Result<Vec<TtsProfileLabel>> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(

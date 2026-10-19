@@ -1,6 +1,7 @@
 //! Objet TTS d'une figurine peinte : asset bundle, profil choisi, silhouette en état 2.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
+use std::sync::OnceLock;
 
 use serde_json::{json, Map, Value};
 
@@ -120,6 +121,30 @@ pub fn parse_color(raw: &str) -> Option<DiffuseColor> {
         r: channel(0).ok()?,
         g: channel(2).ok()?,
         b: channel(4).ok()?,
+    })
+}
+
+/// Couleur de `config/sectorial-colors.json` pour le slug de la sectorielle choisie.
+pub fn sectorial_color_hex(slug: &str) -> Option<String> {
+    let key = slug.trim().to_ascii_lowercase();
+    if key.is_empty() {
+        return None;
+    }
+    sectorial_colors()
+        .get(&key)
+        .and_then(|raw| parse_color(raw))
+        .map(|color| color.hex())
+}
+
+fn sectorial_colors() -> &'static HashMap<String, String> {
+    static COLORS: OnceLock<HashMap<String, String>> = OnceLock::new();
+    COLORS.get_or_init(|| {
+        let raw: HashMap<String, String> =
+            serde_json::from_str(include_str!("../config/sectorial-colors.json"))
+                .expect("config/sectorial-colors.json");
+        raw.into_iter()
+            .map(|(slug, color)| (slug.to_ascii_lowercase(), color))
+            .collect()
     })
 }
 
@@ -351,6 +376,28 @@ fn shell(name: &str, nickname: &str, description: &str, color: DiffuseColor) -> 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn sectorial_colors_follow_the_chosen_slug() {
+        assert_eq!(
+            sectorial_color_hex("military-orders").as_deref(),
+            Some("00B0F2")
+        );
+        assert_eq!(
+            sectorial_color_hex("Shindenbutai").as_deref(),
+            Some("E52520")
+        );
+        assert_eq!(sectorial_color_hex("druze").as_deref(), Some("FFFFFF"));
+        assert_eq!(
+            sectorial_color_hex("contracted-back-up").as_deref(),
+            Some("B3B2B2")
+        );
+        assert_eq!(sectorial_color_hex("inconnue"), None);
+        assert!(sectorial_colors().len() >= 50);
+        assert!(sectorial_colors()
+            .values()
+            .all(|color| parse_color(color).is_some()));
+    }
 
     fn tint() -> DiffuseColor {
         parse_color("E6DA9B").expect("couleur")

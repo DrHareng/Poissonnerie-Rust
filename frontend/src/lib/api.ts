@@ -138,8 +138,8 @@ export function fetchTtsFigurineLoadouts(id: number, armyId: number): Promise<Tt
   return request<TtsFigurineLoadout[]>(`/api/tts-figurines/${id}/loadouts?army_id=${armyId}`)
 }
 
-export function fetchTtsFactionColor(armyId: number): Promise<string> {
-  return request<{ color: string }>(`/api/tts-faction-color?army_id=${armyId}`).then(
+export function fetchTtsSectorialColor(armyId: number): Promise<string> {
+  return request<{ color: string }>(`/api/tts-sectorial-color?army_id=${armyId}`).then(
     (body) => body.color,
   )
 }
