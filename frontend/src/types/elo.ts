@@ -687,6 +687,33 @@ export interface TtsProfileArmyCount {
   count: number
 }
 
+export interface TtsListRankedFigurine extends TtsFigurine {
+  score: number
+  exact_loadout: boolean
+}
+
+export interface TtsListExpandEntry {
+  index: number
+  unit_id: number
+  group_id: number
+  option_id: number
+  combat_group: number
+  reinforcements: boolean
+  customization_json?: string | null
+  profile: TtsProfileSummary | null
+  figurines: TtsListRankedFigurine[]
+}
+
+export interface TtsListExpandResult {
+  code: string
+  army_id: number
+  sectoral_slug: string
+  sectoral_name: string
+  name: string
+  max_points: number
+  entries: TtsListExpandEntry[]
+}
+
 export interface TtsProfileUpdate {
   army_id: number | null
   isc: string

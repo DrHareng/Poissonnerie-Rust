@@ -1,8 +1,49 @@
 //! Normalisation et parsing des codes de liste Infinity Army.
+//!
+//! Format binaire (Army 7), d'après Infinity-Army-Tools / Docs/Armycodes.md :
+//! sectoral_id (VLI) · slug · nom · points · N groupes ·
+//! chaque groupe : numéro, field_A, field_B (renfort), taille ·
+//! chaque membre : 00 · unit_id · group · option · new_field · [mod_flag · custom?]
+//!
+//! Certaines listes omettent le `mod_flag` quand il vaut 0 : on tente d'abord le
+//! format complet, puis le format sans `mod_flag`.
 
 use anyhow::{bail, Context, Result};
+use serde::Serialize;
 
 const URL_MARKERS: &[&str] = &["army/list/", "army/infinity/list/"];
+
+/// Entrée d'une liste décodée (une ligne Army Builder).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct ArmyListMember {
+    pub unit_id: u32,
+    pub group_id: u32,
+    pub option_id: u32,
+    pub combat_group: u32,
+    pub reinforcements: bool,
+    /// JSON brut de customisation Spec-Ops / Team-Ops, si présent.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub customization_json: Option<String>,
+}
+
+/// Liste Army entièrement décodée.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct DecodedArmyList {
+    pub sectoral_id: u32,
+    pub sectoral_slug: String,
+    pub name: String,
+    pub max_points: u32,
+    pub members: Vec<ArmyListMember>,
+}
+
+/// Décode le roster complet (unités / options) depuis un code ou une URL Army.
+pub fn parse_army_list(raw: &str) -> Result<DecodedArmyList> {
+    let normalized =
+        normalize_army_list_code(raw).context("code de liste Army manquant ou invalide")?;
+    let binary =
+        decode_army_payload(&normalized).context("impossible de décoder le code Army (base64)")?;
+    decode_army_binary(&binary).context("format de liste Army non reconnu")
+}
 
 /// Extrait le code depuis un code brut ou une URL Army (query/hash ignorés).
 /// Décode aussi les séquences percent-encoding (`%3D` → `=`).
@@ -65,6 +106,167 @@ pub fn parse_army_list_name(raw: &str) -> Option<String> {
     let header = find_faction_slug_in_binary(&binary)?;
     let name_offset = header.slug_offset + 1 + header.slug_len;
     read_length_prefixed_string(&binary, name_offset, 128)
+}
+
+fn decode_army_binary(data: &[u8]) -> Result<DecodedArmyList> {
+    if let Ok(list) = decode_army_binary_with(data, true) {
+        return Ok(list);
+    }
+    decode_army_binary_with(data, false)
+}
+
+fn decode_army_binary_with(data: &[u8], with_mod_flag: bool) -> Result<DecodedArmyList> {
+    let mut cur = Cursor::new(data);
+    let sectoral_id = cur.read_vli().context("ID de sectorielle")?;
+    let sectoral_slug = cur
+        .read_length_string(64)
+        .context("slug de sectorielle")?;
+    if !is_faction_slug(&sectoral_slug) {
+        bail!("slug de sectorielle invalide");
+    }
+    let name = cur.read_byte_string(128).context("nom de liste")?;
+    let max_points = cur.read_vli().context("limite de points")?;
+    let group_count = cur.read_vli().context("nombre de groupes")?;
+    if group_count == 0 || group_count > 8 {
+        bail!("nombre de combat groups invalide ({group_count})");
+    }
+
+    let mut members = Vec::new();
+    for _ in 0..group_count {
+        let combat_group = cur.read_vli().context("numéro de combat group")?;
+        let _field_a = cur.read_vli().context("field_A")?;
+        let field_b = cur.read_vli().context("field_B")?;
+        let size = cur.read_vli().context("taille du combat group")?;
+        if size > 40 {
+            bail!("combat group trop grand ({size})");
+        }
+        let reinforcements = field_b != 0;
+        for _ in 0..size {
+            members.push(
+                cur.read_member(combat_group, reinforcements, with_mod_flag)
+                    .context("membre de liste")?,
+            );
+        }
+    }
+    if !cur.is_empty() {
+        bail!("octets restants après décodage ({})", cur.remaining());
+    }
+    Ok(DecodedArmyList {
+        sectoral_id,
+        sectoral_slug,
+        name,
+        max_points,
+        members,
+    })
+}
+
+struct Cursor<'a> {
+    data: &'a [u8],
+    pos: usize,
+}
+
+impl<'a> Cursor<'a> {
+    fn new(data: &'a [u8]) -> Self {
+        Self { data, pos: 0 }
+    }
+
+    fn is_empty(&self) -> bool {
+        self.pos >= self.data.len()
+    }
+
+    fn remaining(&self) -> usize {
+        self.data.len().saturating_sub(self.pos)
+    }
+
+    fn read_u8(&mut self) -> Result<u8> {
+        let byte = *self
+            .data
+            .get(self.pos)
+            .context("fin inattendue du code Army")?;
+        self.pos += 1;
+        Ok(byte)
+    }
+
+    /// Entier VLQ Army : 1 octet si < 128, sinon short BE avec bit 15 levé.
+    fn read_vli(&mut self) -> Result<u32> {
+        let first = self.read_u8()?;
+        if first < 0x80 {
+            return Ok(u32::from(first));
+        }
+        let second = self.read_u8()?;
+        let value = (u16::from(first) << 8) | u16::from(second);
+        Ok(u32::from(value & 0x7fff))
+    }
+
+    fn read_length_string(&mut self, max_len: usize) -> Result<String> {
+        let length = self.read_vli()? as usize;
+        self.read_exact_string(length, max_len)
+    }
+
+    fn read_byte_string(&mut self, max_len: usize) -> Result<String> {
+        let length = usize::from(self.read_u8()?);
+        self.read_exact_string(length, max_len)
+    }
+
+    fn read_exact_string(&mut self, length: usize, max_len: usize) -> Result<String> {
+        if length > max_len {
+            bail!("chaîne trop longue ({length})");
+        }
+        if self.pos + length > self.data.len() {
+            bail!("chaîne tronquée");
+        }
+        let bytes = &self.data[self.pos..self.pos + length];
+        self.pos += length;
+        let value = std::str::from_utf8(bytes)
+            .context("chaîne UTF-8 invalide")?
+            .trim()
+            .to_string();
+        Ok(value)
+    }
+
+    fn read_member(
+        &mut self,
+        combat_group: u32,
+        reinforcements: bool,
+        with_mod_flag: bool,
+    ) -> Result<ArmyListMember> {
+        let lead = self.read_u8()?;
+        if lead != 0 {
+            bail!("séparateur de membre invalide (0x{lead:02x})");
+        }
+        let unit_id = self.read_vli()?;
+        let group_id = self.read_vli()?;
+        let option_id = self.read_vli()?;
+        let _new_field = self.read_vli()?;
+        let mut customization_json = None;
+        if with_mod_flag {
+            let mod_flag = self.read_vli()?;
+            if mod_flag != 0 {
+                let _byte_e = self.read_vli()?;
+                let length = self.read_vli()? as usize;
+                if length > 8_192 {
+                    bail!("customisation trop longue ({length})");
+                }
+                if self.pos + length > self.data.len() {
+                    bail!("customisation tronquée");
+                }
+                let bytes = &self.data[self.pos..self.pos + length];
+                self.pos += length;
+                let json = std::str::from_utf8(bytes)
+                    .context("customisation UTF-8 invalide")?
+                    .to_string();
+                customization_json = Some(json);
+            }
+        }
+        Ok(ArmyListMember {
+            unit_id,
+            group_id,
+            option_id,
+            combat_group,
+            reinforcements,
+            customization_json,
+        })
+    }
 }
 
 struct FactionSlugHeader {
@@ -266,5 +468,57 @@ mod tests {
             parse_army_list_name(code).as_deref(),
             Some("Nouveau go to v2")
         );
+    }
+
+    #[test]
+    fn decodes_hassassin_roster_without_mod_flag() {
+        let code = "gZIQaGFzc2Fzc2luLWJhaHJhbRBOb3V2ZWF1IGdvIHRvIHYygSwCAQEACgCBMAECAACGNQECAACBRwEGAACBTgEBAACBLQELAACBLQEOAACBUQECAACBGwEBAACBTAECAACGCwEDAAIBAAUAgUgBAwAAgTABBgAAgT4BAQAAgVQBAwAAhgkBAgA=";
+        let list = parse_army_list(code).unwrap();
+        assert_eq!(list.sectoral_id, 402);
+        assert_eq!(list.sectoral_slug, "hassassin-bahram");
+        assert_eq!(list.name, "Nouveau go to v2");
+        assert_eq!(list.max_points, 300);
+        assert_eq!(list.members.len(), 15);
+        assert_eq!(list.members[0].unit_id, 304);
+        assert_eq!(list.members[0].group_id, 1);
+        assert_eq!(list.members[0].option_id, 2);
+        assert_eq!(list.members[0].combat_group, 1);
+        assert_eq!(list.members[10].combat_group, 2);
+        assert_eq!(list.members[10].unit_id, 328);
+    }
+
+    #[test]
+    fn decodes_operations_roster_with_mod_flag() {
+        // CODE_1 from Infinity-Army-Tools ArmylistDecodeTest
+        let code = "gr8Kb3BlcmF0aW9ucwtTSW1wbGUgbGlzdIEsAQEBAAYAgkgBBgAAAIJTAQEAAACCUwEBAAAAglUBAgAAAIJVAgIAAACCVQQCAAA=";
+        let list = parse_army_list(code).unwrap();
+        assert_eq!(list.sectoral_id, 703);
+        assert_eq!(list.sectoral_slug, "operations");
+        assert_eq!(list.name, "SImple list");
+        assert_eq!(list.max_points, 300);
+        assert_eq!(list.members.len(), 6);
+        assert_eq!(list.members[0].unit_id, 584);
+        assert_eq!(list.members[0].option_id, 6);
+        assert_eq!(
+            list.members
+                .iter()
+                .map(|member| member.unit_id)
+                .collect::<Vec<_>>(),
+            vec![584, 595, 595, 597, 597, 597]
+        );
+    }
+
+    #[test]
+    fn decodes_customization_block() {
+        // CODE_4 from Infinity-Army-Tools — un Spec-Ops customisé
+        let code = "gr8Kb3BlcmF0aW9ucwtTSW1wbGUgbGlzdIEsAQEBAAEAh5ABAQABAXJbeyJ0eXBlIjoic3RhdCIsInN0YXQiOiJtb3ZlMCIsInEiOjE1fSx7InR5cGUiOiJzdGF0Iiwic3RhdCI6Im1vdmUxIiwicSI6MTB9LHsidHlwZSI6InNraWxsIiwiaWQiOjQwLCJleHRyYSI6WzFdfV0=";
+        let list = parse_army_list(code).unwrap();
+        assert_eq!(list.members.len(), 1);
+        assert_eq!(list.members[0].unit_id, 1936);
+        assert_eq!(list.members[0].group_id, 1);
+        assert_eq!(list.members[0].option_id, 1);
+        let json = list.members[0].customization_json.as_deref().unwrap();
+        assert!(json.contains("move0"));
+        assert!(json.contains("\"id\":40"));
     }
 }

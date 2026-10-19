@@ -24,6 +24,7 @@ pub mod tournament_api;
 pub mod tournament_store;
 pub mod tts_figurine;
 pub mod tts_figurine_api;
+pub mod tts_list_api;
 pub mod tts_map;
 pub mod tts_map_api;
 pub mod tts_object;

@@ -1151,6 +1151,19 @@ impl TtsProfileStore {
         get_profile(&conn, id)
     }
 
+    /// Résout un profil via `source_bag = army:{unit}:{group}` et `source_index = option`.
+    /// Préfère un profil lié à `army_id` (sectorielle ou catalogue).
+    pub fn find_by_army_source(
+        &self,
+        unit_id: u32,
+        group_id: u32,
+        option_id: u32,
+        army_id: Option<i64>,
+    ) -> Result<Option<TtsProfileSummary>> {
+        let conn = self.conn.lock().unwrap();
+        find_by_army_source(&conn, unit_id, group_id, option_id, army_id)
+    }
+
     pub fn update(&self, id: i64, update: &ProfileUpdate) -> Result<TtsProfileDetail> {
         let conn = self.conn.lock().unwrap();
         update_profile(&conn, id, update)
@@ -1596,6 +1609,50 @@ fn profile_in_army(conn: &Connection, profile_id: i64, army_id: i64) -> Result<b
         )
         .optional()?;
     Ok(found.is_some())
+}
+
+fn find_by_army_source(
+    conn: &Connection,
+    unit_id: u32,
+    group_id: u32,
+    option_id: u32,
+    army_id: Option<i64>,
+) -> Result<Option<TtsProfileSummary>> {
+    let bag = format!("army:{unit_id}:{group_id}");
+    let mut stmt = conn.prepare(
+        "
+        SELECT
+            p.id, p.army_id, p.faction_label, p.isc, p.loadout, p.nom_tts,
+            p.silhouette_size, p.silhouette_type, p.marker_name,
+            (SELECT COUNT(*) FROM tts_profile_forms f WHERE f.profile_id = p.id),
+            0,
+            ''
+        FROM tts_profiles p
+        WHERE p.source_bag = ?1 AND p.source_index = ?2
+        ORDER BY p.id
+        ",
+    )?;
+    let rows = stmt
+        .query_map(params![bag, i64::from(option_id)], map_summary)?
+        .collect::<std::result::Result<Vec<_>, _>>()
+        .context("recherche de profil par source Army")?;
+    if rows.is_empty() {
+        return Ok(None);
+    }
+    let Some(army_id) = army_id else {
+        return Ok(rows.into_iter().next());
+    };
+    let mut fallback = None;
+    for mut row in rows {
+        if profile_in_army(conn, row.id, army_id)? {
+            row.linked = true;
+            return Ok(Some(row));
+        }
+        if fallback.is_none() {
+            fallback = Some(row);
+        }
+    }
+    Ok(fallback)
 }
 
 fn marker_mesh_catalog(conn: &Connection) -> Result<BTreeMap<String, String>> {

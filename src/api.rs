@@ -24,7 +24,8 @@ use crate::{
     dauphine_api, default_db_path,
     scenario::ScenarioStore,
     session_store::SqliteSessionStore,
-    tournament_api, tts_figurine_api, tts_map_api, tts_profile_api, ArmyListStore, ArmyStore,
+    tournament_api, tts_figurine_api, tts_list_api, tts_map_api, tts_profile_api, ArmyListStore,
+    ArmyStore,
     ContentUpdateStore, DauphineStore, Leaderboard, MatchOutcome, MatchRecord, MatchScores, Player,
     ReportStatus, ReportTemplateStore, SiteContentStore, TournamentStore, TtsMapStore, User,
     UserStore, DEFAULT_K_FACTOR, RESSOURCES_KEY,
@@ -484,6 +485,7 @@ pub fn router(state: AppState) -> Result<Router> {
         .merge(tournament_api::tournament_routes())
         .merge(tts_map_api::tts_map_routes())
         .merge(tts_figurine_api::tts_figurine_routes())
+        .merge(tts_list_api::tts_list_routes())
         .merge(tts_profile_api::tts_profile_routes())
         .merge(dauphine_api::dauphine_routes())
         .layer(cors_layer())

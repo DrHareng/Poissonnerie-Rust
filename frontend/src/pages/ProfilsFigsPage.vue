@@ -5,6 +5,7 @@ import PageTitleTabs from '@/components/PageTitleTabs.vue'
 import PlayerPicker from '@/components/PlayerPicker.vue'
 import SectorialPicker from '@/components/SectorialPicker.vue'
 import TtsFigurinesPanel from '@/components/TtsFigurinesPanel.vue'
+import TtsListsPanel from '@/components/TtsListsPanel.vue'
 import TtsProfilesPanel from '@/components/TtsProfilesPanel.vue'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -30,12 +31,15 @@ const figsPanel = ref<{ openCreate: () => void } | null>(null)
 
 const isProfilesTab = computed(() => route.name === 'profils-figs-profils')
 const isFigsTab = computed(() => route.name === 'profils-figs-figs')
+const isListsTab = computed(() => route.name === 'profils-figs-listes')
 
 const showSearch = computed(() => {
   if (isProfilesTab.value) return !!armyId.value
   if (!isFigsTab.value) return false
   return !!armyId.value || !!painterFilter.value.trim()
 })
+
+const showSectorialBar = computed(() => !isListsTab.value)
 
 const pickerArmies = computed(() => {
   const known = new Set(armies.value.map((army) => army.id))
@@ -96,7 +100,7 @@ onMounted(async () => {
       :tabs="profilsFigsTabs"
     />
 
-    <div class="space-y-1.5">
+    <div v-if="showSectorialBar" class="space-y-1.5">
       <div class="flex flex-wrap items-end gap-2">
         <div class="grid min-w-56 flex-1 gap-1.5 sm:max-w-md">
           <Label>Sectorielle</Label>
@@ -148,8 +152,10 @@ onMounted(async () => {
       @saved="refreshPainterOptions"
     />
 
-    <p v-else class="text-sm text-muted-foreground">
-      Listes TTS — section en cours de préparation.
-    </p>
+    <TtsListsPanel
+      v-else-if="isListsTab"
+      :painter-options="painterOptions"
+      @update:army-id="setArmyId"
+    />
   </div>
 </template>

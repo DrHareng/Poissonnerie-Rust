@@ -35,6 +35,7 @@ import type {
   TtsFigurine,
   TtsFigurineLabel,
   TtsFigurineLoadout,
+  TtsListExpandResult,
   TtsFigurineWrite,
   ContentUpdate,
   MapContentUpdate,
@@ -107,6 +108,16 @@ export function fetchTtsProfileLabels(): Promise<TtsProfileLabel[]> {
 
 export function fetchTtsFigurines(): Promise<TtsFigurine[]> {
   return request<TtsFigurine[]>('/api/tts-figurines')
+}
+
+export function expandTtsList(code: string, painter?: string): Promise<TtsListExpandResult> {
+  return request<TtsListExpandResult>('/api/tts-lists/expand', {
+    method: 'POST',
+    body: JSON.stringify({
+      code,
+      painter: painter?.trim() || undefined,
+    }),
+  })
 }
 
 export function createTtsFigurine(payload: TtsFigurineWrite): Promise<TtsFigurine> {

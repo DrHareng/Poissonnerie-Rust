@@ -311,7 +311,7 @@ fn absorb_units(
         let Some(unit_id) = unit.get("id").and_then(Value::as_i64) else {
             continue;
         };
-        let isc = unit
+        let unit_isc = unit
             .get("name")
             .and_then(Value::as_str)
             .unwrap_or("Profil")
@@ -322,6 +322,13 @@ fn absorb_units(
         };
         for group in groups {
             let group_id = group.get("id").and_then(Value::as_i64).unwrap_or(0);
+            let isc = group
+                .get("isc")
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .map(str::to_string)
+                .unwrap_or_else(|| unit_isc.clone());
             let base = group
                 .get("profiles")
                 .and_then(Value::as_array)
@@ -334,11 +341,7 @@ fn absorb_units(
             };
             let mut used_loadouts = BTreeSet::new();
             for option in options {
-                if option
-                    .get("disabled")
-                    .and_then(Value::as_bool)
-                    .unwrap_or(false)
-                {
+                if !option_is_importable(unit, group_id, option) {
                     continue;
                 }
                 let option_id = option.get("id").and_then(Value::as_i64).unwrap_or(0);
@@ -373,6 +376,40 @@ fn absorb_units(
             }
         }
     }
+}
+
+/// Options marquées `disabled` au niveau du groupe restent importables si une option
+/// d'unité active les référence via `includes` (Polaris Team, Mirage-5, Scarface…).
+fn option_is_importable(unit: &Value, group_id: i64, option: &Value) -> bool {
+    if !option
+        .get("disabled")
+        .and_then(Value::as_bool)
+        .unwrap_or(false)
+    {
+        return true;
+    }
+    let option_id = option.get("id").and_then(Value::as_i64).unwrap_or(0);
+    let Some(unit_options) = unit.get("options").and_then(Value::as_array) else {
+        return false;
+    };
+    unit_options.iter().any(|unit_option| {
+        if unit_option
+            .get("disabled")
+            .and_then(Value::as_bool)
+            .unwrap_or(false)
+        {
+            return false;
+        }
+        unit_option
+            .get("includes")
+            .and_then(Value::as_array)
+            .is_some_and(|includes| {
+                includes.iter().any(|include| {
+                    include.get("group").and_then(Value::as_i64) == Some(group_id)
+                        && include.get("option").and_then(Value::as_i64) == Some(option_id)
+                })
+            })
+    })
 }
 
 fn unit_factions(unit: &Value) -> Vec<i64> {
@@ -1876,6 +1913,174 @@ mod tests {
         assert_eq!(
             pipe_equipment("FUSILIER || TURTLEMEK x2, CrazyKoala"),
             vec!["TURTLEMEK".to_string(), "CrazyKoala".to_string()]
+        );
+    }
+
+    #[test]
+    fn imports_team_members_referenced_by_unit_options() {
+        let metadata = serde_json::json!({
+            "skills": [],
+            "weapons": [
+                {"id": 33, "name": "Combi Rifle"},
+                {"id": 69, "name": "Pistol"},
+                {"id": 5, "name": "CC Weapon"},
+                {"id": 2, "name": "Heavy Machine Gun"}
+            ],
+            "equips": []
+        });
+        let army = ArmyRow {
+            id: 301,
+            parent_id: 301,
+            name: "Ariadna".into(),
+            slug: "ariadna".into(),
+        };
+        let document = serde_json::json!({
+            "filters": {
+                "extras": [],
+                "chars": [],
+                "type": [],
+                "peripheral": []
+            },
+            "units": [{
+                "id": 1522,
+                "name": "POLARIS TEAM",
+                "factions": [301, 306],
+                "options": [
+                    {
+                        "id": 1,
+                        "name": "POLARIS TEAM ALPHA",
+                        "disabled": false,
+                        "includes": [
+                            {"q": 1, "group": 1, "option": 1},
+                            {"q": 1, "group": 2, "option": 1}
+                        ]
+                    },
+                    {
+                        "id": 2,
+                        "name": "POLARIS TEAM BETA",
+                        "disabled": false,
+                        "includes": [
+                            {"q": 1, "group": 1, "option": 1},
+                            {"q": 1, "group": 2, "option": 2}
+                        ]
+                    }
+                ],
+                "profileGroups": [
+                    {
+                        "id": 1,
+                        "isc": "Masha, Polaris Handler",
+                        "profiles": [{
+                            "name": "MASHA",
+                            "type": 1,
+                            "chars": [],
+                            "move": [4, 4],
+                            "cc": 13, "bs": 12, "ph": 10, "wip": 13, "arm": 1, "bts": 0, "w": 1,
+                            "str": false, "s": 2,
+                            "skills": [], "equip": [], "weapons": []
+                        }],
+                        "options": [{
+                            "id": 1,
+                            "name": "MASHA",
+                            "disabled": true,
+                            "weapons": [{"id": 33}, {"id": 69}, {"id": 5}],
+                            "skills": [], "equip": [], "includes": []
+                        }]
+                    },
+                    {
+                        "id": 2,
+                        "isc": "Polaris Bearpode",
+                        "profiles": [{
+                            "name": "POLARIS BEARPODE",
+                            "type": 1,
+                            "chars": [],
+                            "move": [6, 4],
+                            "cc": 20, "bs": 10, "ph": 14, "wip": 13, "arm": 2, "bts": 0, "w": 2,
+                            "str": false, "s": 5,
+                            "skills": [], "equip": [], "weapons": []
+                        }],
+                        "options": [
+                            {
+                                "id": 1,
+                                "name": "POLARIS BEARPODE ALPHA",
+                                "disabled": true,
+                                "weapons": [{"id": 33}, {"id": 5}],
+                                "skills": [], "equip": [], "includes": []
+                            },
+                            {
+                                "id": 2,
+                                "name": "POLARIS BEARPODE BETA",
+                                "disabled": true,
+                                "weapons": [{"id": 2}, {"id": 5}],
+                                "skills": [], "equip": [], "includes": []
+                            }
+                        ]
+                    }
+                ]
+            }, {
+                "id": 10,
+                "name": "FUSILIER",
+                "factions": [301],
+                "profileGroups": [{
+                    "id": 1,
+                    "profiles": [{
+                        "name": "FUSILIER",
+                        "type": 1,
+                        "chars": [],
+                        "move": [4, 4],
+                        "cc": 13, "bs": 12, "ph": 10, "wip": 13, "arm": 1, "bts": 0, "w": 1,
+                        "str": false, "s": 2,
+                        "skills": [], "equip": [], "weapons": []
+                    }],
+                    "options": [{
+                        "id": 1,
+                        "name": "FUSILIER",
+                        "disabled": false,
+                        "weapons": [{"id": 33}],
+                        "skills": [], "equip": [],
+                        "includes": [{"group": 2, "option": 1}]
+                    }]
+                }, {
+                    "id": 2,
+                    "profiles": [{
+                        "name": "OPERATOR",
+                        "type": 1,
+                        "chars": [],
+                        "move": [4, 4],
+                        "cc": 13, "bs": 12, "ph": 10, "wip": 13, "arm": 0, "bts": 0, "w": 1,
+                        "str": false, "s": 2,
+                        "skills": [], "equip": [], "weapons": []
+                    }],
+                    "options": [{
+                        "id": 1,
+                        "name": "OPERATOR",
+                        "disabled": true,
+                        "weapons": [{"id": 69}],
+                        "skills": [], "equip": [], "includes": []
+                    }]
+                }]
+            }]
+        });
+        let names = names_from_metadata(&metadata);
+        let armies = vec![army.clone()];
+        let mut drafts = BTreeMap::new();
+        absorb_units(&mut drafts, &names, &army, &armies, &document);
+        let profiles: Vec<_> = drafts.into_values().collect();
+        assert!(profiles.iter().any(|profile| {
+            profile.isc == "Masha, Polaris Handler" && profile.loadout.starts_with("Combi Rifle")
+        }));
+        assert!(profiles.iter().any(|profile| {
+            profile.isc == "Polaris Bearpode" && profile.loadout.starts_with("Combi Rifle")
+        }));
+        assert!(profiles.iter().any(|profile| {
+            profile.isc == "Polaris Bearpode" && profile.loadout.starts_with("Heavy Machine Gun")
+        }));
+        assert!(!profiles.iter().any(|profile| profile.isc == "OPERATOR"));
+        assert_eq!(
+            profiles
+                .iter()
+                .filter(|profile| profile.isc.contains("Polaris") || profile.isc.contains("Masha"))
+                .count(),
+            3
         );
     }
 }
