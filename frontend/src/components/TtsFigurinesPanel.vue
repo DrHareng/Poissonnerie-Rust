@@ -435,7 +435,6 @@ watch(
 )
 
 watch(() => props.armyId, () => {
-  search.value = ''
   void loadLabels()
   void loadFactionColor()
   if (panel.value === 'download' && downloadTarget.value) {
