@@ -26,6 +26,7 @@ pub mod tts_figurine;
 pub mod tts_figurine_api;
 pub mod tts_map;
 pub mod tts_map_api;
+pub mod tts_object;
 pub mod tts_profile;
 pub mod tts_profile_api;
 pub mod tts_profile_army;

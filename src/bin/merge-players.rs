@@ -41,11 +41,7 @@ fn main() -> Result<()> {
     );
     println!(
         "Matchs réécrits : {} | ELO {:.1} | {}V / {}N / {}D",
-        report.matches_rewritten,
-        report.rating,
-        report.wins,
-        report.draws,
-        report.losses
+        report.matches_rewritten, report.rating, report.wins, report.draws, report.losses
     );
     Ok(())
 }

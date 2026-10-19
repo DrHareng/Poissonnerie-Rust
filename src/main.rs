@@ -2,9 +2,7 @@ use std::path::PathBuf;
 
 use anyhow::Result;
 use clap::{Parser, Subcommand};
-use poissonnerie_elo::{
-    Leaderboard, MatchOutcome, MatchScores, DEFAULT_K_FACTOR, DEFAULT_RATING,
-};
+use poissonnerie_elo::{Leaderboard, MatchOutcome, MatchScores, DEFAULT_K_FACTOR, DEFAULT_RATING};
 
 #[derive(Parser)]
 #[command(
@@ -64,9 +62,7 @@ fn parse_outcome(value: &str) -> Result<MatchOutcome, String> {
         "1" | "j1" | "win1" | "victoire1" | "v1" => Ok(MatchOutcome::Player1Win),
         "2" | "j2" | "win2" | "victoire2" | "v2" => Ok(MatchOutcome::Player2Win),
         "n" | "nul" | "draw" | "x" => Ok(MatchOutcome::Draw),
-        _ => Err(
-            "résultat invalide : utilisez 1, 2, nul (ou v1, v2, draw)".to_string(),
-        ),
+        _ => Err("résultat invalide : utilisez 1, 2, nul (ou v1, v2, draw)".to_string()),
     }
 }
 

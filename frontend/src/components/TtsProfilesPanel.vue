@@ -29,13 +29,16 @@ import {
 import type { Army, TtsProfileDetail, TtsProfileForm, TtsProfileSummary } from '@/types/elo'
 import { isListableArmy } from '@/lib/army'
 
+const props = defineProps<{
+  armyId?: string
+}>()
+
 const { armies, ensureLoaded } = useArmies()
 const { setCustomSide } = useAppSidePanel()
 const { canEditContent } = useAdminEditMode()
 
-const selectedArmyId = ref<string>()
 const showSpecialOps = ref(false)
-const search = ref('')
+const search = defineModel<string>('search', { default: '' })
 const profiles = ref<TtsProfileSummary[]>([])
 const loading = ref(false)
 const loadError = ref('')
@@ -110,17 +113,17 @@ onMounted(async () => {
   }
 })
 
-watch(selectedArmyId, () => {
+watch(() => props.armyId, () => {
   search.value = ''
   void loadProfiles()
-})
+}, { immediate: true })
 
 async function loadProfiles(keepId?: number) {
   if (keepId == null) {
     detail.value = null
     draft.value = null
   }
-  if (!selectedArmyId.value) {
+  if (!props.armyId) {
     profiles.value = []
     return
   }
@@ -128,7 +131,7 @@ async function loadProfiles(keepId?: number) {
   loadError.value = ''
   try {
     profiles.value = await fetchTtsProfiles({
-      armyId: Number(selectedArmyId.value),
+      armyId: Number(props.armyId),
       includeFaction: false,
     })
   } catch (error) {
@@ -265,28 +268,8 @@ onBeforeUnmount(() => setCustomSide(false))
     </Card>
   </Teleport>
   <div class="grid gap-4">
-    <div class="flex flex-col gap-3 lg:flex-row lg:items-end">
-      <div class="grid min-w-0 flex-1 gap-1.5">
-        <Label>Sectorielle</Label>
-        <SectorialPicker
-          v-model="selectedArmyId"
-          :armies="pickerArmies"
-          :clearable="false"
-          placeholder="Choisir une sectorielle"
-        />
-      </div>
-      <div v-if="selectedArmyId" class="grid min-w-0 flex-1 gap-1.5">
-        <Label for="tts-profile-search">Recherche</Label>
-        <Input
-          id="tts-profile-search"
-          v-model="search"
-          placeholder="ISC, loadout, nom…"
-        />
-      </div>
-    </div>
-
     <label
-      v-if="selectedArmyId"
+      v-if="armyId"
       class="flex items-start gap-2 text-sm text-muted-foreground"
     >
       <input v-model="showSpecialOps" type="checkbox" class="mt-1" />
@@ -298,7 +281,7 @@ onBeforeUnmount(() => setCustomSide(false))
       <AlertDescription>{{ loadError }}</AlertDescription>
     </Alert>
 
-    <p v-else-if="!selectedArmyId" class="text-sm text-muted-foreground">
+    <p v-else-if="!armyId" class="text-sm text-muted-foreground">
       Choisis une sectorielle pour afficher ses profils.
     </p>
     <p v-else-if="loading" class="text-sm text-muted-foreground">
@@ -345,7 +328,7 @@ onBeforeUnmount(() => setCustomSide(false))
       </Table>
     </div>
 
-    <p v-if="!loading && selectedArmyId" class="text-xs text-muted-foreground">
+    <p v-if="!loading && armyId" class="text-xs text-muted-foreground">
       {{ filteredProfiles.length }} profil{{ filteredProfiles.length > 1 ? 's' : '' }}
     </p>
 

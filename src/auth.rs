@@ -21,6 +21,7 @@ pub const SESSION_TTS_MAP_SLUG: &str = "tts_map_slug";
 pub const SESSION_ARMY_SORT_MODE: &str = "army_sort_mode";
 pub const SESSION_PLAYER_SORT_MODE: &str = "player_sort_mode";
 pub const SESSION_TOURNAMENT_COMPLETED_VIEW_MODE: &str = "tournament_completed_view_mode";
+pub const SESSION_TTS_ARMY_ID: &str = "tts_army_id";
 pub const DEFAULT_SECONDARY_VIEW_MODE: &str = "liste";
 pub const DEFAULT_ARMY_SORT_MODE: &str = "win_rate";
 pub const DEFAULT_PLAYER_SORT_MODE: &str = "elo";
@@ -205,7 +206,40 @@ pub async fn login_with_code(
     )
     .await?;
 
+    sync_army_pref_on_login(users, session, user.id, user.tts_army_id).await?;
+
     Ok(user)
+}
+
+async fn sync_army_pref_on_login(
+    users: &UserStore,
+    session: &Session,
+    user_id: i64,
+    user_value: Option<i64>,
+) -> Result<()> {
+    if let Some(army_id) = user_value.filter(|id| *id > 0) {
+        session
+            .insert(SESSION_TTS_ARMY_ID, army_id)
+            .await
+            .context("impossible d'enregistrer la sectorielle")?;
+    } else {
+        let from_session: Option<i64> = session
+            .get(SESSION_TTS_ARMY_ID)
+            .await
+            .context("impossible de lire la sectorielle")?;
+        if let Some(army_id) = from_session.filter(|id| *id > 0) {
+            users
+                .update_ui_prefs(
+                    user_id,
+                    UiPrefsUpdate {
+                        tts_army_id: Some(army_id),
+                        ..UiPrefsUpdate::default()
+                    },
+                )
+                .context("impossible de sauvegarder la sectorielle")?;
+        }
+    }
+    Ok(())
 }
 
 async fn sync_pref_on_login(

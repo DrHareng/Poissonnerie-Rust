@@ -29,14 +29,13 @@ fn main() -> Result<()> {
     let args = Args::parse();
     let tid = 3i64;
 
-    let conn = Connection::open(&args.db)
-        .with_context(|| format!("ouverture {}", args.db.display()))?;
+    let conn =
+        Connection::open(&args.db).with_context(|| format!("ouverture {}", args.db.display()))?;
 
-    let name: String = conn.query_row(
-        "SELECT name FROM tournaments WHERE id = ?1",
-        [tid],
-        |row| row.get(0),
-    )?;
+    let name: String =
+        conn.query_row("SELECT name FROM tournaments WHERE id = ?1", [tid], |row| {
+            row.get(0)
+        })?;
     println!("Tournoi {tid}: {name}");
 
     // Quart 0 : vainqueur R16 Starpu (armée Bakunin 503), pas Azazel

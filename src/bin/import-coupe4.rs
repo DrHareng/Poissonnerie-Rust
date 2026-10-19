@@ -3,21 +3,24 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
 use clap::Parser;
-use rusqlite::{Connection, OptionalExtension};
-use poissonnerie_elo::{
-    store::normalize_name, Leaderboard, MatchOutcome, MatchScores, MatchRecord, RatingUpdate,
-    DEFAULT_K_FACTOR, DEFAULT_RATING,
-};
 use poissonnerie_elo::tournament::TournamentMatch;
 use poissonnerie_elo::tournament_store::{
     BracketSlotSetup, CreateTournamentRequest, PoolSetup, SetupBracketRequest, SetupPoolsRequest,
     SubmitMatchRequest, TournamentStore,
 };
+use poissonnerie_elo::{
+    store::normalize_name, Leaderboard, MatchOutcome, MatchRecord, MatchScores, RatingUpdate,
+    DEFAULT_K_FACTOR, DEFAULT_RATING,
+};
+use rusqlite::{Connection, OptionalExtension};
 
 const ADMIN_ID: i64 = 1;
 
 #[derive(Parser)]
-#[command(name = "poissonnerie-import-coupe4", about = "Import Coupe de la Poissonnerie 4")]
+#[command(
+    name = "poissonnerie-import-coupe4",
+    about = "Import Coupe de la Poissonnerie 4"
+)]
 struct Args {
     #[arg(long, default_value = "data/poissonnerie.db")]
     db: PathBuf,
@@ -54,36 +57,300 @@ fn pool_scores() -> HashMap<(String, String), ScoreLine> {
     };
 
     // Bassin A
-    add(&mut m, "-Scorpion-", "Arkille", ScoreLine { p1_obj: 0, p2_obj: 5, p1_surv: 1, p2_surv: 7, scenario: Some("A : Scène de crime") });
-    add(&mut m, "-Scorpion-", "Obakami", ScoreLine { p1_obj: 0, p2_obj: 4, p1_surv: 0, p2_surv: 3, scenario: Some("C : Exfiltration") });
-    add(&mut m, "Arkille", "Obakami", ScoreLine { p1_obj: 5, p2_obj: 2, p1_surv: 8, p2_surv: 6, scenario: Some("B : Avant-postes") });
+    add(
+        &mut m,
+        "-Scorpion-",
+        "Arkille",
+        ScoreLine {
+            p1_obj: 0,
+            p2_obj: 5,
+            p1_surv: 1,
+            p2_surv: 7,
+            scenario: Some("A : Scène de crime"),
+        },
+    );
+    add(
+        &mut m,
+        "-Scorpion-",
+        "Obakami",
+        ScoreLine {
+            p1_obj: 0,
+            p2_obj: 4,
+            p1_surv: 0,
+            p2_surv: 3,
+            scenario: Some("C : Exfiltration"),
+        },
+    );
+    add(
+        &mut m,
+        "Arkille",
+        "Obakami",
+        ScoreLine {
+            p1_obj: 5,
+            p2_obj: 2,
+            p1_surv: 8,
+            p2_surv: 6,
+            scenario: Some("B : Avant-postes"),
+        },
+    );
 
     // Bassin B
-    add(&mut m, "Maman_Poulet", "Sitsu", ScoreLine { p1_obj: 1, p2_obj: 4, p1_surv: 2, p2_surv: 4, scenario: Some("A : Scène de crime") });
-    add(&mut m, "Astellan", "Maman_Poulet", ScoreLine { p1_obj: 5, p2_obj: 0, p1_surv: 9, p2_surv: 4, scenario: Some("B : Avant-postes") });
-    add(&mut m, "Kamcord", "Maman_Poulet", ScoreLine { p1_obj: 5, p2_obj: 0, p1_surv: 10, p2_surv: 2, scenario: Some("D : Églantine, ici Mirabelle !") });
-    add(&mut m, "Astellan", "Sitsu", ScoreLine { p1_obj: 5, p2_obj: 0, p1_surv: 10, p2_surv: 0, scenario: Some("E : Data Mining") });
-    add(&mut m, "LoGascon", "Sitsu", ScoreLine { p1_obj: 5, p2_obj: 1, p1_surv: 6, p2_surv: 4, scenario: Some("D : Églantine, ici Mirabelle !") });
-    add(&mut m, "Kamcord", "Sitsu", ScoreLine { p1_obj: 3, p2_obj: 3, p1_surv: 8, p2_surv: 8, scenario: Some("B : Avant-postes") });
-    add(&mut m, "Astellan", "LoGascon", ScoreLine { p1_obj: 4, p2_obj: 0, p1_surv: 4, p2_surv: 0, scenario: Some("A : Scène de crime") });
-    add(&mut m, "Astellan", "Kamcord", ScoreLine { p1_obj: 0, p2_obj: 5, p1_surv: 1, p2_surv: 10, scenario: Some("C : Exfiltration") });
-    add(&mut m, "Kamcord", "LoGascon", ScoreLine { p1_obj: 5, p2_obj: 0, p1_surv: 8, p2_surv: 2, scenario: Some("E : Data Mining") });
+    add(
+        &mut m,
+        "Maman_Poulet",
+        "Sitsu",
+        ScoreLine {
+            p1_obj: 1,
+            p2_obj: 4,
+            p1_surv: 2,
+            p2_surv: 4,
+            scenario: Some("A : Scène de crime"),
+        },
+    );
+    add(
+        &mut m,
+        "Astellan",
+        "Maman_Poulet",
+        ScoreLine {
+            p1_obj: 5,
+            p2_obj: 0,
+            p1_surv: 9,
+            p2_surv: 4,
+            scenario: Some("B : Avant-postes"),
+        },
+    );
+    add(
+        &mut m,
+        "Kamcord",
+        "Maman_Poulet",
+        ScoreLine {
+            p1_obj: 5,
+            p2_obj: 0,
+            p1_surv: 10,
+            p2_surv: 2,
+            scenario: Some("D : Églantine, ici Mirabelle !"),
+        },
+    );
+    add(
+        &mut m,
+        "Astellan",
+        "Sitsu",
+        ScoreLine {
+            p1_obj: 5,
+            p2_obj: 0,
+            p1_surv: 10,
+            p2_surv: 0,
+            scenario: Some("E : Data Mining"),
+        },
+    );
+    add(
+        &mut m,
+        "LoGascon",
+        "Sitsu",
+        ScoreLine {
+            p1_obj: 5,
+            p2_obj: 1,
+            p1_surv: 6,
+            p2_surv: 4,
+            scenario: Some("D : Églantine, ici Mirabelle !"),
+        },
+    );
+    add(
+        &mut m,
+        "Kamcord",
+        "Sitsu",
+        ScoreLine {
+            p1_obj: 3,
+            p2_obj: 3,
+            p1_surv: 8,
+            p2_surv: 8,
+            scenario: Some("B : Avant-postes"),
+        },
+    );
+    add(
+        &mut m,
+        "Astellan",
+        "LoGascon",
+        ScoreLine {
+            p1_obj: 4,
+            p2_obj: 0,
+            p1_surv: 4,
+            p2_surv: 0,
+            scenario: Some("A : Scène de crime"),
+        },
+    );
+    add(
+        &mut m,
+        "Astellan",
+        "Kamcord",
+        ScoreLine {
+            p1_obj: 0,
+            p2_obj: 5,
+            p1_surv: 1,
+            p2_surv: 10,
+            scenario: Some("C : Exfiltration"),
+        },
+    );
+    add(
+        &mut m,
+        "Kamcord",
+        "LoGascon",
+        ScoreLine {
+            p1_obj: 5,
+            p2_obj: 0,
+            p1_surv: 8,
+            p2_surv: 2,
+            scenario: Some("E : Data Mining"),
+        },
+    );
 
     // Bassin C
-    add(&mut m, "Dr Hareng", "Stuffist", ScoreLine { p1_obj: 4, p2_obj: 1, p1_surv: 4, p2_surv: 2, scenario: Some("A : Scène de crime") });
-    add(&mut m, "Dr Hareng", "wulfric", ScoreLine { p1_obj: 5, p2_obj: 2, p1_surv: 7, p2_surv: 5, scenario: Some("B : Avant-postes") });
-    add(&mut m, "Dr Hareng", "Shas'O Kassad", ScoreLine { p1_obj: 5, p2_obj: 2, p1_surv: 7, p2_surv: 5, scenario: Some("C : Exfiltration") });
-    add(&mut m, "Stuffist", "wulfric", ScoreLine { p1_obj: 5, p2_obj: 1, p1_surv: 8, p2_surv: 5, scenario: Some("C : Exfiltration") });
-    add(&mut m, "Shas'O Kassad", "Stuffist", ScoreLine { p1_obj: 5, p2_obj: 1, p1_surv: 10, p2_surv: 5, scenario: Some("B : Avant-postes") });
-    add(&mut m, "Shas'O Kassad", "wulfric", ScoreLine { p1_obj: 5, p2_obj: 0, p1_surv: 9, p2_surv: 2, scenario: Some("A : Scène de crime") });
+    add(
+        &mut m,
+        "Dr Hareng",
+        "Stuffist",
+        ScoreLine {
+            p1_obj: 4,
+            p2_obj: 1,
+            p1_surv: 4,
+            p2_surv: 2,
+            scenario: Some("A : Scène de crime"),
+        },
+    );
+    add(
+        &mut m,
+        "Dr Hareng",
+        "wulfric",
+        ScoreLine {
+            p1_obj: 5,
+            p2_obj: 2,
+            p1_surv: 7,
+            p2_surv: 5,
+            scenario: Some("B : Avant-postes"),
+        },
+    );
+    add(
+        &mut m,
+        "Dr Hareng",
+        "Shas'O Kassad",
+        ScoreLine {
+            p1_obj: 5,
+            p2_obj: 2,
+            p1_surv: 7,
+            p2_surv: 5,
+            scenario: Some("C : Exfiltration"),
+        },
+    );
+    add(
+        &mut m,
+        "Stuffist",
+        "wulfric",
+        ScoreLine {
+            p1_obj: 5,
+            p2_obj: 1,
+            p1_surv: 8,
+            p2_surv: 5,
+            scenario: Some("C : Exfiltration"),
+        },
+    );
+    add(
+        &mut m,
+        "Shas'O Kassad",
+        "Stuffist",
+        ScoreLine {
+            p1_obj: 5,
+            p2_obj: 1,
+            p1_surv: 10,
+            p2_surv: 5,
+            scenario: Some("B : Avant-postes"),
+        },
+    );
+    add(
+        &mut m,
+        "Shas'O Kassad",
+        "wulfric",
+        ScoreLine {
+            p1_obj: 5,
+            p2_obj: 0,
+            p1_surv: 9,
+            p2_surv: 2,
+            scenario: Some("A : Scène de crime"),
+        },
+    );
 
     // Bassin D
-    add(&mut m, "Ayadan", "Nico12", ScoreLine { p1_obj: 5, p2_obj: 0, p1_surv: 5, p2_surv: 1, scenario: Some("A : Scène d'Acquisition") });
-    add(&mut m, "Ayadan", "Tau24", ScoreLine { p1_obj: 5, p2_obj: 2, p1_surv: 7, p2_surv: 5, scenario: Some("B : Avant-Acquisition") });
-    add(&mut m, "Ayadan", "Fanfoué (MErcurE)", ScoreLine { p1_obj: 5, p2_obj: 2, p1_surv: 8, p2_surv: 7, scenario: Some("C : ExAcquisition") });
-    add(&mut m, "Nico12", "Tau24", ScoreLine { p1_obj: 0, p2_obj: 5, p1_surv: 0, p2_surv: 7, scenario: Some("C : Exfiltration") });
-    add(&mut m, "Fanfoué (MErcurE)", "Nico12", ScoreLine { p1_obj: 5, p2_obj: 0, p1_surv: 11, p2_surv: 4, scenario: Some("B : Avant-postes") });
-    add(&mut m, "Fanfoué (MErcurE)", "Tau24", ScoreLine { p1_obj: 0, p2_obj: 5, p1_surv: 0, p2_surv: 5, scenario: Some("A : Scène de crime") });
+    add(
+        &mut m,
+        "Ayadan",
+        "Nico12",
+        ScoreLine {
+            p1_obj: 5,
+            p2_obj: 0,
+            p1_surv: 5,
+            p2_surv: 1,
+            scenario: Some("A : Scène d'Acquisition"),
+        },
+    );
+    add(
+        &mut m,
+        "Ayadan",
+        "Tau24",
+        ScoreLine {
+            p1_obj: 5,
+            p2_obj: 2,
+            p1_surv: 7,
+            p2_surv: 5,
+            scenario: Some("B : Avant-Acquisition"),
+        },
+    );
+    add(
+        &mut m,
+        "Ayadan",
+        "Fanfoué (MErcurE)",
+        ScoreLine {
+            p1_obj: 5,
+            p2_obj: 2,
+            p1_surv: 8,
+            p2_surv: 7,
+            scenario: Some("C : ExAcquisition"),
+        },
+    );
+    add(
+        &mut m,
+        "Nico12",
+        "Tau24",
+        ScoreLine {
+            p1_obj: 0,
+            p2_obj: 5,
+            p1_surv: 0,
+            p2_surv: 7,
+            scenario: Some("C : Exfiltration"),
+        },
+    );
+    add(
+        &mut m,
+        "Fanfoué (MErcurE)",
+        "Nico12",
+        ScoreLine {
+            p1_obj: 5,
+            p2_obj: 0,
+            p1_surv: 11,
+            p2_surv: 4,
+            scenario: Some("B : Avant-postes"),
+        },
+    );
+    add(
+        &mut m,
+        "Fanfoué (MErcurE)",
+        "Tau24",
+        ScoreLine {
+            p1_obj: 0,
+            p2_obj: 5,
+            p1_surv: 0,
+            p2_surv: 5,
+            scenario: Some("A : Scène de crime"),
+        },
+    );
 
     m
 }
@@ -180,7 +447,8 @@ fn submit_bracket(
     scenario: &str,
 ) -> Result<()> {
     let db_p1 = tm.player1.as_ref().context("joueur 1 manquant")?;
-    let (p1_obj, p2_obj, p1_surv, p2_surv) = if normalize_name(db_p1) == normalize_name(sheet_first) {
+    let (p1_obj, p2_obj, p1_surv, p2_surv) = if normalize_name(db_p1) == normalize_name(sheet_first)
+    {
         (
             sheet_first_obj,
             sheet_second_obj,
@@ -272,7 +540,10 @@ fn cleanup_partial_import(db_path: &Path) -> Result<()> {
     )?;
     conn.execute("DELETE FROM pools WHERE tournament_id = 4", [])?;
     conn.execute("DELETE FROM tournament_players WHERE tournament_id = 4", [])?;
-    conn.execute("DELETE FROM tournament_registrations WHERE tournament_id = 4", [])?;
+    conn.execute(
+        "DELETE FROM tournament_registrations WHERE tournament_id = 4",
+        [],
+    )?;
     conn.execute("DELETE FROM tournaments WHERE id = 4", [])?;
     conn.execute("DELETE FROM sqlite_sequence WHERE name = 'tournaments'", [])?;
 
@@ -283,7 +554,11 @@ fn cleanup_partial_import(db_path: &Path) -> Result<()> {
 fn rebuild_leaderboard_from_matches(db_path: &Path) -> Result<()> {
     let conn = Connection::open(db_path)?;
     let mut board = Leaderboard::load(db_path)?;
-    let names: Vec<String> = board.ranking().into_iter().map(|p| p.name.clone()).collect();
+    let names: Vec<String> = board
+        .ranking()
+        .into_iter()
+        .map(|p| p.name.clone())
+        .collect();
     for name in &names {
         let player = board.get_player_mut(name)?;
         player.rating = DEFAULT_RATING;
@@ -596,7 +871,10 @@ fn main() -> Result<()> {
         },
     )?;
 
-    let all = store.get_detail(tid)?.context("tournoi introuvable")?.matches;
+    let all = store
+        .get_detail(tid)?
+        .context("tournoi introuvable")?
+        .matches;
 
     // Quarts
     submit_bracket(
@@ -644,7 +922,10 @@ fn main() -> Result<()> {
         "Églantine, ici Mirabelle !",
     )?;
 
-    let all = store.get_detail(tid)?.context("tournoi introuvable")?.matches;
+    let all = store
+        .get_detail(tid)?
+        .context("tournoi introuvable")?
+        .matches;
 
     // Demis
     submit_bracket(
@@ -670,7 +951,10 @@ fn main() -> Result<()> {
         "Razzia",
     )?;
 
-    let all = store.get_detail(tid)?.context("tournoi introuvable")?.matches;
+    let all = store
+        .get_detail(tid)?
+        .context("tournoi introuvable")?
+        .matches;
 
     // Finale
     submit_bracket(

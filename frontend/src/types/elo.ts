@@ -655,6 +655,17 @@ export interface TtsFigurineWrite {
   asset_bundle_url: string
 }
 
+export interface TtsFigurineLoadout {
+  profile_id: number
+  loadout: string
+  faction_label: string
+  marker_name: string | null
+  silhouette_size: string | null
+  silhouette_type: string | null
+  extra_forms: number
+  differences: string
+}
+
 export interface TtsProfileLabel {
   isc: string
   loadout: string

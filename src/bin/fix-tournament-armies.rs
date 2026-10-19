@@ -54,7 +54,11 @@ fn main() -> Result<()> {
             report.registration_updated,
             report.tournament_matches_updated,
             report.matches_updated,
-            if args.bracket_only { ", bracket-only" } else { "" },
+            if args.bracket_only {
+                ", bracket-only"
+            } else {
+                ""
+            },
         );
     }
 

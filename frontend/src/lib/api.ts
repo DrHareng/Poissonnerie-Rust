@@ -33,6 +33,7 @@ import type {
   TournamentScenarioSlot,
   TtsContentImage,
   TtsFigurine,
+  TtsFigurineLoadout,
   TtsFigurineWrite,
   ContentUpdate,
   MapContentUpdate,
@@ -131,6 +132,30 @@ export function uploadTtsFigurinePhoto(id: number, file: File): Promise<TtsFigur
 
 export function clearTtsFigurinePhoto(id: number): Promise<TtsFigurine> {
   return request<TtsFigurine>(`/api/tts-figurines/${id}/photo`, { method: 'DELETE' })
+}
+
+export function fetchTtsFigurineLoadouts(id: number, armyId: number): Promise<TtsFigurineLoadout[]> {
+  return request<TtsFigurineLoadout[]>(`/api/tts-figurines/${id}/loadouts?army_id=${armyId}`)
+}
+
+export function fetchTtsFactionColor(armyId: number): Promise<string> {
+  return request<{ color: string }>(`/api/tts-faction-color?army_id=${armyId}`).then(
+    (body) => body.color,
+  )
+}
+
+export function fetchTtsFigurineObject(
+  id: number,
+  profileId: number,
+  armyId: number,
+  color: string,
+): Promise<unknown> {
+  const params = new URLSearchParams({
+    profile_id: String(profileId),
+    army_id: String(armyId),
+    color,
+  })
+  return request<unknown>(`/api/tts-figurines/${id}/object?${params}`)
 }
 
 export function fetchTtsProfiles(options: {
@@ -242,6 +267,7 @@ export interface UserPrefs {
   army_sort_mode: ArmySortMode
   player_sort_mode: PlayerSortMode
   tournament_completed_view_mode: TournamentCompletedViewMode
+  tts_army_id?: number | null
 }
 
 export function fetchPrefs(): Promise<UserPrefs> {
@@ -255,6 +281,7 @@ export function updatePrefs(payload: {
   army_sort_mode?: ArmySortMode
   player_sort_mode?: PlayerSortMode
   tournament_completed_view_mode?: TournamentCompletedViewMode
+  tts_army_id?: number
 }): Promise<UserPrefs> {
   return request<UserPrefs>('/api/prefs', {
     method: 'PATCH',

@@ -6,7 +6,7 @@ use axum::{
     routing::get,
     Json, Router,
 };
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use tower_sessions::Session;
 
 use crate::{
@@ -14,6 +14,8 @@ use crate::{
     auth,
     tts_figurine::{FigurineWrite, TtsFigurine},
     tts_map::{self, MAX_PICTURE_BYTES},
+    tts_object::{self, ModelForm, ModelProfile},
+    tts_profile::TtsProfileLoadout,
     User,
 };
 
@@ -40,6 +42,12 @@ pub fn tts_figurine_routes() -> Router<AppState> {
             "/api/tts-figurines/{id}/photo",
             get(serve_photo).delete(clear_photo),
         )
+        .route(
+            "/api/tts-figurines/{id}/loadouts",
+            get(list_figurine_loadouts),
+        )
+        .route("/api/tts-faction-color", get(faction_color))
+        .route("/api/tts-figurines/{id}/object", get(figurine_object))
         .merge(uploads)
 }
 
@@ -63,6 +71,23 @@ impl FigurineBody {
             asset_bundle_url: self.asset_bundle_url.clone(),
         }
     }
+}
+
+#[derive(Debug, Deserialize)]
+struct ArmyQuery {
+    army_id: i64,
+}
+
+#[derive(Debug, Deserialize)]
+struct ObjectQuery {
+    profile_id: i64,
+    army_id: i64,
+    color: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+struct FactionColorBody {
+    color: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -91,9 +116,170 @@ async fn require_admin(state: &AppState, session: &Session) -> Result<User, ApiE
     Ok(user)
 }
 
-async fn list_figurines(
+async fn list_figurine_loadouts(
     State(state): State<AppState>,
-) -> Result<Json<Vec<TtsFigurine>>, ApiError> {
+    Path(id): Path<i64>,
+    Query(query): Query<ArmyQuery>,
+) -> Result<Json<Vec<TtsProfileLoadout>>, ApiError> {
+    require_army(&state, query.army_id)?;
+    let figurine = state
+        .tts_figurines
+        .get(id)
+        .map_err(|error| ApiError::bad_request(error.to_string()))?
+        .ok_or_else(|| ApiError::bad_request("figurine introuvable"))?;
+    let mut loadouts = state
+        .tts_profiles
+        .loadouts_for_isc(&figurine.isc, query.army_id)
+        .map_err(|error| ApiError::bad_request(error.to_string()))?;
+    for loadout in &mut loadouts {
+        loadout.marker_name = Some(tts_object::marker_label(
+            loadout.marker_name.as_deref(),
+            loadout.silhouette_type.as_deref(),
+            loadout.silhouette_size.as_deref(),
+        ));
+    }
+    Ok(Json(loadouts))
+}
+
+async fn figurine_object(
+    State(state): State<AppState>,
+    Path(id): Path<i64>,
+    Query(query): Query<ObjectQuery>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    let figurine = state
+        .tts_figurines
+        .get(id)
+        .map_err(|error| ApiError::bad_request(error.to_string()))?
+        .ok_or_else(|| ApiError::bad_request("figurine introuvable"))?;
+    if figurine.asset_bundle_url.is_empty() {
+        return Err(ApiError::bad_request(
+            "cette figurine n'a pas d'asset bundle",
+        ));
+    }
+    let color = diffuse_color(&state, query.army_id, query.color.as_deref())?;
+    let in_army = state
+        .tts_profiles
+        .profile_in_army(query.profile_id, query.army_id)
+        .map_err(|error| ApiError::bad_request(error.to_string()))?;
+    if !in_army {
+        return Err(ApiError::bad_request(
+            "ce loadout n'est pas dans cette sectorielle",
+        ));
+    }
+    let profile = state
+        .tts_profiles
+        .get(query.profile_id)
+        .map_err(|error| ApiError::bad_request(error.to_string()))?
+        .ok_or_else(|| ApiError::bad_request("profil introuvable"))?;
+    if !same_isc(&figurine.isc, &profile.isc) {
+        return Err(ApiError::bad_request(
+            "ce loadout ne correspond pas à cet ISC",
+        ));
+    }
+    let meshes = state
+        .tts_profiles
+        .marker_mesh_catalog()
+        .map_err(|error| ApiError::bad_request(error.to_string()))?;
+    Ok(Json(tts_object::save_file(tts_object::saved_model(
+        &figurine.asset_bundle_url,
+        &model_profile(&profile),
+        &meshes,
+        color,
+    ))))
+}
+
+async fn faction_color(
+    State(state): State<AppState>,
+    Query(query): Query<ArmyQuery>,
+) -> Result<Json<FactionColorBody>, ApiError> {
+    let faction = faction_army(&state, query.army_id)?;
+    let color = state
+        .tts_profiles
+        .color_for_faction_slug(&faction.slug)
+        .map_err(|error| ApiError::bad_request(error.to_string()))?
+        .unwrap_or_else(|| "FFFFFF".to_string());
+    Ok(Json(FactionColorBody { color }))
+}
+
+fn require_army(state: &AppState, army_id: i64) -> Result<(), ApiError> {
+    load_army(state, army_id).map(|_| ())
+}
+
+fn load_army(state: &AppState, army_id: i64) -> Result<crate::army::Army, ApiError> {
+    if army_id <= 0 || army_id > i64::from(u32::MAX) {
+        return Err(ApiError::bad_request("sectorielle invalide"));
+    }
+    state
+        .armies
+        .get(army_id as u32)
+        .map_err(|error| ApiError::bad_request(error.to_string()))?
+        .ok_or_else(|| ApiError::bad_request("sectorielle introuvable"))
+}
+
+fn faction_army(state: &AppState, army_id: i64) -> Result<crate::army::Army, ApiError> {
+    let army = load_army(state, army_id)?;
+    if army.parent_id != 0 && army.parent_id != army.id {
+        if let Some(parent) = state
+            .armies
+            .get(army.parent_id)
+            .map_err(|error| ApiError::bad_request(error.to_string()))?
+        {
+            return Ok(parent);
+        }
+    }
+    Ok(army)
+}
+
+fn diffuse_color(
+    state: &AppState,
+    army_id: i64,
+    raw: Option<&str>,
+) -> Result<tts_object::DiffuseColor, ApiError> {
+    load_army(state, army_id)?;
+    if let Some(raw) = raw.map(str::trim).filter(|value| !value.is_empty()) {
+        return tts_object::parse_color(raw)
+            .ok_or_else(|| ApiError::bad_request("couleur invalide"));
+    }
+    let faction = faction_army(state, army_id)?;
+    let hex = state
+        .tts_profiles
+        .color_for_faction_slug(&faction.slug)
+        .map_err(|error| ApiError::bad_request(error.to_string()))?
+        .unwrap_or_else(|| "FFFFFF".to_string());
+    tts_object::parse_color(&hex).ok_or_else(|| ApiError::bad_request("couleur invalide"))
+}
+
+fn same_isc(left: &str, right: &str) -> bool {
+    left.trim().eq_ignore_ascii_case(right.trim())
+}
+
+fn model_profile(profile: &crate::tts_profile::TtsProfileDetail) -> ModelProfile {
+    ModelProfile {
+        nom_tts: profile.nom_tts.clone(),
+        description_tts: profile.description_tts.clone(),
+        marker_name: profile.marker_name.clone(),
+        silhouette_size: profile.silhouette_size.clone(),
+        silhouette_type: profile.silhouette_type.clone(),
+        marker_mesh_url: profile.marker_mesh_url.clone(),
+        forms: profile
+            .forms
+            .iter()
+            .map(|form| ModelForm {
+                id: form.id,
+                state_index: form.state_index,
+                nom_tts: form.nom_tts.clone(),
+                description_tts: form.description_tts.clone(),
+                marker_name: form.marker_name.clone(),
+                silhouette_size: form.silhouette_size.clone(),
+                silhouette_type: form.silhouette_type.clone(),
+                mesh_url: form.mesh_url.clone(),
+                marker_mesh_url: form.marker_mesh_url.clone(),
+            })
+            .collect(),
+    }
+}
+
+async fn list_figurines(State(state): State<AppState>) -> Result<Json<Vec<TtsFigurine>>, ApiError> {
     state
         .tts_figurines
         .list()

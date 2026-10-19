@@ -1002,6 +1002,18 @@ pub struct TtsProfileLabel {
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct TtsProfileLoadout {
+    pub profile_id: i64,
+    pub loadout: String,
+    pub faction_label: String,
+    pub marker_name: Option<String>,
+    pub silhouette_size: Option<String>,
+    pub silhouette_type: Option<String>,
+    pub extra_forms: i64,
+    pub differences: String,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub struct TtsProfileArmyCount {
     pub army_id: Option<i64>,
     pub name: Option<String>,
@@ -1067,6 +1079,54 @@ impl TtsProfileStore {
     pub fn army_counts(&self) -> Result<Vec<TtsProfileArmyCount>> {
         let conn = self.conn.lock().unwrap();
         army_counts(&conn)
+    }
+
+    pub fn loadouts_for_isc(&self, isc: &str, army_id: i64) -> Result<Vec<TtsProfileLoadout>> {
+        let conn = self.conn.lock().unwrap();
+        list_loadouts(&conn, isc, Some(army_id))
+    }
+
+    pub fn profile_in_army(&self, profile_id: i64, army_id: i64) -> Result<bool> {
+        let conn = self.conn.lock().unwrap();
+        profile_in_army(&conn, profile_id, army_id)
+    }
+
+    pub fn marker_mesh_catalog(&self) -> Result<BTreeMap<String, String>> {
+        let conn = self.conn.lock().unwrap();
+        marker_mesh_catalog(&conn)
+    }
+
+    /// Couleur la plus fréquente des noms TTS de cette faction, sans `#`.
+    pub fn color_for_faction_slug(&self, slug: &str) -> Result<Option<String>> {
+        let slug = slug.trim();
+        if slug.is_empty() {
+            return Ok(None);
+        }
+        let conn = self.conn.lock().unwrap();
+        let color: Option<String> = conn
+            .query_row(
+                "
+                SELECT substr(nom_tts, 2, 6)
+                FROM tts_profiles
+                WHERE faction_slug = ?1 COLLATE NOCASE
+                  AND substr(nom_tts, 1, 1) = '['
+                  AND substr(nom_tts, 8, 1) = ']'
+                GROUP BY substr(nom_tts, 2, 6)
+                ORDER BY COUNT(*) DESC, substr(nom_tts, 2, 6)
+                LIMIT 1
+                ",
+                params![slug],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()?;
+        Ok(color.and_then(|value| {
+            let hex = value.trim();
+            if hex.len() == 6 && hex.chars().all(|char| char.is_ascii_hexdigit()) {
+                Some(hex.to_ascii_uppercase())
+            } else {
+                None
+            }
+        }))
     }
 
     pub fn list_labels(&self) -> Result<Vec<TtsProfileLabel>> {
@@ -1214,6 +1274,160 @@ fn apply_description_differences(rows: &mut [(TtsProfileSummary, String)]) {
             rows[*index].0.differences = extras.join(" · ");
         }
     }
+}
+
+fn list_loadouts(
+    conn: &Connection,
+    isc: &str,
+    army_id: Option<i64>,
+) -> Result<Vec<TtsProfileLoadout>> {
+    let isc = isc.trim();
+    if isc.is_empty() {
+        return Ok(Vec::new());
+    }
+    let mut stmt = conn.prepare(
+        "
+        SELECT
+            p.id, p.loadout, p.faction_label, p.marker_name, p.silhouette_size,
+            p.silhouette_type, p.description_tts,
+            (
+                SELECT COUNT(*)
+                FROM tts_profile_forms f
+                WHERE f.profile_id = p.id AND f.state_index != 900
+            )
+        FROM tts_profiles p
+        WHERE p.isc = ?1 COLLATE NOCASE
+          AND (
+            ?2 IS NULL
+            OR p.army_id = ?2
+            OR EXISTS (
+                SELECT 1 FROM tts_profile_sectorials s
+                WHERE s.profile_id = p.id AND s.army_id = ?2
+            )
+          )
+        ORDER BY p.loadout COLLATE NOCASE, p.faction_label COLLATE NOCASE, p.id
+        ",
+    )?;
+    let mut rows = stmt
+        .query_map(params![isc, army_id], |row| {
+            Ok((
+                TtsProfileLoadout {
+                    profile_id: row.get(0)?,
+                    loadout: row.get(1)?,
+                    faction_label: row.get(2)?,
+                    marker_name: row.get(3)?,
+                    silhouette_size: row.get(4)?,
+                    silhouette_type: row.get(5)?,
+                    extra_forms: row.get(7)?,
+                    differences: String::new(),
+                },
+                row.get::<_, String>(6)?,
+            ))
+        })?
+        .collect::<std::result::Result<Vec<_>, _>>()
+        .context("lecture des loadouts")?;
+    let mut groups: BTreeMap<String, Vec<usize>> = BTreeMap::new();
+    for (index, (loadout, _)) in rows.iter().enumerate() {
+        groups
+            .entry(loadout.loadout.to_lowercase())
+            .or_default()
+            .push(index);
+    }
+    for indexes in groups.values() {
+        let descriptions: Vec<String> =
+            indexes.iter().map(|index| rows[*index].1.clone()).collect();
+        let labels = differing_traits(&descriptions);
+        for (offset, index) in indexes.iter().enumerate() {
+            rows[*index].0.differences = labels[offset].clone();
+        }
+    }
+    Ok(rows.into_iter().map(|(loadout, _)| loadout).collect())
+}
+
+fn differing_traits(descriptions: &[String]) -> Vec<String> {
+    if descriptions.len() < 2 {
+        return vec![String::new(); descriptions.len()];
+    }
+    let pieces: Vec<Vec<String>> = descriptions
+        .iter()
+        .map(|text| description_pieces(text))
+        .collect();
+    let mut distinct = std::collections::BTreeSet::new();
+    for set in &pieces {
+        distinct.insert(set.clone());
+    }
+    if distinct.len() < 2 {
+        return vec![String::new(); descriptions.len()];
+    }
+    let mut frequency: BTreeMap<String, usize> = BTreeMap::new();
+    for set in &pieces {
+        let mut seen = std::collections::BTreeSet::new();
+        for piece in set {
+            seen.insert(compact_piece(piece));
+        }
+        for token in seen {
+            *frequency.entry(token).or_default() += 1;
+        }
+    }
+    let total = pieces.len();
+    pieces
+        .iter()
+        .map(|set| {
+            let mut extras = Vec::new();
+            let mut seen = std::collections::BTreeSet::new();
+            for piece in set {
+                let token = compact_piece(piece);
+                if !seen.insert(token.clone()) {
+                    continue;
+                }
+                if frequency.get(&token).copied().unwrap_or(0) < total {
+                    extras.push(piece.clone());
+                }
+            }
+            extras.join(" · ")
+        })
+        .collect()
+}
+
+fn profile_in_army(conn: &Connection, profile_id: i64, army_id: i64) -> Result<bool> {
+    let found = conn
+        .query_row(
+            "
+            SELECT 1
+            FROM tts_profiles p
+            WHERE p.id = ?1
+              AND (
+                p.army_id = ?2
+                OR EXISTS (
+                    SELECT 1 FROM tts_profile_sectorials s
+                    WHERE s.profile_id = p.id AND s.army_id = ?2
+                )
+              )
+            ",
+            params![profile_id, army_id],
+            |_| Ok(()),
+        )
+        .optional()?;
+    Ok(found.is_some())
+}
+
+fn marker_mesh_catalog(conn: &Connection) -> Result<BTreeMap<String, String>> {
+    let mut stmt = conn.prepare(
+        "
+        SELECT marker_name, marker_mesh_url
+        FROM tts_profiles
+        WHERE marker_name IS NOT NULL AND marker_mesh_url IS NOT NULL AND marker_mesh_url != ''
+        UNION ALL
+        SELECT marker_name, marker_mesh_url
+        FROM tts_profile_forms
+        WHERE marker_name IS NOT NULL AND marker_mesh_url IS NOT NULL AND marker_mesh_url != ''
+        ",
+    )?;
+    let pairs = stmt
+        .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?
+        .collect::<std::result::Result<Vec<(String, String)>, _>>()
+        .context("lecture des meshes de silhouettes")?;
+    Ok(crate::tts_object::majority_meshes(pairs))
 }
 
 fn army_counts(conn: &Connection) -> Result<Vec<TtsProfileArmyCount>> {
@@ -2007,5 +2221,133 @@ mod tests {
             .unwrap();
         assert!(mined.differences.contains("Minelayer"));
         assert_eq!(plain.isc, "THYREOS");
+    }
+
+    #[test]
+    fn lists_loadouts_of_one_isc_and_the_usual_silhouette_mesh() {
+        let conn = Connection::open_in_memory().unwrap();
+        migrate(&conn).unwrap();
+        conn.execute_batch(
+            "
+            CREATE TABLE IF NOT EXISTS armies (
+                id INTEGER PRIMARY KEY,
+                parent_id INTEGER NOT NULL,
+                name TEXT NOT NULL,
+                slug TEXT NOT NULL,
+                logo_url TEXT NOT NULL,
+                discontinued INTEGER NOT NULL DEFAULT 0,
+                short_name TEXT,
+                synced_at INTEGER NOT NULL
+            );
+            ",
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO tts_profiles (faction_label, isc, loadout, nom_tts, description_tts, silhouette_size, silhouette_type, marker_name, marker_mesh_url, source_bag, source_index) VALUES ('Haqqislam', 'YUAN YUAN', 'DA', 'YUAN', 'Skills ● Booty', '2', 'normale', 'Silhouette 2', 'https://example.test/rare.obj', 'bag', 0)",
+            [],
+        )
+        .unwrap();
+        let yuan_id = conn.last_insert_rowid();
+        conn.execute(
+            "INSERT INTO tts_profiles (faction_label, isc, loadout, nom_tts, description_tts, silhouette_size, silhouette_type, marker_name, marker_mesh_url, source_bag, source_index) VALUES ('Haqqislam', 'YUAN YUAN', 'DA', 'YUAN', 'Skills ● Booty ● Mimetism(-3)', '2', 'camo-3', 'Camouflage (-3) S2', 'https://example.test/s2.obj', 'bag', 1)",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO tts_profiles (faction_label, isc, loadout, nom_tts, description_tts, marker_name, marker_mesh_url, source_bag, source_index) VALUES ('PanOceania', 'FUSILIER', 'Combi', 'FUSILIER', '', 'Silhouette 2', 'https://example.test/s2.obj', 'bag', 2)",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO tts_profiles (faction_label, isc, loadout, nom_tts, description_tts, marker_name, marker_mesh_url, source_bag, source_index) VALUES ('PanOceania', 'FUSILIER', 'HMG', 'FUSILIER', '', 'Silhouette 2', 'https://example.test/s2.obj', 'bag', 3)",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO tts_profile_forms (profile_id, state_index, isc, nom_tts, marker_name) VALUES (?1, 900, 'STALDRON', 'STALDRON', 'Silhouette 1')",
+            params![yuan_id],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO tts_profile_forms (profile_id, state_index, isc, nom_tts, marker_name, marker_mesh_url) VALUES (?1, 1, 'DOG', 'DOG', 'Silhouette 6', 'https://example.test/s6.obj')",
+            params![yuan_id],
+        )
+        .unwrap();
+
+        let loadouts = list_loadouts(&conn, "yuan yuan", None).unwrap();
+        assert_eq!(loadouts.len(), 2);
+        assert!(loadouts.iter().all(|row| row.loadout == "DA"));
+        let with_form = loadouts.iter().find(|row| row.extra_forms == 1).unwrap();
+        assert!(with_form.differences.is_empty());
+        let camo = loadouts.iter().find(|row| row.extra_forms == 0).unwrap();
+        assert!(camo.differences.contains("Mimetism(-3)"));
+
+        let meshes = marker_mesh_catalog(&conn).unwrap();
+        assert_eq!(
+            meshes.get("Silhouette 2").map(String::as_str),
+            Some("https://example.test/s2.obj")
+        );
+        assert_eq!(
+            meshes.get("Silhouette 6").map(String::as_str),
+            Some("https://example.test/s6.obj")
+        );
+    }
+
+    #[test]
+    fn loadouts_stay_inside_the_chosen_sectorial() {
+        let conn = Connection::open_in_memory().unwrap();
+        migrate(&conn).unwrap();
+        conn.execute_batch(
+            "
+            CREATE TABLE IF NOT EXISTS armies (
+                id INTEGER PRIMARY KEY,
+                parent_id INTEGER NOT NULL,
+                name TEXT NOT NULL,
+                slug TEXT NOT NULL,
+                logo_url TEXT NOT NULL,
+                discontinued INTEGER NOT NULL DEFAULT 0,
+                short_name TEXT,
+                synced_at INTEGER NOT NULL
+            );
+            ",
+        )
+        .unwrap();
+        conn.execute_batch(
+            "
+            INSERT INTO armies (id, parent_id, name, slug, logo_url, discontinued, synced_at) VALUES
+                (401, 401, 'Haqqislam', 'haqqislam', '', 0, 0),
+                (402, 401, 'Hassassin', 'hassassin', '', 0, 0),
+                (101, 101, 'PanOceania', 'panoceania', '', 0, 0);
+            ",
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO tts_profiles (army_id, faction_label, isc, loadout, nom_tts, source_bag, source_index) VALUES (401, 'Haqqislam', 'YUAN YUAN', 'DA', 'YUAN', 'bag', 0)",
+            [],
+        )
+        .unwrap();
+        let haqq_id = conn.last_insert_rowid();
+        conn.execute(
+            "INSERT INTO tts_profiles (army_id, faction_label, isc, loadout, nom_tts, source_bag, source_index) VALUES (101, 'PanOceania', 'YUAN YUAN', 'HMG', 'YUAN', 'bag', 1)",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO tts_profile_sectorials (profile_id, army_id) VALUES (?1, 402)",
+            params![haqq_id],
+        )
+        .unwrap();
+
+        let haqq = list_loadouts(&conn, "YUAN YUAN", Some(401)).unwrap();
+        assert_eq!(haqq.len(), 1);
+        assert_eq!(haqq[0].loadout, "DA");
+        let linked = list_loadouts(&conn, "YUAN YUAN", Some(402)).unwrap();
+        assert_eq!(linked.len(), 1);
+        assert_eq!(linked[0].profile_id, haqq_id);
+        assert!(list_loadouts(&conn, "YUAN YUAN", Some(103))
+            .unwrap()
+            .is_empty());
+        assert!(profile_in_army(&conn, haqq_id, 402).unwrap());
+        assert!(!profile_in_army(&conn, haqq_id, 101).unwrap());
     }
 }

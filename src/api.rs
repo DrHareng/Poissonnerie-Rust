@@ -303,6 +303,8 @@ struct PrefsResponse {
     army_sort_mode: String,
     player_sort_mode: String,
     tournament_completed_view_mode: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    tts_army_id: Option<i64>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -319,6 +321,8 @@ struct UpdatePrefsRequest {
     player_sort_mode: Option<String>,
     #[serde(default)]
     tournament_completed_view_mode: Option<String>,
+    #[serde(default)]
+    tts_army_id: Option<i64>,
 }
 
 fn default_match_limit() -> usize {
@@ -861,12 +865,29 @@ async fn update_prefs(
         ui_update.tournament_completed_view_mode = Some(mode.to_string());
     }
 
+    if let Some(army_id) = payload.tts_army_id {
+        if army_id <= 0 {
+            return Err(ApiError::bad_request("sectorielle invalide"));
+        }
+        let army = state
+            .armies
+            .get(army_id as u32)
+            .map_err(|error| ApiError::bad_request(error.to_string()))?
+            .ok_or_else(|| ApiError::bad_request("sectorielle introuvable"))?;
+        session
+            .insert(auth::SESSION_TTS_ARMY_ID, i64::from(army.id))
+            .await
+            .map_err(|error| ApiError::bad_request(error.to_string()))?;
+        ui_update.tts_army_id = Some(i64::from(army.id));
+    }
+
     if ui_update.secondary_view_mode.is_none()
         && ui_update.scenario_slug.is_none()
         && ui_update.tts_map_slug.is_none()
         && ui_update.army_sort_mode.is_none()
         && ui_update.player_sort_mode.is_none()
         && ui_update.tournament_completed_view_mode.is_none()
+        && ui_update.tts_army_id.is_none()
     {
         return Err(ApiError::bad_request("aucune préférence à mettre à jour"));
     }
@@ -989,6 +1010,15 @@ async fn resolve_prefs(state: &AppState, session: &Session) -> Result<PrefsRespo
             .unwrap_or(auth::DEFAULT_TOURNAMENT_COMPLETED_VIEW_MODE)
     };
 
+    let tts_army_id = if let Some(army_id) = user.as_ref().and_then(|u| u.tts_army_id) {
+        Some(army_id)
+    } else {
+        session
+            .get(auth::SESSION_TTS_ARMY_ID)
+            .await
+            .map_err(|error| ApiError::bad_request(error.to_string()))?
+    };
+
     Ok(PrefsResponse {
         secondary_view_mode: secondary_view_mode.to_string(),
         scenario_slug,
@@ -996,6 +1026,7 @@ async fn resolve_prefs(state: &AppState, session: &Session) -> Result<PrefsRespo
         army_sort_mode: army_sort_mode.to_string(),
         player_sort_mode: player_sort_mode.to_string(),
         tournament_completed_view_mode: tournament_completed_view_mode.to_string(),
+        tts_army_id,
     })
 }
 

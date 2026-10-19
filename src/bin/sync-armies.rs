@@ -22,7 +22,10 @@ fn main() -> Result<()> {
 
     println!("Synchronisation terminée.");
     println!("  Factions récupérées     : {}", report.fetched);
-    println!("  Sectorielles x99 ignorées : {}", report.skipped_reinforcement);
+    println!(
+        "  Sectorielles x99 ignorées : {}",
+        report.skipped_reinforcement
+    );
     println!("  Armées enregistrées     : {}", report.stored);
     println!("  Armées sélectionnables  : {}", report.selectable);
     println!("Base : {}", args.db.display());

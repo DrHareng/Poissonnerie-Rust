@@ -1256,6 +1256,12 @@ fn migrate_tts_maps(conn: &Connection) -> Result<()> {
         "tts_map_slug",
         "ALTER TABLE users ADD COLUMN tts_map_slug TEXT",
     )?;
+    add_column_if_missing(
+        conn,
+        "users",
+        "tts_army_id",
+        "ALTER TABLE users ADD COLUMN tts_army_id INTEGER",
+    )?;
     conn.execute_batch(
         "
         DROP INDEX IF EXISTS idx_tts_module_updates_created;
