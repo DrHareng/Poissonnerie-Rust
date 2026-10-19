@@ -15,7 +15,7 @@ use crate::{
     tts_figurine::{FigurineWrite, TtsFigurine},
     tts_map::{self, MAX_PICTURE_BYTES},
     tts_object::{self, ModelForm, ModelProfile},
-    tts_profile::TtsProfileLoadout,
+    tts_profile::{TtsFigurineLabel, TtsProfileForm, TtsProfileLoadout},
     User,
 };
 
@@ -34,6 +34,7 @@ pub fn tts_figurine_routes() -> Router<AppState> {
             "/api/tts-figurines",
             get(list_figurines).post(create_figurine),
         )
+        .route("/api/tts-figurines/labels", get(list_figurine_labels))
         .route(
             "/api/tts-figurines/{id}",
             axum::routing::patch(update_figurine).delete(delete_figurine),
@@ -80,7 +81,8 @@ struct ArmyQuery {
 
 #[derive(Debug, Deserialize)]
 struct ObjectQuery {
-    profile_id: i64,
+    profile_id: Option<i64>,
+    form_id: Option<i64>,
     army_id: i64,
     color: Option<String>,
 }
@@ -114,6 +116,18 @@ async fn require_admin(state: &AppState, session: &Session) -> Result<User, ApiE
         return Err(ApiError::unauthorized("droits administrateur requis"));
     }
     Ok(user)
+}
+
+async fn list_figurine_labels(
+    State(state): State<AppState>,
+    Query(query): Query<ArmyQuery>,
+) -> Result<Json<Vec<TtsFigurineLabel>>, ApiError> {
+    require_army(&state, query.army_id)?;
+    state
+        .tts_profiles
+        .figurine_labels_for_army(query.army_id)
+        .map(Json)
+        .map_err(|error| ApiError::bad_request(error.to_string()))
 }
 
 async fn list_figurine_loadouts(
@@ -157,32 +171,59 @@ async fn figurine_object(
         ));
     }
     let color = diffuse_color(&state, query.army_id, query.color.as_deref())?;
-    let in_army = state
-        .tts_profiles
-        .profile_in_army(query.profile_id, query.army_id)
-        .map_err(|error| ApiError::bad_request(error.to_string()))?;
-    if !in_army {
-        return Err(ApiError::bad_request(
-            "ce loadout n'est pas dans cette sectorielle",
-        ));
-    }
-    let profile = state
-        .tts_profiles
-        .get(query.profile_id)
-        .map_err(|error| ApiError::bad_request(error.to_string()))?
-        .ok_or_else(|| ApiError::bad_request("profil introuvable"))?;
-    if !same_isc(&figurine.isc, &profile.isc) {
-        return Err(ApiError::bad_request(
-            "ce loadout ne correspond pas à cet ISC",
-        ));
-    }
+    let model = if let Some(form_id) = query.form_id {
+        let (form, profile_id) = state
+            .tts_profiles
+            .get_peripheral_form(form_id)
+            .map_err(|error| ApiError::bad_request(error.to_string()))?
+            .ok_or_else(|| ApiError::bad_request("périphérique introuvable"))?;
+        let in_army = state
+            .tts_profiles
+            .profile_in_army(profile_id, query.army_id)
+            .map_err(|error| ApiError::bad_request(error.to_string()))?;
+        if !in_army {
+            return Err(ApiError::bad_request(
+                "ce loadout n'est pas dans cette sectorielle",
+            ));
+        }
+        if !same_isc(&figurine.isc, &form.isc) {
+            return Err(ApiError::bad_request(
+                "ce loadout ne correspond pas à cet ISC",
+            ));
+        }
+        model_from_form(&form)
+    } else {
+        let profile_id = query
+            .profile_id
+            .ok_or_else(|| ApiError::bad_request("loadout manquant"))?;
+        let in_army = state
+            .tts_profiles
+            .profile_in_army(profile_id, query.army_id)
+            .map_err(|error| ApiError::bad_request(error.to_string()))?;
+        if !in_army {
+            return Err(ApiError::bad_request(
+                "ce loadout n'est pas dans cette sectorielle",
+            ));
+        }
+        let profile = state
+            .tts_profiles
+            .get(profile_id)
+            .map_err(|error| ApiError::bad_request(error.to_string()))?
+            .ok_or_else(|| ApiError::bad_request("profil introuvable"))?;
+        if !same_isc(&figurine.isc, &profile.isc) {
+            return Err(ApiError::bad_request(
+                "ce loadout ne correspond pas à cet ISC",
+            ));
+        }
+        model_profile(&profile)
+    };
     let meshes = state
         .tts_profiles
         .marker_mesh_catalog()
         .map_err(|error| ApiError::bad_request(error.to_string()))?;
     Ok(Json(tts_object::save_file(tts_object::saved_model(
         &figurine.asset_bundle_url,
-        &model_profile(&profile),
+        &model,
         &meshes,
         color,
     ))))
@@ -258,6 +299,18 @@ fn model_profile(profile: &crate::tts_profile::TtsProfileDetail) -> ModelProfile
                 marker_mesh_url: form.marker_mesh_url.clone(),
             })
             .collect(),
+    }
+}
+
+fn model_from_form(form: &TtsProfileForm) -> ModelProfile {
+    ModelProfile {
+        nom_tts: form.nom_tts.clone(),
+        description_tts: form.description_tts.clone(),
+        marker_name: form.marker_name.clone(),
+        silhouette_size: form.silhouette_size.clone(),
+        silhouette_type: form.silhouette_type.clone(),
+        marker_mesh_url: form.marker_mesh_url.clone(),
+        forms: Vec::new(),
     }
 }
 

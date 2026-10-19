@@ -786,7 +786,7 @@ fn enrich_my_tournament_summary(
                     .player2
                     .as_ref()
                     .is_some_and(|p| crate::store::normalize_name(p) == player_key);
-            plays && tm.status != TournamentMatchStatus::Confirmed && !tm.is_unplayed
+            plays && (tm.status != TournamentMatchStatus::Confirmed || tm.is_unplayed)
         })
         .map(|mut tm| {
             if let Some(ref name) = tm.player1 {
@@ -1524,6 +1524,7 @@ async fn submit_tournament_match(
         } else if tm.phase != crate::tournament::TournamentPhase::Pool {
             maybe_apply_bracket_match(&state, &tm)?;
         }
+        maybe_record_finalized_pool_elo(&state, &tm)?;
     }
 
     Ok(Json(tm))
@@ -1562,6 +1563,7 @@ async fn confirm_tournament_match(
     if !tm.is_forfeit && tm.phase != crate::tournament::TournamentPhase::Pool {
         maybe_apply_bracket_match(&state, &tm)?;
     }
+    maybe_record_finalized_pool_elo(&state, &tm)?;
 
     Ok(Json(tm))
 }
@@ -1584,7 +1586,7 @@ async fn start_tournament_partie(
     Path(id): Path<i64>,
 ) -> Result<(StatusCode, Json<crate::display_name::EnrichedMatchRecord>), ApiError> {
     let user = require_user(&state, &session).await?;
-    let tm = state
+    let mut tm = state
         .tournaments
         .get_match(id)
         .map_err(|error| ApiError::bad_request(error.to_string()))?
@@ -1618,13 +1620,13 @@ async fn start_tournament_partie(
         }
     }
 
-    if tm.status == TournamentMatchStatus::Confirmed {
-        return Err(ApiError::bad_request("match déjà confirmé"));
-    }
-    if tm.is_forfeit || tm.is_unplayed {
+    if tm.is_forfeit {
         return Err(ApiError::bad_request(
-            "impossible de démarrer une partie sur un forfait / non joué",
+            "impossible de démarrer une partie sur un forfait",
         ));
+    }
+    if tm.status == TournamentMatchStatus::Confirmed && !tm.is_unplayed {
+        return Err(ApiError::bad_request("match déjà confirmé"));
     }
 
     // Reprendre une partie déjà liée.
@@ -1642,7 +1644,7 @@ async fn start_tournament_partie(
         }
     }
 
-    if tm.status != TournamentMatchStatus::Scheduled {
+    if tm.status != TournamentMatchStatus::Scheduled && !tm.is_unplayed {
         return Err(ApiError::bad_request(
             "démarrez la partie uniquement sur un match à venir",
         ));
@@ -1704,6 +1706,13 @@ async fn start_tournament_partie(
     });
     let army1 = army1.ok_or_else(|| ApiError::bad_request("armée joueur 1 manquante"))?;
     let army2 = army2.ok_or_else(|| ApiError::bad_request("armée joueur 2 manquante"))?;
+
+    if tm.is_unplayed {
+        tm = state
+            .tournaments
+            .reopen_unplayed(id)
+            .map_err(|error| ApiError::bad_request(error.to_string()))?;
+    }
 
     state
         .armies
@@ -1889,6 +1898,7 @@ async fn submit_tournament_from_partie(
     {
         maybe_apply_bracket_match(&state, &tm)?;
     }
+    maybe_record_finalized_pool_elo(&state, &tm)?;
 
     Ok(Json(tm))
 }
@@ -2059,6 +2069,7 @@ pub(crate) fn apply_tournament_match_correction(
     }
 
     sync_elo_match_after_tournament_score_edit(state, &tm)?;
+    maybe_record_finalized_pool_elo(state, &tm)?;
 
     Ok(tm)
 }
@@ -2210,6 +2221,44 @@ fn apply_tournament_match_to_board(
         )
         .map_err(|error| ApiError::bad_request(error.to_string()))?;
     Ok(())
+}
+
+/// Elo de poule déjà versé au classement général : un score saisi après coup y est ajouté.
+fn maybe_record_finalized_pool_elo(
+    state: &AppState,
+    tm: &crate::tournament::TournamentMatch,
+) -> Result<(), ApiError> {
+    if tm.phase != crate::tournament::TournamentPhase::Pool
+        || tm.is_forfeit
+        || tm.is_unplayed
+        || tm.elo_applied_at.is_some()
+        || tm.status != TournamentMatchStatus::Confirmed
+        || tm.outcome.is_none()
+    {
+        return Ok(());
+    }
+
+    let tournament = state
+        .tournaments
+        .get(tm.tournament_id)
+        .map_err(|error| ApiError::bad_request(error.to_string()))?
+        .ok_or_else(|| ApiError::bad_request("tournoi introuvable"))?;
+    if tournament.pools_finalized_at.is_none() {
+        return Ok(());
+    }
+
+    {
+        let mut board = state.board.lock().unwrap();
+        apply_tournament_match_to_board(&mut board, tm, Some(tournament.name))?;
+        board
+            .save(&state.db_path)
+            .map_err(|error| ApiError::bad_request(error.to_string()))?;
+    }
+
+    state
+        .tournaments
+        .mark_pool_elo_applied(tm.id)
+        .map_err(|error| ApiError::bad_request(error.to_string()))
 }
 
 fn maybe_apply_bracket_match(

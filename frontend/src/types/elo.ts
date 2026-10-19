@@ -657,6 +657,7 @@ export interface TtsFigurineWrite {
 
 export interface TtsFigurineLoadout {
   profile_id: number
+  form_id?: number | null
   loadout: string
   faction_label: string
   marker_name: string | null
@@ -664,6 +665,14 @@ export interface TtsFigurineLoadout {
   silhouette_type: string | null
   extra_forms: number
   differences: string
+}
+
+export interface TtsFigurineLabel {
+  isc: string
+  loadout: string
+  marker_name: string | null
+  silhouette_size: string | null
+  silhouette_type: string | null
 }
 
 export interface TtsProfileLabel {

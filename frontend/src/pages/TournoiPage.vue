@@ -254,7 +254,7 @@ const hasPoolWithoutMatches = computed(() => {
 const selectedPoolId = ref<number | null>(null)
 
 function isMatchPlayed(match: TournamentMatch) {
-  return match.status === 'confirmed' || match.is_unplayed
+  return match.status === 'confirmed' && !match.is_unplayed
 }
 
 const myTournamentMatches = computed(() => {
@@ -1736,7 +1736,7 @@ async function cancelForfeit(match: TournamentMatch) {
 async function markMatchUnplayed(match: TournamentMatch) {
   if (
     !window.confirm(
-      'Marquer ce match comme non joué ? Les deux joueurs n’obtiendront pas de points.',
+      'Marquer ce match comme non joué ? Les deux joueurs n’obtiennent pas de points tant qu’un score n’est pas saisi.',
     )
   ) {
     return

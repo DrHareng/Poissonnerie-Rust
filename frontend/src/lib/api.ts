@@ -33,6 +33,7 @@ import type {
   TournamentScenarioSlot,
   TtsContentImage,
   TtsFigurine,
+  TtsFigurineLabel,
   TtsFigurineLoadout,
   TtsFigurineWrite,
   ContentUpdate,
@@ -134,6 +135,10 @@ export function clearTtsFigurinePhoto(id: number): Promise<TtsFigurine> {
   return request<TtsFigurine>(`/api/tts-figurines/${id}/photo`, { method: 'DELETE' })
 }
 
+export function fetchTtsFigurineLabels(armyId: number): Promise<TtsFigurineLabel[]> {
+  return request<TtsFigurineLabel[]>(`/api/tts-figurines/labels?army_id=${armyId}`)
+}
+
 export function fetchTtsFigurineLoadouts(id: number, armyId: number): Promise<TtsFigurineLoadout[]> {
   return request<TtsFigurineLoadout[]>(`/api/tts-figurines/${id}/loadouts?army_id=${armyId}`)
 }
@@ -146,15 +151,19 @@ export function fetchTtsSectorialColor(armyId: number): Promise<string> {
 
 export function fetchTtsFigurineObject(
   id: number,
-  profileId: number,
-  armyId: number,
-  color: string,
+  options: {
+    armyId: number
+    color: string
+    profileId?: number
+    formId?: number
+  },
 ): Promise<unknown> {
   const params = new URLSearchParams({
-    profile_id: String(profileId),
-    army_id: String(armyId),
-    color,
+    army_id: String(options.armyId),
+    color: options.color,
   })
+  if (options.formId != null) params.set('form_id', String(options.formId))
+  else if (options.profileId != null) params.set('profile_id', String(options.profileId))
   return request<unknown>(`/api/tts-figurines/${id}/object?${params}`)
 }
 

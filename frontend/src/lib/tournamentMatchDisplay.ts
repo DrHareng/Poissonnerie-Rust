@@ -41,6 +41,14 @@ export function matchHasResult(match: TournamentMatch) {
   )
 }
 
+/** Encore jouable : programmé, ou marqué non joué et saisissable après coup. */
+export function matchIsOpenForPlay(
+  match: Pick<TournamentMatch, 'status' | 'is_unplayed' | 'is_forfeit'>,
+): boolean {
+  if (match.is_forfeit) return false
+  return match.status === 'scheduled' || Boolean(match.is_unplayed)
+}
+
 /** Tant que le résultat n’est pas confirmé, les deux joueurs peuvent le corriger. */
 export function canCorrectTournamentMatch(
   match: Pick<

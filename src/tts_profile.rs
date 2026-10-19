@@ -1004,6 +1004,9 @@ pub struct TtsProfileLabel {
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub struct TtsProfileLoadout {
     pub profile_id: i64,
+    /// Présent pour un périphérique (state_index 900) : id de la forme, pas du profil.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub form_id: Option<i64>,
     pub loadout: String,
     pub faction_label: String,
     pub marker_name: Option<String>,
@@ -1011,6 +1014,17 @@ pub struct TtsProfileLoadout {
     pub silhouette_type: Option<String>,
     pub extra_forms: i64,
     pub differences: String,
+}
+
+/// ISC / loadout utilisables pour cataloguer une figurine dans une sectorielle,
+/// y compris les périphériques (GO-BOT, STALDRON, …).
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct TtsFigurineLabel {
+    pub isc: String,
+    pub loadout: String,
+    pub marker_name: Option<String>,
+    pub silhouette_size: Option<String>,
+    pub silhouette_type: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
@@ -1083,12 +1097,27 @@ impl TtsProfileStore {
 
     pub fn loadouts_for_isc(&self, isc: &str, army_id: i64) -> Result<Vec<TtsProfileLoadout>> {
         let conn = self.conn.lock().unwrap();
-        list_loadouts(&conn, isc, Some(army_id))
+        let loadouts = list_loadouts(&conn, isc, Some(army_id))?;
+        if loadouts.is_empty() {
+            list_peripheral_loadouts(&conn, isc, Some(army_id))
+        } else {
+            Ok(loadouts)
+        }
+    }
+
+    pub fn figurine_labels_for_army(&self, army_id: i64) -> Result<Vec<TtsFigurineLabel>> {
+        let conn = self.conn.lock().unwrap();
+        figurine_labels_for_army(&conn, army_id)
     }
 
     pub fn profile_in_army(&self, profile_id: i64, army_id: i64) -> Result<bool> {
         let conn = self.conn.lock().unwrap();
         profile_in_army(&conn, profile_id, army_id)
+    }
+
+    pub fn get_peripheral_form(&self, form_id: i64) -> Result<Option<(TtsProfileForm, i64)>> {
+        let conn = self.conn.lock().unwrap();
+        get_peripheral_form(&conn, form_id)
     }
 
     pub fn marker_mesh_catalog(&self) -> Result<BTreeMap<String, String>> {
@@ -1275,11 +1304,12 @@ fn list_loadouts(
         ORDER BY p.loadout COLLATE NOCASE, p.faction_label COLLATE NOCASE, p.id
         ",
     )?;
-    let mut rows = stmt
+    let rows = stmt
         .query_map(params![isc, army_id], |row| {
             Ok((
                 TtsProfileLoadout {
                     profile_id: row.get(0)?,
+                    form_id: None,
                     loadout: row.get(1)?,
                     faction_label: row.get(2)?,
                     marker_name: row.get(3)?,
@@ -1293,6 +1323,84 @@ fn list_loadouts(
         })?
         .collect::<std::result::Result<Vec<_>, _>>()
         .context("lecture des loadouts")?;
+    Ok(apply_loadout_differences(rows))
+}
+
+fn list_peripheral_loadouts(
+    conn: &Connection,
+    isc: &str,
+    army_id: Option<i64>,
+) -> Result<Vec<TtsProfileLoadout>> {
+    let isc = isc.trim();
+    if isc.is_empty() {
+        return Ok(Vec::new());
+    }
+    let map_row = |row: &rusqlite::Row<'_>| -> rusqlite::Result<_> {
+        Ok((
+            row.get::<_, String>(2)?,
+            TtsProfileLoadout {
+                profile_id: row.get(0)?,
+                form_id: Some(row.get(1)?),
+                loadout: row.get(3)?,
+                faction_label: row.get(4)?,
+                marker_name: row.get(5)?,
+                silhouette_size: row.get(6)?,
+                silhouette_type: row.get(7)?,
+                extra_forms: 0,
+                differences: String::new(),
+            },
+            row.get::<_, Option<String>>(8)?.unwrap_or_default(),
+        ))
+    };
+    let rows = if let Some(army_id) = army_id {
+        let mut stmt = conn.prepare(
+            "
+            SELECT
+                p.id, f.id, f.isc, f.loadout, p.faction_label, f.marker_name, f.silhouette_size,
+                f.silhouette_type, f.description_tts
+            FROM tts_profile_forms f
+            JOIN tts_profiles p ON p.id = f.profile_id
+            WHERE f.state_index = 900
+              AND (
+                p.army_id = ?1
+                OR EXISTS (
+                    SELECT 1 FROM tts_profile_sectorials s
+                    WHERE s.profile_id = p.id AND s.army_id = ?1
+                )
+              )
+            ORDER BY f.loadout COLLATE NOCASE, p.faction_label COLLATE NOCASE, f.id
+            ",
+        )?;
+        let mapped = stmt.query_map(params![army_id], map_row)?;
+        mapped
+            .collect::<std::result::Result<Vec<_>, _>>()
+            .context("lecture des loadouts de périphériques")?
+    } else {
+        let mut stmt = conn.prepare(
+            "
+            SELECT
+                p.id, f.id, f.isc, f.loadout, p.faction_label, f.marker_name, f.silhouette_size,
+                f.silhouette_type, f.description_tts
+            FROM tts_profile_forms f
+            JOIN tts_profiles p ON p.id = f.profile_id
+            WHERE f.state_index = 900
+            ORDER BY f.loadout COLLATE NOCASE, p.faction_label COLLATE NOCASE, f.id
+            ",
+        )?;
+        let mapped = stmt.query_map([], map_row)?;
+        mapped
+            .collect::<std::result::Result<Vec<_>, _>>()
+            .context("lecture des loadouts de périphériques")?
+    };
+    let rows = rows
+        .into_iter()
+        .filter(|(form_isc, _, _)| form_isc.eq_ignore_ascii_case(isc))
+        .map(|(_, loadout, description)| (loadout, description))
+        .collect();
+    Ok(apply_loadout_differences(rows))
+}
+
+fn apply_loadout_differences(mut rows: Vec<(TtsProfileLoadout, String)>) -> Vec<TtsProfileLoadout> {
     let mut groups: BTreeMap<String, Vec<usize>> = BTreeMap::new();
     for (index, (loadout, _)) in rows.iter().enumerate() {
         groups
@@ -1308,7 +1416,119 @@ fn list_loadouts(
             rows[*index].0.differences = labels[offset].clone();
         }
     }
-    Ok(rows.into_iter().map(|(loadout, _)| loadout).collect())
+    rows.into_iter().map(|(loadout, _)| loadout).collect()
+}
+
+fn figurine_labels_for_army(conn: &Connection, army_id: i64) -> Result<Vec<TtsFigurineLabel>> {
+    let mut labels: BTreeMap<(String, String), TtsFigurineLabel> = BTreeMap::new();
+    let mut stmt = conn.prepare(
+        "
+        SELECT p.isc, p.loadout, p.marker_name, p.silhouette_size, p.silhouette_type
+        FROM tts_profiles p
+        WHERE p.army_id = ?1
+           OR EXISTS (
+                SELECT 1 FROM tts_profile_sectorials s
+                WHERE s.profile_id = p.id AND s.army_id = ?1
+           )
+        ORDER BY p.isc COLLATE NOCASE, p.loadout COLLATE NOCASE, p.id
+        ",
+    )?;
+    let profile_rows = stmt.query_map(params![army_id], |row| {
+        Ok(TtsFigurineLabel {
+            isc: row.get(0)?,
+            loadout: row.get(1)?,
+            marker_name: row.get(2)?,
+            silhouette_size: row.get(3)?,
+            silhouette_type: row.get(4)?,
+        })
+    })?;
+    for row in profile_rows {
+        let label = row?;
+        let key = (
+            label.isc.trim().to_ascii_lowercase(),
+            label.loadout.trim().to_ascii_lowercase(),
+        );
+        labels.entry(key).or_insert(label);
+    }
+    let mut stmt = conn.prepare(
+        "
+        SELECT f.isc, f.loadout, f.marker_name, f.silhouette_size, f.silhouette_type
+        FROM tts_profile_forms f
+        JOIN tts_profiles p ON p.id = f.profile_id
+        WHERE f.state_index = 900
+          AND (
+            p.army_id = ?1
+            OR EXISTS (
+                SELECT 1 FROM tts_profile_sectorials s
+                WHERE s.profile_id = p.id AND s.army_id = ?1
+            )
+          )
+        ORDER BY f.isc COLLATE NOCASE, f.loadout COLLATE NOCASE, f.id
+        ",
+    )?;
+    let form_rows = stmt.query_map(params![army_id], |row| {
+        Ok(TtsFigurineLabel {
+            isc: row.get(0)?,
+            loadout: row.get(1)?,
+            marker_name: row.get(2)?,
+            silhouette_size: row.get(3)?,
+            silhouette_type: row.get(4)?,
+        })
+    })?;
+    for row in form_rows {
+        let label = row?;
+        let key = (
+            label.isc.trim().to_ascii_lowercase(),
+            label.loadout.trim().to_ascii_lowercase(),
+        );
+        labels.entry(key).or_insert(label);
+    }
+    let mut rows: Vec<_> = labels.into_values().collect();
+    rows.sort_by(|left, right| {
+        left.isc
+            .to_ascii_lowercase()
+            .cmp(&right.isc.to_ascii_lowercase())
+            .then_with(|| {
+                left.loadout
+                    .to_ascii_lowercase()
+                    .cmp(&right.loadout.to_ascii_lowercase())
+            })
+    });
+    Ok(rows)
+}
+
+fn get_peripheral_form(conn: &Connection, form_id: i64) -> Result<Option<(TtsProfileForm, i64)>> {
+    let mut stmt = conn.prepare(
+        "
+        SELECT
+            f.id, f.state_index, f.isc, f.loadout, f.nom_tts, f.description_tts,
+            f.silhouette_size, f.silhouette_type, f.marker_name, f.mesh_url,
+            f.marker_mesh_url, f.profile_id
+        FROM tts_profile_forms f
+        WHERE f.id = ?1 AND f.state_index = 900
+        ",
+    )?;
+    let mut rows = stmt.query(params![form_id])?;
+    let Some(row) = rows.next()? else {
+        return Ok(None);
+    };
+    Ok(Some((
+        TtsProfileForm {
+            id: row.get(0)?,
+            state_index: row.get(1)?,
+            isc: row.get(2)?,
+            loadout: row.get(3)?,
+            nom_tts: row.get(4)?,
+            description_tts: row.get(5)?,
+            silhouette_size: row.get(6)?,
+            silhouette_type: row.get(7)?,
+            marker_name: row.get(8)?,
+            mesh_url: row.get(9)?,
+            marker_mesh_url: row.get(10)?,
+            traits: Vec::new(),
+        },
+        row.get(11)?,
+    )))
 }
 
 fn differing_traits(descriptions: &[String]) -> Vec<String> {
@@ -2230,16 +2450,23 @@ mod tests {
             [],
         )
         .unwrap();
-        conn.execute(
-            "INSERT INTO tts_profile_forms (profile_id, state_index, isc, nom_tts, marker_name) VALUES (?1, 900, 'STALDRON', 'STALDRON', 'Silhouette 1')",
-            params![yuan_id],
-        )
-        .unwrap();
-        conn.execute(
-            "INSERT INTO tts_profile_forms (profile_id, state_index, isc, nom_tts, marker_name, marker_mesh_url) VALUES (?1, 1, 'DOG', 'DOG', 'Silhouette 6', 'https://example.test/s6.obj')",
-            params![yuan_id],
-        )
-        .unwrap();
+        assert_eq!(
+            conn.execute(
+                "INSERT INTO tts_profile_forms (profile_id, state_index, isc, loadout, nom_tts, description_tts, marker_name) VALUES (?1, 900, 'STALDRON', 'STALDRON', 'STALDRON', '', 'Silhouette 1')",
+                params![yuan_id],
+            )
+            .unwrap(),
+            1
+        );
+        let staldrone_id = conn.last_insert_rowid();
+        assert_eq!(
+            conn.execute(
+                "INSERT INTO tts_profile_forms (profile_id, state_index, isc, nom_tts, marker_name, marker_mesh_url) VALUES (?1, 1, 'DOG', 'DOG', 'Silhouette 6', 'https://example.test/s6.obj')",
+                params![yuan_id],
+            )
+            .unwrap(),
+            1
+        );
 
         let loadouts = list_loadouts(&conn, "yuan yuan", None).unwrap();
         assert_eq!(loadouts.len(), 2);
@@ -2248,6 +2475,12 @@ mod tests {
         assert!(with_form.differences.is_empty());
         let camo = loadouts.iter().find(|row| row.extra_forms == 0).unwrap();
         assert!(camo.differences.contains("Mimetism(-3)"));
+
+        let peripherals = list_peripheral_loadouts(&conn, "staldrOn", None).unwrap();
+        assert_eq!(peripherals.len(), 1);
+        assert_eq!(peripherals[0].form_id, Some(staldrone_id));
+        assert_eq!(peripherals[0].profile_id, yuan_id);
+        assert_eq!(peripherals[0].marker_name.as_deref(), Some("Silhouette 1"));
 
         let meshes = marker_mesh_catalog(&conn).unwrap();
         assert_eq!(

@@ -15,16 +15,22 @@ import {
   clearTtsFigurinePhoto,
   createTtsFigurine,
   deleteTtsFigurine,
+  fetchTtsFigurineLabels,
   fetchTtsSectorialColor,
   fetchTtsFigurineLoadouts,
   fetchTtsFigurineObject,
   fetchTtsFigurines,
-  fetchTtsProfiles,
   updateTtsFigurine,
   uploadTtsFigurinePhoto,
 } from '@/lib/api'
 import { withBase } from '@/lib/basePath'
-import type { TtsFigurine, TtsFigurineLoadout, TtsFigurineWrite, TtsProfileLabel } from '@/types/elo'
+import type { TtsFigurine, TtsFigurineLabel, TtsFigurineLoadout, TtsFigurineWrite } from '@/types/elo'
+
+type FigurineLabel = {
+  isc: string
+  loadout: string
+  silhouette: string
+}
 
 type Draft = TtsFigurineWrite
 
@@ -36,7 +42,7 @@ const { setCustomSide } = useAppSidePanel()
 const { canEditContent } = useAdminEditMode()
 
 const figurines = ref<TtsFigurine[]>([])
-const labels = ref<TtsProfileLabel[]>([])
+const labels = ref<FigurineLabel[]>([])
 const search = defineModel<string>('search', { default: '' })
 const loading = ref(true)
 const loadError = ref('')
@@ -47,7 +53,7 @@ const downloadTarget = ref<TtsFigurine | null>(null)
 const loadouts = ref<TtsFigurineLoadout[]>([])
 const loadoutsLoading = ref(false)
 const loadoutsError = ref('')
-const selectedProfileId = ref('')
+const selectedLoadoutKey = ref('')
 const color = ref('FFFFFF')
 const sectorialColor = ref('FFFFFF')
 const downloading = ref(false)
@@ -94,7 +100,7 @@ const showLoadoutOptions = computed(() => loadoutFocused.value && loadoutOptions
 const previewSrc = computed(() => photoPreview.value || (!removeExistingPhoto.value ? existingPhoto.value : ''))
 const panelOpen = computed(() => panel.value != null)
 const selectedLoadout = computed(() =>
-  loadouts.value.find((loadout) => String(loadout.profile_id) === selectedProfileId.value),
+  loadouts.value.find((loadout) => loadoutKey(loadout) === selectedLoadoutKey.value),
 )
 
 function emptyDraft(): Draft {
@@ -167,6 +173,30 @@ function onDrop(event: DragEvent) {
   if (file?.type.startsWith('image/')) setPhoto(file)
 }
 
+function silhouetteOf(
+  profile: Pick<TtsFigurineLabel, 'marker_name' | 'silhouette_size' | 'silhouette_type'>,
+) {
+  const marker = profile.marker_name?.trim()
+  if (marker) return marker
+  const size = profile.silhouette_size?.trim()
+  if (!size) return ''
+  const kind = profile.silhouette_type?.trim()
+  if (kind && kind.toLowerCase() !== 'normale') return `S${size} · ${kind}`
+  return `S${size}`
+}
+
+function loadoutKey(option: TtsFigurineLoadout) {
+  return option.form_id != null ? `f:${option.form_id}` : `p:${option.profile_id}`
+}
+
+function figurineSilhouette(figurine: TtsFigurine) {
+  const isc = figurine.isc.trim().toLowerCase()
+  const loadout = figurine.loadout.trim().toLowerCase()
+  const sameIsc = labels.value.filter((label) => label.isc.trim().toLowerCase() === isc && label.silhouette)
+  const exact = sameIsc.find((label) => label.loadout.trim().toLowerCase() === loadout)
+  return (exact ?? sameIsc[0])?.silhouette ?? ''
+}
+
 function sameText(left: string, right: string) {
   return left.trim().toLowerCase() === right.trim().toLowerCase()
 }
@@ -215,7 +245,7 @@ async function openDownload(figurine: TtsFigurine) {
   downloadTarget.value = figurine
   loadouts.value = []
   loadoutsError.value = ''
-  selectedProfileId.value = ''
+  selectedLoadoutKey.value = ''
   panel.value = 'download'
   loadoutsLoading.value = true
   try {
@@ -227,8 +257,8 @@ async function openDownload(figurine: TtsFigurine) {
     const rows = await fetchTtsFigurineLoadouts(figurine.id, armyId)
     if (downloadTarget.value?.id !== figurine.id) return
     loadouts.value = rows
-    const match = rows.find((row) => sameText(row.loadout, figurine.loadout))
-    selectedProfileId.value = String((match ?? rows[0])?.profile_id ?? '')
+    const match = rows.find((row) => sameText(row.loadout, figurine.loadout)) ?? rows[0]
+    selectedLoadoutKey.value = match ? loadoutKey(match) : ''
   } catch (error) {
     if (downloadTarget.value?.id !== figurine.id) return
     loadoutsError.value = error instanceof Error ? error.message : 'Impossible de charger les loadouts'
@@ -239,13 +269,18 @@ async function openDownload(figurine: TtsFigurine) {
 
 async function downloadFigurine() {
   const figurine = downloadTarget.value
-  const profileId = Number(selectedProfileId.value)
+  const option = selectedLoadout.value
   const armyId = Number(props.armyId)
-  if (!figurine || !profileId || !armyId || downloading.value) return
+  if (!figurine || !option || !armyId || downloading.value) return
   downloading.value = true
   try {
-    const object = await fetchTtsFigurineObject(figurine.id, profileId, armyId, color.value)
-    const loadout = selectedLoadout.value?.loadout ?? figurine.loadout
+    const object = await fetchTtsFigurineObject(figurine.id, {
+      armyId,
+      color: color.value,
+      formId: option.form_id ?? undefined,
+      profileId: option.form_id == null ? option.profile_id : undefined,
+    })
+    const loadout = option.loadout || figurine.loadout
     downloadBlob(
       new Blob([JSON.stringify(object, null, 2)], { type: 'application/json' }),
       downloadFilename(figurine.isc, loadout),
@@ -390,12 +425,15 @@ async function loadLabels() {
     return
   }
   try {
-    const profiles = await fetchTtsProfiles({ armyId, includeFaction: false })
-    labels.value = profiles.map((profile) => ({
-      isc: profile.isc,
-      loadout: profile.loadout,
+    const rows = await fetchTtsFigurineLabels(armyId)
+    if (Number(props.armyId) !== armyId) return
+    labels.value = rows.map((row) => ({
+      isc: row.isc,
+      loadout: row.loadout,
+      silhouette: silhouetteOf(row),
     }))
   } catch {
+    if (Number(props.armyId) !== armyId) return
     labels.value = []
   }
 }
@@ -465,14 +503,14 @@ onBeforeUnmount(() => {
                 v-for="option in loadouts"
                 :key="option.profile_id"
                 class="flex cursor-pointer gap-2 rounded-md border px-2 py-1.5 text-sm"
-                :class="String(option.profile_id) === selectedProfileId ? 'border-primary' : 'border-border'"
+                :class="loadoutKey(option) === selectedLoadoutKey ? 'border-primary' : 'border-border'"
               >
                 <input
-                  v-model="selectedProfileId"
+                  v-model="selectedLoadoutKey"
                   class="mt-1"
                   type="radio"
                   name="figurine-loadout"
-                  :value="String(option.profile_id)"
+                  :value="loadoutKey(option)"
                 />
                 <span class="min-w-0">
                   <span class="block break-words">{{ loadoutTitle(option) }}</span>
@@ -487,7 +525,7 @@ onBeforeUnmount(() => {
               </label>
             </div>
           </fieldset>
-          <Button type="submit" :disabled="downloading || !downloadTarget.asset_bundle_url || !selectedProfileId">
+          <Button type="submit" :disabled="downloading || !downloadTarget.asset_bundle_url || !selectedLoadoutKey">
             {{ downloading ? 'Téléchargement…' : 'Télécharger' }}
           </Button>
         </form>
@@ -654,7 +692,7 @@ onBeforeUnmount(() => {
       <article
         v-for="figurine in filtered"
         :key="figurine.id"
-        class="neon-panel overflow-hidden"
+        class="neon-panel min-w-0 overflow-hidden"
       >
         <div class="relative">
           <button type="button" class="block w-full" @click="openEdit(figurine)">
@@ -682,11 +720,30 @@ onBeforeUnmount(() => {
             <Download class="size-4" />
           </button>
         </div>
-        <button type="button" class="block w-full px-3 pt-2 pb-3 text-left" @click="openEdit(figurine)">
-          <div class="space-y-1">
-            <p class="font-medium">{{ figurine.isc }}</p>
-            <p class="text-sm text-muted-foreground">{{ figurine.loadout || '—' }}</p>
-            <p v-if="figurine.painter" class="text-sm">{{ figurine.painter }}</p>
+        <button type="button" class="block w-full min-w-0 px-3 pt-2 pb-3 text-left" @click="openEdit(figurine)">
+          <div class="min-w-0 space-y-1">
+            <p class="truncate font-medium" :title="figurine.isc">{{ figurine.isc }}</p>
+            <p class="truncate text-sm text-muted-foreground" :title="figurine.loadout || undefined">
+              {{ figurine.loadout || '—' }}
+            </p>
+            <div
+              v-if="figurineSilhouette(figurine) || figurine.painter"
+              class="flex min-w-0 items-baseline gap-2 text-sm"
+            >
+              <span
+                class="min-w-0 flex-1 truncate text-muted-foreground"
+                :title="figurineSilhouette(figurine) || undefined"
+              >
+                {{ figurineSilhouette(figurine) }}
+              </span>
+              <span
+                v-if="figurine.painter"
+                class="min-w-0 max-w-[55%] truncate text-right"
+                :title="figurine.painter"
+              >
+                {{ figurine.painter }}
+              </span>
+            </div>
           </div>
         </button>
       </article>

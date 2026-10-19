@@ -113,7 +113,7 @@ function playerInitial(pp: PoolPlayer) {
 }
 
 function isPoolMatchFinished(match: TournamentMatch) {
-  if (match.is_unplayed) return true
+  if (match.is_unplayed) return false
   if (match.status === 'confirmed') return true
   // Forfait déclaré : la partie ne sera pas jouée.
   if (match.is_forfeit && match.status !== 'scheduled') return true

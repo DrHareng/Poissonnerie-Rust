@@ -17,6 +17,7 @@ import { Button } from '@/components/ui/button'
 import {
   canConfirmTournamentMatch,
   canCorrectTournamentMatch,
+  matchIsOpenForPlay,
   formatMatchRecordedDate,
   tournamentMatchScenarioPath,
 } from '@/lib/tournamentMatchDisplay'
@@ -107,9 +108,7 @@ const canStart = computed(
   () =>
     props.canInteract
     && hasBothPlayers.value
-    && props.match.status === 'scheduled'
-    && !props.match.is_forfeit
-    && !props.match.is_unplayed
+    && matchIsOpenForPlay(props.match)
     && props.listsReady
     && !props.match.elo_match_id,
 )
@@ -214,8 +213,7 @@ const opponentArmyId = computed(() => {
 const showMatchOptionsMenu = computed(
   () =>
     hasBothPlayers.value
-    && props.match.status === 'scheduled'
-    && !props.match.is_unplayed
+    && matchIsOpenForPlay(props.match)
     && !correcting.value
     && (Boolean(selfForfeitName.value) || props.isAdmin),
 )
@@ -226,7 +224,7 @@ const showActionsRow = computed(
     && (correcting.value
       || showConfirmButton.value
       || awaitingOpponentValidation.value
-      || (!props.listsReady && props.match.status === 'scheduled' && props.canInteract)),
+      || (!props.listsReady && matchIsOpenForPlay(props.match) && props.canInteract)),
 )
 
 function onConfirm() {
@@ -405,7 +403,7 @@ function matchPlayerLabel(slot: 'player1' | 'player2') {
                   />
                   <template v-if="isAdmin">
                     <DropdownMenuItem
-                      v-if="isPoolMatch"
+                      v-if="isPoolMatch && !match.is_unplayed"
                       :class="menuItemClass"
                       @select="emit('unplayed')"
                     >
@@ -560,7 +558,7 @@ function matchPlayerLabel(slot: 'player1' | 'player2') {
                 />
                 <template v-if="isAdmin">
                   <DropdownMenuItem
-                    v-if="isPoolMatch"
+                    v-if="isPoolMatch && !match.is_unplayed"
                     :class="menuItemClass"
                     @select="emit('unplayed')"
                   >
@@ -632,7 +630,7 @@ function matchPlayerLabel(slot: 'player1' | 'player2') {
       </template>
       <template v-else>
         <p
-          v-if="!listsReady && match.status === 'scheduled'"
+          v-if="!listsReady && matchIsOpenForPlay(match)"
           class="w-full text-sm text-amber-600 dark:text-amber-400"
         >
           {{ listsReadyMessage || 'Listes d’arbre manquantes.' }}

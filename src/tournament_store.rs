@@ -2100,6 +2100,16 @@ impl TournamentStore {
         user_player_name: Option<&str>,
         k_factor: f64,
     ) -> Result<TournamentMatch> {
+        let was_unplayed = {
+            let conn = self.conn.lock().unwrap();
+            self.get_match_in_conn(&conn, match_id)?
+                .context("match introuvable")?
+                .is_unplayed
+        };
+        if was_unplayed {
+            self.reopen_unplayed(match_id)?;
+        }
+
         let conn = self.conn.lock().unwrap();
         let mut tm = self
             .get_match_in_conn(&conn, match_id)?
@@ -2404,14 +2414,12 @@ impl TournamentStore {
             .get_match_in_conn(&conn, match_id)?
             .context("match introuvable")?;
 
-        if !matches!(
+        let still_playable = matches!(
             tm.status,
             TournamentMatchStatus::Scheduled | TournamentMatchStatus::Submitted
-        ) {
+        ) || tm.is_unplayed;
+        if !still_playable {
             bail!("forfait impossible sur un match confirmé");
-        }
-        if tm.is_unplayed {
-            bail!("match déjà marqué non joué");
         }
 
         let p1 = tm.player1.clone().context("joueur 1 manquant")?;
@@ -2529,6 +2537,38 @@ impl TournamentStore {
             self.recompute_tournament_standings(tm.tournament_id, 32.0)?;
         }
 
+        self.get_match(match_id)?.context("match introuvable")
+    }
+
+    /// Remet un match non joué au statut « à jouer » pour une saisie après coup.
+    pub fn reopen_unplayed(&self, match_id: i64) -> Result<TournamentMatch> {
+        let conn = self.conn.lock().unwrap();
+        let tm = self
+            .get_match_in_conn(&conn, match_id)?
+            .context("match introuvable")?;
+        if !tm.is_unplayed {
+            return Ok(tm);
+        }
+
+        conn.execute(
+            "
+            UPDATE tournament_matches SET
+                player1_objectives = 0, player2_objectives = 0,
+                player1_survivors = 0, player2_survivors = 0,
+                player1_tournament_points = 0, player2_tournament_points = 0,
+                outcome = NULL, is_forfeit = 0, is_unplayed = 0, forfeit_player = NULL,
+                player1_elo_delta = 0, player2_elo_delta = 0,
+                player1_rating_used = NULL, player2_rating_used = NULL,
+                elo_applied_at = NULL,
+                status = ?1,
+                submitted_by_user_id = NULL, submitted_at = NULL,
+                confirmed_by_user_id = NULL, confirmed_at = NULL,
+                played_at = NULL
+            WHERE id = ?2
+            ",
+            params![TournamentMatchStatus::Scheduled.as_str(), match_id],
+        )?;
+        drop(conn);
         self.get_match(match_id)?.context("match introuvable")
     }
 
@@ -3158,7 +3198,7 @@ impl TournamentStore {
         self.rebuild_bracket_progression(&conn, tournament_id)
     }
 
-    fn apply_confirmed_match(&self, match_id: i64, _k_factor: f64) -> Result<()> {
+    fn apply_confirmed_match(&self, match_id: i64, k_factor: f64) -> Result<()> {
         let conn = self.conn.lock().unwrap();
         let tm = self
             .get_match_in_conn(&conn, match_id)?
@@ -3170,6 +3210,20 @@ impl TournamentStore {
 
         if tm.is_unplayed {
             return Ok(());
+        }
+
+        // Un résultat de poule saisi après la clôture doit recalculer points et Elo d'arbre.
+        if tm.phase == TournamentPhase::Pool {
+            let pools_finalized = self
+                .get_in_conn(&conn, tm.tournament_id)?
+                .context("tournoi introuvable")?
+                .pools_finalized_at
+                .is_some();
+            if pools_finalized {
+                let tournament_id = tm.tournament_id;
+                drop(conn);
+                return self.recompute_tournament_standings(tournament_id, k_factor);
+            }
         }
 
         if tm.is_forfeit {
@@ -5276,6 +5330,56 @@ mod tests {
         assert_eq!(updated.outcome, Some(MatchOutcome::Draw));
         assert_eq!(updated.player1_tournament_points, 2);
         assert_eq!(updated.player2_tournament_points, 2);
+
+        let _ = fs::remove_file(db_path);
+    }
+
+    #[test]
+    fn reopen_unplayed_match_accepts_a_later_result() {
+        let (db_path, store) = temp_copy_of_db();
+        let before = store.get_match(1).unwrap().unwrap();
+        let conn = store.conn.lock().unwrap();
+        conn.execute(
+            "
+            UPDATE tournament_matches SET
+                player1_objectives = 0, player2_objectives = 0,
+                player1_survivors = 0, player2_survivors = 0,
+                player1_tournament_points = 0, player2_tournament_points = 0,
+                outcome = NULL, is_forfeit = 0, is_unplayed = 1,
+                forfeit_player = NULL, status = 'confirmed',
+                confirmed_by_user_id = 1, confirmed_at = 10, played_at = 10
+            WHERE id = 1
+            ",
+            [],
+        )
+        .unwrap();
+        drop(conn);
+
+        let reopened = store.reopen_unplayed(1).unwrap();
+        assert!(!reopened.is_unplayed);
+        assert_eq!(reopened.status, TournamentMatchStatus::Scheduled);
+        assert!(reopened.outcome.is_none());
+        assert!(reopened.played_at.is_none());
+        assert!(reopened.confirmed_at.is_none());
+
+        let conn = store.conn.lock().unwrap();
+        conn.execute(
+            "
+            UPDATE tournament_matches SET
+                status = 'confirmed', is_unplayed = 1, played_at = 10, confirmed_at = 10
+            WHERE id = 1
+            ",
+            [],
+        )
+        .unwrap();
+        drop(conn);
+
+        let forfeited = store
+            .declare_forfeit(1, before.player2.as_deref().unwrap(), 1, true, None)
+            .unwrap();
+        assert!(forfeited.is_forfeit);
+        assert!(!forfeited.is_unplayed);
+        assert_eq!(forfeited.status, TournamentMatchStatus::Submitted);
 
         let _ = fs::remove_file(db_path);
     }

@@ -18,6 +18,7 @@ import { Button } from '@/components/ui/button'
 import {
   canConfirmTournamentMatch,
   canCorrectTournamentMatch,
+  matchIsOpenForPlay,
   tournamentMatchScenarioPath,
 } from '@/lib/tournamentMatchDisplay'
 import { scoreBadgeMinCh } from '@/lib/matchResultBadges'
@@ -82,9 +83,7 @@ function canStart(match: TournamentMatch) {
   return (
     props.canInteract(match)
     && Boolean(match.player1 && match.player2)
-    && match.status === 'scheduled'
-    && !match.is_forfeit
-    && !match.is_unplayed
+    && matchIsOpenForPlay(match)
     && !match.elo_match_id
     && (props.listsReady?.(match) ?? true)
   )
@@ -154,8 +153,7 @@ function selfForfeitName(match: TournamentMatch) {
 function showMatchOptionsMenu(match: TournamentMatch) {
   return (
     Boolean(match.player1 && match.player2)
-    && match.status === 'scheduled'
-    && !match.is_unplayed
+    && matchIsOpenForPlay(match)
     && !isCorrecting(match)
     && (Boolean(selfForfeitName(match)) || props.isAdmin)
   )
@@ -263,8 +261,7 @@ function showEditRow(match: TournamentMatch) {
   if (isCorrecting(match)) return true
   return (
     props.canInteract(match)
-    && match.status === 'scheduled'
-    && !match.is_unplayed
+    && matchIsOpenForPlay(match)
     && Boolean(props.listsReady)
     && !(props.listsReady?.(match) ?? true)
   )
@@ -455,7 +452,7 @@ watch(
                       />
                       <template v-if="isAdmin">
                         <DropdownMenuItem
-                          v-if="allowUnplayed && match.phase === 'pool'"
+                          v-if="allowUnplayed && match.phase === 'pool' && !match.is_unplayed"
                           :class="menuItemClass"
                           @select="emit('unplayed', match)"
                         >
