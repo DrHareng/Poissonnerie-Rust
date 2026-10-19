@@ -867,18 +867,23 @@ async fn update_prefs(
 
     if let Some(army_id) = payload.tts_army_id {
         if army_id <= 0 {
-            return Err(ApiError::bad_request("sectorielle invalide"));
+            let _: Option<i64> = session
+                .remove(auth::SESSION_TTS_ARMY_ID)
+                .await
+                .map_err(|error| ApiError::bad_request(error.to_string()))?;
+            ui_update.tts_army_id = Some(0);
+        } else {
+            let army = state
+                .armies
+                .get(army_id as u32)
+                .map_err(|error| ApiError::bad_request(error.to_string()))?
+                .ok_or_else(|| ApiError::bad_request("sectorielle introuvable"))?;
+            session
+                .insert(auth::SESSION_TTS_ARMY_ID, i64::from(army.id))
+                .await
+                .map_err(|error| ApiError::bad_request(error.to_string()))?;
+            ui_update.tts_army_id = Some(i64::from(army.id));
         }
-        let army = state
-            .armies
-            .get(army_id as u32)
-            .map_err(|error| ApiError::bad_request(error.to_string()))?
-            .ok_or_else(|| ApiError::bad_request("sectorielle introuvable"))?;
-        session
-            .insert(auth::SESSION_TTS_ARMY_ID, i64::from(army.id))
-            .await
-            .map_err(|error| ApiError::bad_request(error.to_string()))?;
-        ui_update.tts_army_id = Some(i64::from(army.id));
     }
 
     if ui_update.secondary_view_mode.is_none()

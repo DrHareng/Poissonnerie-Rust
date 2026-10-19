@@ -248,7 +248,11 @@ impl UserStore {
         let tournament_completed_view_mode = update
             .tournament_completed_view_mode
             .or(current.tournament_completed_view_mode);
-        let tts_army_id = update.tts_army_id.or(current.tts_army_id);
+        let tts_army_id = match update.tts_army_id {
+            Some(id) if id > 0 => Some(id),
+            Some(_) => None,
+            None => current.tts_army_id,
+        };
 
         conn.execute(
             "

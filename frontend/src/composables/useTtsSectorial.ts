@@ -21,9 +21,14 @@ export function useTtsSectorial() {
   }
 
   function setArmyId(value: string | undefined) {
-    if (!value || value === armyId.value) return
-    armyId.value = value
-    const id = Number(value)
+    const next = value?.trim() || undefined
+    if (next === armyId.value) return
+    armyId.value = next
+    if (!next) {
+      void updatePrefs({ tts_army_id: 0 }).catch(() => {})
+      return
+    }
+    const id = Number(next)
     if (!Number.isInteger(id) || id <= 0) return
     void updatePrefs({ tts_army_id: id }).catch(() => {})
   }

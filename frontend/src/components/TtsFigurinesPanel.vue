@@ -6,6 +6,7 @@ import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import ColorPicker from '@/components/ColorPicker.vue'
+import PlayerPicker from '@/components/PlayerPicker.vue'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { useAdminEditMode } from '@/composables/useAdminEditMode'
@@ -38,12 +39,17 @@ const props = defineProps<{
   armyId?: string
 }>()
 
+const emit = defineEmits<{
+  saved: []
+}>()
+
 const { setCustomSide } = useAppSidePanel()
 const { canEditContent } = useAdminEditMode()
 
 const figurines = ref<TtsFigurine[]>([])
 const labels = ref<FigurineLabel[]>([])
 const search = defineModel<string>('search', { default: '' })
+const painterFilter = defineModel<string>('painter', { default: '' })
 const loading = ref(true)
 const loadError = ref('')
 const saving = ref(false)
@@ -62,20 +68,31 @@ const photoFile = ref<File | null>(null)
 const photoPreview = ref('')
 const existingPhoto = ref('')
 const removeExistingPhoto = ref(false)
-const iscFocused = ref(false)
-const loadoutFocused = ref(false)
 const fileInput = ref<HTMLInputElement | null>(null)
 
-const inSectorial = computed(() => {
-  if (!props.armyId) return []
-  const known = new Set(labels.value.map((label) => label.isc.trim().toLowerCase()))
-  return figurines.value.filter((figurine) => known.has(figurine.isc.trim().toLowerCase()))
+const painterOptions = computed(() =>
+  uniqueSorted(figurines.value.map((figurine) => figurine.painter)),
+)
+
+const inScope = computed(() => {
+  const painter = painterFilter.value.trim().toLowerCase()
+  let rows = figurines.value
+  if (props.armyId) {
+    const known = new Set(labels.value.map((label) => label.isc.trim().toLowerCase()))
+    rows = rows.filter((figurine) => known.has(figurine.isc.trim().toLowerCase()))
+  } else if (!painter) {
+    return []
+  }
+  if (painter) {
+    rows = rows.filter((figurine) => figurine.painter.trim().toLowerCase() === painter)
+  }
+  return rows
 })
 
 const filtered = computed(() => {
   const needle = search.value.trim().toLowerCase()
-  if (!needle) return inSectorial.value
-  return inSectorial.value.filter((figurine) =>
+  if (!needle) return inScope.value
+  return inScope.value.filter((figurine) =>
     [figurine.isc, figurine.loadout, figurine.painter, figurine.asset_bundle_url]
       .join(' ')
       .toLowerCase()
@@ -83,19 +100,18 @@ const filtered = computed(() => {
   )
 })
 
-const iscOptions = computed(() => uniqueMatches(labels.value.map((label) => label.isc), draft.value.isc))
+const iscPickerOptions = computed(() => uniqueSorted(labels.value.map((label) => label.isc)))
 
-const loadoutOptions = computed(() => {
+const loadoutPickerOptions = computed(() => {
   const isc = draft.value.isc.trim().toLowerCase()
-  const exact = labels.value.filter((label) => label.isc.toLowerCase() === isc)
-  if (exact.length) {
-    return uniqueMatches(exact.map((label) => label.loadout), draft.value.loadout, true)
-  }
-  return uniqueMatches(labels.value.map((label) => label.loadout), draft.value.loadout)
+  if (!isc) return []
+  return uniqueSorted(
+    labels.value
+      .filter((label) => label.isc.trim().toLowerCase() === isc)
+      .map((label) => label.loadout)
+      .filter((loadout) => loadout.trim() !== ''),
+  )
 })
-
-const showIscOptions = computed(() => iscFocused.value && iscOptions.value.length > 0)
-const showLoadoutOptions = computed(() => loadoutFocused.value && loadoutOptions.value.length > 0)
 
 const previewSrc = computed(() => photoPreview.value || (!removeExistingPhoto.value ? existingPhoto.value : ''))
 const panelOpen = computed(() => panel.value != null)
@@ -107,22 +123,29 @@ function emptyDraft(): Draft {
   return { isc: '', loadout: '', painter: '', asset_bundle_url: '' }
 }
 
-function uniqueMatches(values: string[], needle: string, listWhenEmpty = false) {
-  const query = needle.trim().toLowerCase()
-  if (!query && !listWhenEmpty) return []
+function uniqueSorted(values: string[]) {
   const seen = new Set<string>()
-  const matches: string[] = []
+  const options: { value: string; label: string }[] = []
   for (const value of values) {
     const trimmed = value.trim()
     if (!trimmed) continue
     const key = trimmed.toLowerCase()
-    if (query && (!key.includes(query) || key === query)) continue
     if (seen.has(key)) continue
     seen.add(key)
-    matches.push(trimmed)
-    if (matches.length >= 8) break
+    options.push({ value: trimmed, label: trimmed })
   }
-  return matches
+  options.sort((left, right) => left.label.localeCompare(right.label, 'fr', { sensitivity: 'base' }))
+  return options
+}
+
+function resetCreateForm() {
+  editingId.value = null
+  draft.value = emptyDraft()
+  draft.value.painter = painterFilter.value.trim()
+  existingPhoto.value = ''
+  removeExistingPhoto.value = false
+  photoFile.value = null
+  revokePreview()
 }
 
 function photoSrc(figurine: TtsFigurine) {
@@ -217,12 +240,7 @@ function downloadFilename(isc: string, loadout: string) {
 
 function openCreate() {
   if (!canEditContent.value) return
-  editingId.value = null
-  draft.value = emptyDraft()
-  existingPhoto.value = ''
-  removeExistingPhoto.value = false
-  photoFile.value = null
-  revokePreview()
+  resetCreateForm()
   panel.value = 'edit'
 }
 
@@ -321,6 +339,10 @@ async function loadFigurines() {
 
 async function save() {
   if (!canEditContent.value) return
+  if (!draft.value.isc.trim()) {
+    toast.error('Choisis un ISC.')
+    return
+  }
   saving.value = true
   const creating = editingId.value == null
   try {
@@ -333,15 +355,30 @@ async function save() {
     let saved = creating
       ? await createTtsFigurine(payload)
       : await updateTtsFigurine(editingId.value as number, payload)
-    editingId.value = saved.id
     if (photoFile.value) {
       saved = await uploadTtsFigurinePhoto(saved.id, photoFile.value)
     } else if (removeExistingPhoto.value && saved.photo_url) {
       saved = await clearTtsFigurinePhoto(saved.id)
     }
     toast.success(creating ? 'Figurine ajoutée' : 'Figurine enregistrée')
-    closePanel()
+    if (creating) {
+      resetCreateForm()
+      panel.value = 'edit'
+    } else {
+      editingId.value = saved.id
+      draft.value = {
+        isc: saved.isc,
+        loadout: saved.loadout,
+        painter: saved.painter,
+        asset_bundle_url: saved.asset_bundle_url,
+      }
+      existingPhoto.value = fullPhotoSrc(saved)
+      removeExistingPhoto.value = false
+      photoFile.value = null
+      revokePreview()
+    }
     await loadFigurines()
+    emit('saved')
   } catch (error) {
     toast.error(error instanceof Error ? error.message : 'Impossible d’enregistrer la figurine')
     await loadFigurines()
@@ -361,31 +398,10 @@ async function removeCurrent() {
     closePanel()
     toast.success('Figurine supprimée')
     await loadFigurines()
+    emit('saved')
   } catch (error) {
     toast.error(error instanceof Error ? error.message : 'Impossible de supprimer la figurine')
   }
-}
-
-function pickIsc(value: string) {
-  draft.value.isc = value
-  iscFocused.value = false
-}
-
-function pickLoadout(value: string) {
-  draft.value.loadout = value
-  loadoutFocused.value = false
-}
-
-function blurIsc() {
-  window.setTimeout(() => {
-    iscFocused.value = false
-  }, 150)
-}
-
-function blurLoadout() {
-  window.setTimeout(() => {
-    loadoutFocused.value = false
-  }, 150)
 }
 
 watch(panelOpen, (open) => setCustomSide(open), { immediate: true })
@@ -393,6 +409,25 @@ watch(panelOpen, (open) => setCustomSide(open), { immediate: true })
 watch(canEditContent, (canEdit) => {
   if (!canEdit && panel.value === 'edit' && editingId.value == null) closePanel()
 })
+
+watch(
+  () => draft.value.isc,
+  (isc) => {
+    const key = isc.trim().toLowerCase()
+    if (!key) {
+      draft.value.loadout = ''
+      return
+    }
+    const allowed = new Set(
+      labels.value
+        .filter((label) => label.isc.trim().toLowerCase() === key)
+        .map((label) => label.loadout.trim().toLowerCase()),
+    )
+    if (draft.value.loadout && !allowed.has(draft.value.loadout.trim().toLowerCase())) {
+      draft.value.loadout = ''
+    }
+  },
+)
 
 watch(() => props.armyId, () => {
   search.value = ''
@@ -549,57 +584,40 @@ onBeforeUnmount(() => {
       <CardContent class="min-h-0 flex-1 space-y-4 overflow-y-auto pt-0">
         <form class="space-y-4" @submit.prevent="save">
           <div class="space-y-1.5">
-            <Label for="fig-isc">ISC</Label>
-            <Input
-              id="fig-isc"
-              v-model="draft.isc"
-              autocomplete="off"
-              required
+            <Label>ISC</Label>
+            <PlayerPicker
+              :model-value="draft.isc || undefined"
+              :options="iscPickerOptions"
               :disabled="!canEditContent"
-              @focus="iscFocused = true"
-              @blur="blurIsc"
+              placeholder="Choisir un ISC"
+              empty-message="Aucun ISC dans cette sectorielle."
+              @update:model-value="draft.isc = $event ?? ''"
             />
-            <div v-if="canEditContent && showIscOptions" class="flex flex-wrap gap-1">
-              <Button
-                v-for="option in iscOptions"
-                :key="option"
-                type="button"
-                variant="outline"
-                size="xs"
-                @mousedown.prevent="pickIsc(option)"
-              >
-                {{ option }}
-              </Button>
-            </div>
           </div>
 
           <div class="space-y-1.5">
-            <Label for="fig-loadout">Loadout</Label>
-            <Input
-              id="fig-loadout"
-              v-model="draft.loadout"
-              autocomplete="off"
-              :disabled="!canEditContent"
-              @focus="loadoutFocused = true"
-              @blur="blurLoadout"
+            <Label>Loadout</Label>
+            <PlayerPicker
+              :model-value="draft.loadout || undefined"
+              :options="loadoutPickerOptions"
+              :disabled="!canEditContent || !draft.isc"
+              placeholder="Choisir un loadout"
+              empty-message="Aucun loadout pour cet ISC."
+              @update:model-value="draft.loadout = $event ?? ''"
             />
-            <div v-if="canEditContent && showLoadoutOptions" class="flex flex-wrap gap-1">
-              <Button
-                v-for="option in loadoutOptions"
-                :key="option"
-                type="button"
-                variant="outline"
-                size="xs"
-                @mousedown.prevent="pickLoadout(option)"
-              >
-                {{ option }}
-              </Button>
-            </div>
           </div>
 
           <div class="space-y-1.5">
-            <Label for="fig-painter">Peintre</Label>
-            <Input id="fig-painter" v-model="draft.painter" autocomplete="off" :disabled="!canEditContent" />
+            <Label>Peintre</Label>
+            <PlayerPicker
+              :model-value="draft.painter || undefined"
+              :options="painterOptions"
+              :disabled="!canEditContent"
+              allow-custom
+              placeholder="Choisir ou saisir un peintre"
+              empty-message="Aucun peintre connu."
+              @update:model-value="draft.painter = $event ?? ''"
+            />
           </div>
 
           <div class="space-y-1.5">
@@ -680,15 +698,21 @@ onBeforeUnmount(() => {
 
     <p v-else-if="loading" class="text-sm text-muted-foreground">Chargement...</p>
 
-    <p v-else-if="!armyId" class="text-sm text-muted-foreground">
-      Choisis une sectorielle pour afficher ses figurines.
+    <p v-else-if="!armyId && !painterFilter.trim()" class="text-sm text-muted-foreground">
+      Choisis une sectorielle ou un peintre pour afficher les figurines.
     </p>
 
     <p v-else-if="!filtered.length" class="text-sm text-muted-foreground">
-      {{ inSectorial.length ? 'Aucune figurine ne correspond.' : 'Aucune figurine pour cette sectorielle.' }}
+      {{
+        inScope.length
+          ? 'Aucune figurine ne correspond.'
+          : armyId
+            ? 'Aucune figurine pour cette sectorielle.'
+            : 'Aucune figurine pour ce peintre.'
+      }}
     </p>
 
-    <div v-else class="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+    <div v-else class="grid grid-cols-2 gap-3 lg:grid-cols-4">
       <article
         v-for="figurine in filtered"
         :key="figurine.id"

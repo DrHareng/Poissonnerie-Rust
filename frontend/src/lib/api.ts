@@ -290,6 +290,7 @@ export function updatePrefs(payload: {
   army_sort_mode?: ArmySortMode
   player_sort_mode?: PlayerSortMode
   tournament_completed_view_mode?: TournamentCompletedViewMode
+  /** `0` efface la sectorielle TTS mémorisée. */
   tts_army_id?: number
 }): Promise<UserPrefs> {
   return request<UserPrefs>('/api/prefs', {
