@@ -1,6 +1,9 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { RouterLink } from 'vue-router'
+import { Box } from '@lucide/vue'
 import { toast } from 'vue-sonner'
+import ArmyLogo from '@/components/ArmyLogo.vue'
 import SectorialPicker from '@/components/SectorialPicker.vue'
 import ProfileTraitBlock from '@/components/ProfileTraitBlock.vue'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
@@ -29,9 +32,16 @@ import {
 import type { Army, TtsProfileDetail, TtsProfileForm, TtsProfileSummary } from '@/types/elo'
 import { isListableArmy } from '@/lib/army'
 
-const props = defineProps<{
+type FigFilter = 'tous' | 'avec' | 'sans'
+
+const props = withDefaults(defineProps<{
   armyId?: string
-}>()
+  figFilter?: FigFilter
+  figurineIscs?: string[]
+}>(), {
+  figFilter: 'tous',
+  figurineIscs: () => [],
+})
 
 const { armies, ensureLoaded } = useArmies()
 const { setCustomSide } = useAppSidePanel()
@@ -55,15 +65,33 @@ const pickerArmies = computed(() => {
     .filter((army) => isListableArmy(army))
 })
 
+const figurineIscSet = computed(() =>
+  new Set(props.figurineIscs.map((isc) => isc.trim().toLowerCase()).filter(Boolean)),
+)
+
 function isSpecialOps(profile: { isc: string }) {
   const name = profile.isc.toLowerCase()
   return name.includes('team-ops') || name.includes('team ops') || name.includes('spec-ops') || name.includes('spec ops')
+}
+
+function hasFigurine(profile: { isc: string }) {
+  return figurineIscSet.value.has(profile.isc.trim().toLowerCase())
+}
+
+function figurinesLink(profile: { isc: string }) {
+  const query: Record<string, string> = {
+    recherche: profile.isc.trim(),
+  }
+  if (props.armyId?.trim()) query.sectorielle = props.armyId.trim()
+  return { name: 'profils-figs-figs' as const, query }
 }
 
 const filteredProfiles = computed(() => {
   const needle = search.value.trim().toLowerCase()
   return profiles.value.filter((profile) => {
     if (!showSpecialOps.value && isSpecialOps(profile)) return false
+    if (props.figFilter === 'avec' && !hasFigurine(profile)) return false
+    if (props.figFilter === 'sans' && hasFigurine(profile)) return false
     if (!needle) return true
     return [profile.isc, profile.loadout, profile.nom_tts, profile.marker_name ?? '', profile.differences]
       .join(' ')
@@ -114,7 +142,6 @@ onMounted(async () => {
 })
 
 watch(() => props.armyId, () => {
-  search.value = ''
   void loadProfiles()
 }, { immediate: true })
 
@@ -251,10 +278,15 @@ onBeforeUnmount(() => setCustomSide(false))
       </CardHeader>
       <CardContent class="min-h-0 flex-1 space-y-4 overflow-y-auto pt-0 text-sm">
         <p>{{ silhouetteLabel(detail) }}</p>
-        <p v-if="detail.sectorial_ids.length">
+        <div v-if="detail.sectorial_ids.length" class="flex flex-wrap items-center gap-2">
           <span class="text-muted-foreground">Sectorielles</span>
-          {{ detail.sectorial_ids.map(armyName).join(', ') }}
-        </p>
+          <ArmyLogo
+            v-for="id in detail.sectorial_ids"
+            :key="id"
+            :army-id="id"
+            :title="armyName(id)"
+          />
+        </div>
         <ProfileTraitBlock :traits="detail.traits" />
         <ProfileTraitBlock
           v-for="form in detail.forms"
@@ -295,12 +327,14 @@ onBeforeUnmount(() => setCustomSide(false))
       <Table class="table-fixed border-separate border-spacing-0">
         <colgroup>
           <col style="width: 25%" />
-          <col style="width: 75%" />
+          <col />
+          <col style="width: 2.75rem" />
         </colgroup>
         <TableHeader>
           <TableRow>
             <TableHead class="sticky top-0 z-20 w-1/4 border-b border-border bg-background whitespace-normal">ISC</TableHead>
-            <TableHead class="sticky top-0 z-20 w-3/4 border-b border-border bg-background whitespace-normal">Loadout</TableHead>
+            <TableHead class="sticky top-0 z-20 border-b border-border bg-background whitespace-normal">Loadout</TableHead>
+            <TableHead class="sticky top-0 z-20 w-10 border-b border-border bg-background text-center">Fig</TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
@@ -320,8 +354,25 @@ onBeforeUnmount(() => setCustomSide(false))
                 {{ row.profile.isc }}
               </div>
             </TableCell>
-            <TableCell class="w-3/4 border-b border-border whitespace-normal">
+            <TableCell class="border-b border-border whitespace-normal">
               {{ row.profile.loadout || '—' }}
+            </TableCell>
+            <TableCell
+              v-if="row.showIsc"
+              :rowspan="row.iscSpan"
+              class="w-10 border-b border-border bg-background text-center align-top"
+            >
+              <div class="sticky top-10 z-10 flex justify-center bg-background py-0.5">
+                <RouterLink
+                  v-if="hasFigurine(row.profile)"
+                  :to="figurinesLink(row.profile)"
+                  class="text-muted-foreground hover:text-foreground inline-flex size-7 items-center justify-center rounded-md"
+                  title="Voir les figurines"
+                  @click.stop
+                >
+                  <Box class="size-4" />
+                </RouterLink>
+              </div>
             </TableCell>
           </TableRow>
         </TableBody>
@@ -349,12 +400,14 @@ onBeforeUnmount(() => setCustomSide(false))
             v-for="id in draftSectorialIds"
             :key="id"
             class="inline-flex items-center gap-1 rounded-full border border-border px-2 py-0.5 text-sm"
+            :title="armyName(id)"
           >
-            {{ armyName(id) }}
+            <ArmyLogo :army-id="id" :title="armyName(id)" />
             <button
               v-if="canEditContent"
               type="button"
               class="text-muted-foreground"
+              :aria-label="`Retirer ${armyName(id)}`"
               @click="removeSectorial(id)"
             >×</button>
           </span>
