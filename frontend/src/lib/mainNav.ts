@@ -80,7 +80,6 @@ export const mainNavLinks: MainNavLink[] = [
     to: '/profils-figs/profils',
     label: 'Profils & figs',
     icon: Boxes,
-    adminOnly: true,
     children: [
       { to: { name: 'profils-figs-profils' }, label: 'Profils' },
       { to: { name: 'profils-figs-figs' }, label: 'Figs 3D' },

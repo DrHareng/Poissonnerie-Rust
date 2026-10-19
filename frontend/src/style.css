@@ -263,6 +263,10 @@
     @apply inline-flex items-center gap-2 rounded-md border border-transparent px-4 py-2 text-sm font-medium text-muted-foreground no-underline transition-colors;
   }
 
+  .topbar-link-icon {
+    @apply px-2.5;
+  }
+
   .topbar-link:hover {
     @apply border-primary/30 bg-primary/10 text-primary;
   }

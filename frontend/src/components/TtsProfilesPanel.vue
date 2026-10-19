@@ -16,6 +16,7 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
+import { useAdminEditMode } from '@/composables/useAdminEditMode'
 import { useArmies } from '@/composables/useArmies'
 import { useAppSidePanel } from '@/composables/useAppSidePanel'
 import { silhouetteKind } from '@/lib/silhouetteKind'
@@ -30,6 +31,7 @@ import { isListableArmy } from '@/lib/army'
 
 const { armies, ensureLoaded } = useArmies()
 const { setCustomSide } = useAppSidePanel()
+const { canEditContent } = useAdminEditMode()
 
 const selectedArmyId = ref<string>()
 const showSpecialOps = ref(false)
@@ -161,7 +163,7 @@ function emptyToNull(value: string) {
 }
 
 async function saveProfile() {
-  if (!draft.value) return
+  if (!canEditContent.value || !draft.value) return
   saving.value = true
   try {
     const payload = {
@@ -211,6 +213,7 @@ function armyName(id: number) {
 }
 
 function addSectorial() {
+  if (!canEditContent.value) return
   const id = Number(addArmyId.value)
   if (!id || draftSectorialIds.value.includes(id)) return
   draftSectorialIds.value = [...draftSectorialIds.value, id]
@@ -218,6 +221,7 @@ function addSectorial() {
 }
 
 function removeSectorial(id: number) {
+  if (!canEditContent.value) return
   draftSectorialIds.value = draftSectorialIds.value.filter((armyId) => armyId !== id)
 }
 
@@ -350,11 +354,12 @@ onBeforeUnmount(() => setCustomSide(false))
       class="grid gap-4 rounded-lg border border-border p-4"
       @submit.prevent="saveProfile"
     >
+      <fieldset :disabled="!canEditContent" class="m-0 grid min-w-0 gap-4 border-0 p-0">
       <div class="grid gap-2">
         <Label>Sectorielles associées</Label>
         <p class="text-xs text-muted-foreground">
           Catalogue d’origine : {{ draft.faction_label || 'sans faction' }}.
-          Tu peux lier ce profil à plusieurs sectorielles.
+          <template v-if="canEditContent">Tu peux lier ce profil à plusieurs sectorielles.</template>
         </p>
         <div v-if="draftSectorialIds.length" class="flex flex-wrap gap-2">
           <span
@@ -363,11 +368,16 @@ onBeforeUnmount(() => setCustomSide(false))
             class="inline-flex items-center gap-1 rounded-full border border-border px-2 py-0.5 text-sm"
           >
             {{ armyName(id) }}
-            <button type="button" class="text-muted-foreground" @click="removeSectorial(id)">×</button>
+            <button
+              v-if="canEditContent"
+              type="button"
+              class="text-muted-foreground"
+              @click="removeSectorial(id)"
+            >×</button>
           </span>
         </div>
         <p v-else class="text-sm text-muted-foreground">Aucune sectorielle associée.</p>
-        <div class="flex flex-col gap-2 sm:flex-row sm:items-end">
+        <div v-if="canEditContent" class="flex flex-col gap-2 sm:flex-row sm:items-end">
           <div class="min-w-0 flex-1">
             <SectorialPicker
               v-model="addArmyId"
@@ -495,7 +505,8 @@ onBeforeUnmount(() => setCustomSide(false))
         </article>
       </div>
 
-      <div>
+      </fieldset>
+      <div v-if="canEditContent">
         <Button type="submit" :disabled="saving">
           {{ saving ? 'Enregistrement…' : 'Enregistrer' }}
         </Button>

@@ -88,9 +88,7 @@ async fn require_admin(state: &AppState, session: &Session) -> Result<User, ApiE
 
 async fn list_profile_armies(
     State(state): State<AppState>,
-    session: Session,
 ) -> Result<Json<Vec<TtsProfileArmyCount>>, ApiError> {
-    require_admin(&state, &session).await?;
     state
         .tts_profiles
         .army_counts()
@@ -100,9 +98,7 @@ async fn list_profile_armies(
 
 async fn list_profile_labels(
     State(state): State<AppState>,
-    session: Session,
 ) -> Result<Json<Vec<TtsProfileLabel>>, ApiError> {
-    require_admin(&state, &session).await?;
     state
         .tts_profiles
         .list_labels()
@@ -112,10 +108,8 @@ async fn list_profile_labels(
 
 async fn list_profiles(
     State(state): State<AppState>,
-    session: Session,
     Query(query): Query<ListProfilesQuery>,
 ) -> Result<Json<Vec<TtsProfileSummary>>, ApiError> {
-    require_admin(&state, &session).await?;
     let filter = profile_query(&state, &query)?;
     state
         .tts_profiles
@@ -158,10 +152,8 @@ fn profile_query(
 
 async fn get_profile(
     State(state): State<AppState>,
-    session: Session,
     Path(id): Path<i64>,
 ) -> Result<Json<TtsProfileDetail>, ApiError> {
-    require_admin(&state, &session).await?;
     state
         .tts_profiles
         .get(id)

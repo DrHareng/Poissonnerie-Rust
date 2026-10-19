@@ -93,9 +93,7 @@ async fn require_admin(state: &AppState, session: &Session) -> Result<User, ApiE
 
 async fn list_figurines(
     State(state): State<AppState>,
-    session: Session,
 ) -> Result<Json<Vec<TtsFigurine>>, ApiError> {
-    require_admin(&state, &session).await?;
     state
         .tts_figurines
         .list()
@@ -173,11 +171,9 @@ async fn clear_photo(
 
 async fn serve_photo(
     State(state): State<AppState>,
-    session: Session,
     Path(id): Path<i64>,
     Query(query): Query<PhotoQuery>,
 ) -> Result<Response, ApiError> {
-    require_admin(&state, &session).await?;
     let Some(path) = state
         .tts_figurines
         .photo_file_path(id)

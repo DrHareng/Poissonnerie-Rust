@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { useAdminEditMode } from '@/composables/useAdminEditMode'
 import { useAppSidePanel } from '@/composables/useAppSidePanel'
 import {
   clearTtsFigurinePhoto,
@@ -22,6 +23,7 @@ import type { TtsFigurine, TtsFigurineWrite, TtsProfileLabel } from '@/types/elo
 type Draft = TtsFigurineWrite
 
 const { setCustomSide } = useAppSidePanel()
+const { canEditContent } = useAdminEditMode()
 
 const figurines = ref<TtsFigurine[]>([])
 const labels = ref<TtsProfileLabel[]>([])
@@ -105,6 +107,7 @@ function revokePreview() {
 }
 
 function setPhoto(file: File) {
+  if (!canEditContent.value) return
   revokePreview()
   photoFile.value = file
   removeExistingPhoto.value = false
@@ -137,6 +140,7 @@ function onDrop(event: DragEvent) {
 }
 
 function openCreate() {
+  if (!canEditContent.value) return
   editingId.value = null
   draft.value = emptyDraft()
   existingPhoto.value = ''
@@ -168,6 +172,7 @@ function closePanel() {
 }
 
 function forgetPhoto() {
+  if (!canEditContent.value) return
   photoFile.value = null
   revokePreview()
   if (existingPhoto.value) removeExistingPhoto.value = true
@@ -186,6 +191,7 @@ async function loadFigurines() {
 }
 
 async function save() {
+  if (!canEditContent.value) return
   saving.value = true
   const creating = editingId.value == null
   try {
@@ -216,6 +222,7 @@ async function save() {
 }
 
 async function removeCurrent() {
+  if (!canEditContent.value) return
   const id = editingId.value
   if (id == null) return
   const name = [draft.value.isc, draft.value.loadout].filter(Boolean).join(' · ') || 'cette figurine'
@@ -254,6 +261,10 @@ function blurLoadout() {
 
 watch(panelOpen, (open) => setCustomSide(open), { immediate: true })
 
+watch(canEditContent, (canEdit) => {
+  if (!canEdit && editingId.value == null) closePanel()
+})
+
 onMounted(async () => {
   await loadFigurines()
   try {
@@ -280,7 +291,7 @@ onBeforeUnmount(() => {
         <div class="flex items-start justify-between gap-2">
           <div class="min-w-0">
             <CardTitle>{{ editingId == null ? 'Nouvelle figurine' : draft.isc || 'Figurine' }}</CardTitle>
-            <CardDescription>Colle une capture dans cette fiche (Ctrl+V).</CardDescription>
+            <CardDescription v-if="canEditContent">Colle une capture dans cette fiche (Ctrl+V).</CardDescription>
           </div>
           <Button type="button" variant="ghost" size="sm" @click="closePanel">Fermer</Button>
         </div>
@@ -294,10 +305,11 @@ onBeforeUnmount(() => {
               v-model="draft.isc"
               autocomplete="off"
               required
+              :disabled="!canEditContent"
               @focus="iscFocused = true"
               @blur="blurIsc"
             />
-            <div v-if="showIscOptions" class="flex flex-wrap gap-1">
+            <div v-if="canEditContent && showIscOptions" class="flex flex-wrap gap-1">
               <Button
                 v-for="option in iscOptions"
                 :key="option"
@@ -317,10 +329,11 @@ onBeforeUnmount(() => {
               id="fig-loadout"
               v-model="draft.loadout"
               autocomplete="off"
+              :disabled="!canEditContent"
               @focus="loadoutFocused = true"
               @blur="blurLoadout"
             />
-            <div v-if="showLoadoutOptions" class="flex flex-wrap gap-1">
+            <div v-if="canEditContent && showLoadoutOptions" class="flex flex-wrap gap-1">
               <Button
                 v-for="option in loadoutOptions"
                 :key="option"
@@ -336,7 +349,7 @@ onBeforeUnmount(() => {
 
           <div class="space-y-1.5">
             <Label for="fig-painter">Peintre</Label>
-            <Input id="fig-painter" v-model="draft.painter" autocomplete="off" />
+            <Input id="fig-painter" v-model="draft.painter" autocomplete="off" :disabled="!canEditContent" />
           </div>
 
           <div class="space-y-1.5">
@@ -349,6 +362,7 @@ onBeforeUnmount(() => {
               autocomplete="off"
               spellcheck="false"
               placeholder="https://"
+              :disabled="!canEditContent"
             />
           </div>
 
@@ -357,7 +371,8 @@ onBeforeUnmount(() => {
             <button
               type="button"
               class="flex min-h-36 w-full flex-col items-center justify-center gap-2 rounded-lg border border-dashed border-border bg-muted/20 px-3 py-4 text-center text-sm text-muted-foreground"
-              @click="fileInput?.click()"
+              :disabled="!canEditContent"
+              @click="canEditContent && fileInput?.click()"
               @dragover.prevent
               @drop.prevent="onDrop"
             >
@@ -367,7 +382,8 @@ onBeforeUnmount(() => {
                 alt="Aperçu de la figurine"
                 class="max-h-48 w-full object-contain"
               />
-              <span v-else>Colle une capture, ou clique pour choisir un fichier.</span>
+              <span v-else-if="canEditContent">Colle une capture, ou clique pour choisir un fichier.</span>
+              <span v-else>Aucune photo.</span>
             </button>
             <input
               ref="fileInput"
@@ -377,7 +393,7 @@ onBeforeUnmount(() => {
               @change="onFileChange"
             />
             <Button
-              v-if="previewSrc"
+              v-if="canEditContent && previewSrc"
               type="button"
               variant="ghost"
               size="xs"
@@ -387,7 +403,7 @@ onBeforeUnmount(() => {
             </Button>
           </div>
 
-          <div class="flex flex-wrap gap-2">
+          <div v-if="canEditContent" class="flex flex-wrap gap-2">
             <Button type="submit" :disabled="saving">
               {{ saving ? 'Enregistrement…' : 'Enregistrer' }}
             </Button>
@@ -414,7 +430,7 @@ onBeforeUnmount(() => {
         placeholder="ISC, loadout, peintre…"
         autocomplete="off"
       />
-      <Button type="button" @click="openCreate">Ajouter une figurine</Button>
+      <Button v-if="canEditContent" type="button" @click="openCreate">Ajouter une figurine</Button>
     </div>
 
     <Alert v-if="loadError" variant="destructive" class="neon-panel-accent">

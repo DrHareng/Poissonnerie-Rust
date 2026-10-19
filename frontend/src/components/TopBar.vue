@@ -185,10 +185,14 @@ async function handleLogout() {
           <RouterLink
             :to="link.to"
             class="topbar-link"
-            :class="{ 'topbar-link-active': isLinkActive(link.to) }"
+            :class="{
+              'topbar-link-active': isLinkActive(link.to),
+              'topbar-link-icon': !isLinkActive(link.to),
+            }"
+            :aria-label="isLinkActive(link.to) ? undefined : link.label"
           >
-            <component :is="link.icon" class="size-4" />
-            {{ link.label }}
+            <component :is="link.icon" class="size-4 shrink-0" />
+            <span v-if="isLinkActive(link.to)">{{ link.label }}</span>
           </RouterLink>
           <div
             v-if="link.children && openFlyout === link.to"
