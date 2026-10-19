@@ -1,6 +1,6 @@
 //! Profils TTS lus dans la sauvegarde « Infinity the Game - Models ».
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::fs;
 use std::path::Path;
 use std::sync::Mutex;
@@ -1110,6 +1110,12 @@ impl TtsProfileStore {
         figurine_labels_for_army(&conn, army_id)
     }
 
+    /// Sectorielles (ids) indexées par ISC normalisé (trim + minuscules).
+    pub fn sectorial_ids_by_isc(&self) -> Result<HashMap<String, Vec<i64>>> {
+        let conn = self.conn.lock().unwrap();
+        sectorial_ids_by_isc(&conn)
+    }
+
     pub fn profile_in_army(&self, profile_id: i64, army_id: i64) -> Result<bool> {
         let conn = self.conn.lock().unwrap();
         profile_in_army(&conn, profile_id, army_id)
@@ -1746,6 +1752,51 @@ fn list_traits(
     })?;
     rows.collect::<std::result::Result<Vec<_>, _>>()
         .context("lecture des caractéristiques du profil")
+}
+
+fn sectorial_ids_by_isc(conn: &Connection) -> Result<HashMap<String, Vec<i64>>> {
+    let mut by_isc: HashMap<String, BTreeSet<i64>> = HashMap::new();
+    let mut push = |isc: String, army_id: i64| {
+        let key = isc.trim().to_ascii_lowercase();
+        if key.is_empty() {
+            return;
+        }
+        by_isc.entry(key).or_default().insert(army_id);
+    };
+    let mut stmt = conn.prepare(
+        "
+        SELECT p.isc, s.army_id
+        FROM tts_profiles p
+        JOIN tts_profile_sectorials s ON s.profile_id = p.id
+        ",
+    )?;
+    let profile_rows = stmt.query_map([], |row| {
+        Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
+    })?;
+    for row in profile_rows {
+        let (isc, army_id) = row?;
+        push(isc, army_id);
+    }
+    let mut stmt = conn.prepare(
+        "
+        SELECT f.isc, s.army_id
+        FROM tts_profile_forms f
+        JOIN tts_profiles p ON p.id = f.profile_id
+        JOIN tts_profile_sectorials s ON s.profile_id = p.id
+        WHERE f.state_index = 900
+        ",
+    )?;
+    let form_rows = stmt.query_map([], |row| {
+        Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
+    })?;
+    for row in form_rows {
+        let (isc, army_id) = row?;
+        push(isc, army_id);
+    }
+    Ok(by_isc
+        .into_iter()
+        .map(|(isc, ids)| (isc, ids.into_iter().collect()))
+        .collect())
 }
 
 fn list_sectorial_ids(conn: &Connection, profile_id: i64) -> Result<Vec<i64>> {

@@ -646,6 +646,7 @@ export interface TtsFigurine {
   photo_url: string | null
   created_at: number
   updated_at: number
+  sectorial_ids: number[]
 }
 
 export interface TtsFigurineWrite {

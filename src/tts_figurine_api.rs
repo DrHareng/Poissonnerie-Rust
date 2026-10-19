@@ -315,11 +315,11 @@ fn model_from_form(form: &TtsProfileForm) -> ModelProfile {
 }
 
 async fn list_figurines(State(state): State<AppState>) -> Result<Json<Vec<TtsFigurine>>, ApiError> {
-    state
+    let figurines = state
         .tts_figurines
         .list()
-        .map(Json)
-        .map_err(|error| ApiError::bad_request(error.to_string()))
+        .map_err(|error| ApiError::bad_request(error.to_string()))?;
+    Ok(Json(attach_sectorials(&state, figurines)?))
 }
 
 async fn create_figurine(
@@ -328,11 +328,11 @@ async fn create_figurine(
     Json(body): Json<FigurineBody>,
 ) -> Result<Json<TtsFigurine>, ApiError> {
     require_admin(&state, &session).await?;
-    state
+    let figurine = state
         .tts_figurines
         .create(&body.write())
-        .map(Json)
-        .map_err(|error| ApiError::bad_request(error.to_string()))
+        .map_err(|error| ApiError::bad_request(error.to_string()))?;
+    Ok(Json(attach_sectorial(&state, figurine)?))
 }
 
 async fn update_figurine(
@@ -342,11 +342,11 @@ async fn update_figurine(
     Json(body): Json<FigurineBody>,
 ) -> Result<Json<TtsFigurine>, ApiError> {
     require_admin(&state, &session).await?;
-    state
+    let figurine = state
         .tts_figurines
         .update(id, &body.write())
-        .map(Json)
-        .map_err(|error| ApiError::bad_request(error.to_string()))
+        .map_err(|error| ApiError::bad_request(error.to_string()))?;
+    Ok(Json(attach_sectorial(&state, figurine)?))
 }
 
 async fn delete_figurine(
@@ -370,11 +370,11 @@ async fn upload_photo(
 ) -> Result<Json<TtsFigurine>, ApiError> {
     require_admin(&state, &session).await?;
     let bytes = read_photo(multipart).await?;
-    state
+    let figurine = state
         .tts_figurines
         .set_photo(id, &bytes)
-        .map(Json)
-        .map_err(|error| ApiError::bad_request(error.to_string()))
+        .map_err(|error| ApiError::bad_request(error.to_string()))?;
+    Ok(Json(attach_sectorial(&state, figurine)?))
 }
 
 async fn clear_photo(
@@ -383,11 +383,38 @@ async fn clear_photo(
     Path(id): Path<i64>,
 ) -> Result<Json<TtsFigurine>, ApiError> {
     require_admin(&state, &session).await?;
-    state
+    let figurine = state
         .tts_figurines
         .clear_photo(id)
-        .map(Json)
-        .map_err(|error| ApiError::bad_request(error.to_string()))
+        .map_err(|error| ApiError::bad_request(error.to_string()))?;
+    Ok(Json(attach_sectorial(&state, figurine)?))
+}
+
+fn attach_sectorials(
+    state: &AppState,
+    mut figurines: Vec<TtsFigurine>,
+) -> Result<Vec<TtsFigurine>, ApiError> {
+    let by_isc = state
+        .tts_profiles
+        .sectorial_ids_by_isc()
+        .map_err(|error| ApiError::bad_request(error.to_string()))?;
+    for figurine in &mut figurines {
+        let key = figurine.isc.trim().to_ascii_lowercase();
+        figurine.sectorial_ids = by_isc.get(&key).cloned().unwrap_or_default();
+    }
+    Ok(figurines)
+}
+
+fn attach_sectorial(state: &AppState, mut figurine: TtsFigurine) -> Result<TtsFigurine, ApiError> {
+    let key = figurine.isc.trim().to_ascii_lowercase();
+    figurine.sectorial_ids = state
+        .tts_profiles
+        .sectorial_ids_by_isc()
+        .map_err(|error| ApiError::bad_request(error.to_string()))?
+        .get(&key)
+        .cloned()
+        .unwrap_or_default();
+    Ok(figurine)
 }
 
 async fn serve_photo(

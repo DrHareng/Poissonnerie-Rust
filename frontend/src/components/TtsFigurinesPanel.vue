@@ -5,6 +5,7 @@ import { toast } from 'vue-sonner'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import ArmyLogo from '@/components/ArmyLogo.vue'
 import ColorPicker from '@/components/ColorPicker.vue'
 import PlayerPicker from '@/components/PlayerPicker.vue'
 import { Input } from '@/components/ui/input'
@@ -218,6 +219,10 @@ function figurineSilhouette(figurine: TtsFigurine) {
   const sameIsc = labels.value.filter((label) => label.isc.trim().toLowerCase() === isc && label.silhouette)
   const exact = sameIsc.find((label) => label.loadout.trim().toLowerCase() === loadout)
   return (exact ?? sameIsc[0])?.silhouette ?? ''
+}
+
+function figurineSectorials(figurine: TtsFigurine) {
+  return figurine.sectorial_ids ?? []
 }
 
 function sameText(left: string, right: string) {
@@ -751,8 +756,8 @@ onBeforeUnmount(() => {
               {{ figurine.loadout || '—' }}
             </p>
             <div
-              v-if="figurineSilhouette(figurine) || figurine.painter"
-              class="flex min-w-0 items-baseline gap-2 text-sm"
+              v-if="figurineSilhouette(figurine) || figurineSectorials(figurine).length || figurine.painter"
+              class="flex min-w-0 items-center gap-2 text-sm"
             >
               <span
                 class="min-w-0 flex-1 truncate text-muted-foreground"
@@ -760,13 +765,29 @@ onBeforeUnmount(() => {
               >
                 {{ figurineSilhouette(figurine) }}
               </span>
-              <span
-                v-if="figurine.painter"
-                class="min-w-0 max-w-[55%] truncate text-right"
-                :title="figurine.painter"
+              <div
+                v-if="figurineSectorials(figurine).length || figurine.painter"
+                class="flex min-w-0 shrink-0 items-center justify-end gap-1.5"
               >
-                {{ figurine.painter }}
-              </span>
+                <div
+                  v-if="figurineSectorials(figurine).length"
+                  class="flex max-w-[7.5rem] flex-wrap items-center justify-end gap-0.5"
+                >
+                  <ArmyLogo
+                    v-for="armyId in figurineSectorials(figurine)"
+                    :key="armyId"
+                    :army-id="armyId"
+                    class="!size-4"
+                  />
+                </div>
+                <span
+                  v-if="figurine.painter"
+                  class="min-w-0 max-w-[7rem] truncate text-right"
+                  :title="figurine.painter"
+                >
+                  {{ figurine.painter }}
+                </span>
+              </div>
             </div>
           </div>
         </button>

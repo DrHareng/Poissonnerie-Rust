@@ -35,6 +35,8 @@ pub struct TtsFigurine {
     pub photo_url: Option<String>,
     pub created_at: u64,
     pub updated_at: u64,
+    #[serde(default)]
+    pub sectorial_ids: Vec<i64>,
 }
 
 pub struct TtsFigurineStore {
@@ -250,6 +252,7 @@ fn map_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<TtsFigurine> {
         photo_url: has_photo.then(|| format!("/api/tts-figurines/{id}/photo")),
         created_at: row.get(6)?,
         updated_at: row.get(7)?,
+        sectorial_ids: Vec::new(),
     })
 }
 
