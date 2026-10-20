@@ -844,11 +844,6 @@ const canEditBracket = computed(
     bracketMatches.value.every((match) => match.status !== 'confirmed'),
 )
 
-/** Toutes les poules (groupes + éventuelle poule finale), triées. */
-const sortedPools = computed(() =>
-  [...(detail.value?.pools ?? [])].sort((a, b) => a.position - b.position),
-)
-
 const isRoundOf16Format = computed(
   () =>
     groupPools.value.length === 4
