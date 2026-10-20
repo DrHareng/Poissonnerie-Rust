@@ -131,6 +131,12 @@ pub struct SetBracketScenarioPoolRequest {
 }
 
 #[derive(Debug, Deserialize)]
+pub struct SetFinalPoolScenariosRequest {
+    /// IDs de scénarios A–E selon l'effectif de la poule finale.
+    pub scenario_ids: Vec<i64>,
+}
+
+#[derive(Debug, Deserialize)]
 pub struct SetupPoolsRequest {
     pub pools: Vec<PoolSetup>,
 }
@@ -818,6 +824,7 @@ impl TournamentStore {
             display_status,
             top_four,
             pool_scenarios: self.list_scenarios_in_conn(&conn, id, "pool")?,
+            final_pool_scenarios: self.list_scenarios_in_conn(&conn, id, "final_pool")?,
             bracket_scenario_pool: self.list_scenarios_in_conn(&conn, id, "bracket_pool")?,
             bracket_scenarios: self.list_scenarios_in_conn(&conn, id, "bracket")?,
         }))
@@ -933,6 +940,9 @@ impl TournamentStore {
             && registration.status != RegistrationStatus::Approved
         {
             bail!("cette inscription ne peut plus être modifiée");
+        }
+        if player_has_started_group_pool_match_in_conn(&conn, tournament_id, &tournament, &key)? {
+            bail!("impossible de modifier les listes : un match de poule a déjà démarré");
         }
 
         let list1_opt = crate::army_list::normalize_army_list_code(army_list_1);
@@ -1259,11 +1269,22 @@ impl TournamentStore {
         let tournament = self
             .get_in_conn(&conn, tournament_id)?
             .context("tournoi introuvable")?;
+        if !matches!(
+            tournament.structure,
+            TournamentStructure::PoolsBracket | TournamentStructure::PoolsFinal
+        ) {
+            bail!("ce format n'utilise pas de listes de phase finale");
+        }
         if tournament.pools_finalized_at.is_none() {
-            bail!("les listes d'arbre sont disponibles après la finalisation des poules");
+            bail!("les listes de phase finale sont disponibles après la finalisation des poules");
         }
         if tournament.status == TournamentStatus::Completed {
             bail!("tournoi terminé");
+        }
+
+        let key = normalize_name(player_name);
+        if player_has_started_final_phase_match_in_conn(&conn, tournament_id, &tournament, &key)? {
+            bail!("impossible de modifier les listes : un match de phase finale a déjà démarré");
         }
 
         let list1_entry = get_or_create_in_conn(&conn, &list1)?;
@@ -1272,7 +1293,6 @@ impl TournamentStore {
             .map(|code| get_or_create_in_conn(&conn, code).map(|entry| entry.id))
             .transpose()?;
 
-        let key = normalize_name(player_name);
         let updated = conn.execute(
             "
             UPDATE tournament_registrations
@@ -1966,20 +1986,39 @@ impl TournamentStore {
             bail!("ce format n'utilise pas de matchs de poule");
         }
         let pools = self.list_pools_in_conn(&conn, tournament_id)?;
-        let pool_scenarios = self.list_scenarios_in_conn(&conn, tournament_id, "pool")?;
-        let expected = expected_pool_scenario_count(&tournament);
-        if pool_scenarios.len() < expected {
-            bail!("définissez les {expected} scénarios de poule avant de générer les matchs");
-        }
-        let letter_to_id: HashMap<char, i64> = pool_scenarios
-            .iter()
-            .filter_map(|s| {
-                let letter = s.slot.chars().next()?;
-                Some((letter, s.scenario_id))
-            })
-            .collect();
-
         let regenerate_all = tournament.pools_finalized_at.is_none();
+
+        let group_letter_to_id = if regenerate_all {
+            let pool_scenarios = self.list_scenarios_in_conn(&conn, tournament_id, "pool")?;
+            let expected = expected_pool_scenario_count(&tournament);
+            if pool_scenarios.len() < expected {
+                bail!("définissez les {expected} scénarios de poule avant de générer les matchs");
+            }
+            Some(scenario_letter_map(&pool_scenarios))
+        } else {
+            None
+        };
+
+        let final_letter_to_id = if !regenerate_all
+            && tournament.structure == TournamentStructure::PoolsFinal
+        {
+            let final_pool = pools
+                .iter()
+                .find(|pool| !is_group_pool(&tournament, pool))
+                .context("poule finale introuvable")?;
+            let n = final_pool.players.len().max(2);
+            let expected = pool_scenario_slot_letters(n).len();
+            let final_scenarios = self.list_scenarios_in_conn(&conn, tournament_id, "final_pool")?;
+            if final_scenarios.len() < expected {
+                bail!(
+                    "définissez les {expected} scénarios de poule finale avant de générer les matchs"
+                );
+            }
+            Some(scenario_letter_map(&final_scenarios))
+        } else {
+            None
+        };
+
         let tx = conn.unchecked_transaction()?;
         if regenerate_all {
             tx.execute(
@@ -1989,27 +2028,144 @@ impl TournamentStore {
         }
 
         for pool in &pools {
-            if regenerate_all && !is_group_pool(&tournament, pool) {
-                continue;
-            }
-            if !regenerate_all {
-                let existing: i64 = tx.query_row(
-                    "
-                    SELECT COUNT(*) FROM tournament_matches
-                    WHERE tournament_id = ?1 AND pool_id = ?2
-                    ",
-                    params![tournament_id, pool.id],
-                    |row| row.get(0),
-                )?;
-                if existing > 0 {
+            let is_group = is_group_pool(&tournament, pool);
+            if regenerate_all {
+                if !is_group {
                     continue;
                 }
+                let letter_to_id = group_letter_to_id.as_ref().unwrap();
+                insert_round_robin_matches(&*tx, tournament_id, pool, letter_to_id)?;
+                continue;
             }
-            insert_round_robin_matches(&*tx, tournament_id, pool, &letter_to_id)?;
+            if is_group {
+                continue;
+            }
+            let existing: i64 = tx.query_row(
+                "
+                SELECT COUNT(*) FROM tournament_matches
+                WHERE tournament_id = ?1 AND pool_id = ?2
+                ",
+                params![tournament_id, pool.id],
+                |row| row.get(0),
+            )?;
+            if existing > 0 {
+                continue;
+            }
+            let letter_to_id = final_letter_to_id
+                .as_ref()
+                .context("scénarios de poule finale manquants")?;
+            insert_round_robin_matches(&*tx, tournament_id, pool, letter_to_id)?;
         }
 
         tx.commit()?;
         self.list_matches_in_conn(&conn, tournament_id)
+    }
+
+    pub fn set_final_pool_scenarios(
+        &self,
+        tournament_id: i64,
+        scenario_ids: &[i64],
+    ) -> Result<Vec<TournamentScenarioSlot>> {
+        let conn = self.conn.lock().unwrap();
+        let tournament = self
+            .get_in_conn(&conn, tournament_id)?
+            .context("tournoi introuvable")?;
+        if tournament.structure != TournamentStructure::PoolsFinal {
+            bail!("ce format n'utilise pas de poule finale");
+        }
+        if tournament.pools_finalized_at.is_none() {
+            bail!("finalisez les poules avant de choisir les scénarios de poule finale");
+        }
+        let pools = self.list_pools_in_conn(&conn, tournament_id)?;
+        let final_pool = pools
+            .iter()
+            .find(|pool| !is_group_pool(&tournament, pool))
+            .context("poule finale introuvable")?;
+        let n = final_pool.players.len().max(2);
+        let expected = pool_scenario_slot_letters(n).len();
+        if scenario_ids.len() != expected {
+            bail!("il faut exactement {expected} scénario(s) pour la poule finale");
+        }
+        // Régénération : supprimer les matchs existants de la poule finale.
+        conn.execute(
+            "DELETE FROM tournament_matches WHERE tournament_id = ?1 AND pool_id = ?2",
+            params![tournament_id, final_pool.id],
+        )?;
+        drop(conn);
+        let letters = pool_scenario_slot_letters(expected);
+        let slots: Vec<String> = letters.iter().map(char::to_string).collect();
+        let slot_refs: Vec<&str> = slots.iter().map(String::as_str).collect();
+        self.replace_scenario_kind(tournament_id, "final_pool", scenario_ids, &slot_refs)
+    }
+
+    pub fn draw_final_pool_scenarios(
+        &self,
+        tournament_id: i64,
+    ) -> Result<Vec<TournamentScenarioSlot>> {
+        let conn = self.conn.lock().unwrap();
+        let tournament = self
+            .get_in_conn(&conn, tournament_id)?
+            .context("tournoi introuvable")?;
+        if tournament.structure != TournamentStructure::PoolsFinal {
+            bail!("ce format n'utilise pas de poule finale");
+        }
+        if tournament.pools_finalized_at.is_none() {
+            bail!("finalisez les poules avant de choisir les scénarios de poule finale");
+        }
+        let pools = self.list_pools_in_conn(&conn, tournament_id)?;
+        let final_pool = pools
+            .iter()
+            .find(|pool| !is_group_pool(&tournament, pool))
+            .context("poule finale introuvable")?;
+        let n = final_pool.players.len().max(2);
+        let count = pool_scenario_slot_letters(n).len();
+        drop(conn);
+        let ids = self.pick_random_scenario_ids(count)?;
+        self.set_final_pool_scenarios(tournament_id, &ids)
+    }
+
+    pub fn reroll_final_pool_scenario(
+        &self,
+        tournament_id: i64,
+        letter: &str,
+    ) -> Result<Vec<TournamentScenarioSlot>> {
+        let letter = letter.trim().to_uppercase();
+        let conn = self.conn.lock().unwrap();
+        let tournament = self
+            .get_in_conn(&conn, tournament_id)?
+            .context("tournoi introuvable")?;
+        if tournament.structure != TournamentStructure::PoolsFinal {
+            bail!("ce format n'utilise pas de poule finale");
+        }
+        if tournament.pools_finalized_at.is_none() {
+            bail!("finalisez les poules avant de choisir les scénarios de poule finale");
+        }
+        let pools = self.list_pools_in_conn(&conn, tournament_id)?;
+        let final_pool = pools
+            .iter()
+            .find(|pool| !is_group_pool(&tournament, pool))
+            .context("poule finale introuvable")?;
+        let n = final_pool.players.len().max(2);
+        let allowed = pool_scenario_slot_letters(n);
+        if !allowed.iter().any(|c| c.to_string() == letter) {
+            bail!("lettre de scénario invalide");
+        }
+        let current = self.list_scenarios_in_conn(&conn, tournament_id, "final_pool")?;
+        let used: Vec<i64> = current.iter().map(|s| s.scenario_id).collect();
+        let new_id = self.pick_random_scenario_excluding(&conn, &used)?;
+        conn.execute(
+            "
+            INSERT INTO tournament_scenarios (tournament_id, kind, slot, scenario_id)
+            VALUES (?1, 'final_pool', ?2, ?3)
+            ON CONFLICT(tournament_id, kind, slot) DO UPDATE SET scenario_id = excluded.scenario_id
+            ",
+            params![tournament_id, letter, new_id],
+        )?;
+        conn.execute(
+            "DELETE FROM tournament_matches WHERE tournament_id = ?1 AND pool_id = ?2",
+            params![tournament_id, final_pool.id],
+        )?;
+        self.list_scenarios_in_conn(&conn, tournament_id, "final_pool")
     }
 
     pub fn get_match(&self, match_id: i64) -> Result<Option<TournamentMatch>> {
@@ -4308,7 +4464,6 @@ impl TournamentStore {
             params![tournament_id, "Poule finale", tournament.pool_count + 1,],
         )?;
         let pool_id = conn.last_insert_rowid();
-        let mut players = Vec::new();
         for (seed, player_name) in qualified.iter().enumerate() {
             conn.execute(
                 "
@@ -4322,39 +4477,9 @@ impl TournamentStore {
                     seed as u8,
                 ],
             )?;
-            players.push(PoolPlayer {
-                player_name: player_name.clone(),
-                player_display_name: None,
-                army_id: None,
-                seed: seed as u8,
-                points: 0,
-                objectives: 0,
-                survivors: 0,
-                wins: 0,
-                draws: 0,
-                losses: 0,
-                rating: None,
-                avatar_url: None,
-                army_matches: None,
-            });
         }
 
-        let pool_scenarios = self.list_scenarios_in_conn(conn, tournament_id, "pool")?;
-        let letter_to_id: HashMap<char, i64> = pool_scenarios
-            .iter()
-            .filter_map(|s| {
-                let letter = s.slot.chars().next()?;
-                Some((letter, s.scenario_id))
-            })
-            .collect();
-        let pool = Pool {
-            id: pool_id,
-            tournament_id,
-            name: "Poule finale".into(),
-            position: tournament.pool_count + 1,
-            players,
-        };
-        insert_round_robin_matches(conn, tournament_id, &pool, &letter_to_id)?;
+        // Les matchs de poule finale sont générés après le choix des scénarios `final_pool`.
         Ok(())
     }
 
@@ -4952,6 +5077,136 @@ fn registration_lists_fully_validated(registration: &TournamentRegistration) -> 
 
 fn is_group_pool(tournament: &Tournament, pool: &Pool) -> bool {
     (pool.position as u32) <= u32::from(tournament.pool_count)
+}
+
+fn is_final_pool(tournament: &Tournament, pool: &Pool) -> bool {
+    tournament.structure == TournamentStructure::PoolsFinal && !is_group_pool(tournament, pool)
+}
+
+fn scenario_letter_map(scenarios: &[TournamentScenarioSlot]) -> HashMap<char, i64> {
+    scenarios
+        .iter()
+        .filter_map(|s| {
+            let letter = s.slot.chars().next()?;
+            Some((letter, s.scenario_id))
+        })
+        .collect()
+}
+
+/// Match de poule appartenant à la poule finale (pas une poule de groupe).
+pub fn match_is_final_pool(
+    tournament: &Tournament,
+    pools: &[Pool],
+    tm: &TournamentMatch,
+) -> bool {
+    if tm.phase != TournamentPhase::Pool {
+        return false;
+    }
+    let Some(pool_id) = tm.pool_id else {
+        return false;
+    };
+    pools
+        .iter()
+        .find(|pool| pool.id == pool_id)
+        .is_some_and(|pool| is_final_pool(tournament, pool))
+}
+
+fn player_has_started_group_pool_match_in_conn(
+    conn: &Connection,
+    tournament_id: i64,
+    tournament: &Tournament,
+    player_key: &str,
+) -> Result<bool> {
+    let pools = list_pool_positions_in_conn(conn, tournament_id)?;
+    let group_ids: Vec<i64> = pools
+        .into_iter()
+        .filter(|(_, position)| (*position as u32) <= u32::from(tournament.pool_count))
+        .map(|(id, _)| id)
+        .collect();
+    player_has_started_pool_ids_match_in_conn(conn, tournament_id, player_key, &group_ids)
+}
+
+fn player_has_started_final_phase_match_in_conn(
+    conn: &Connection,
+    tournament_id: i64,
+    tournament: &Tournament,
+    player_key: &str,
+) -> Result<bool> {
+    if tournament.structure.uses_bracket() {
+        let found = conn
+            .query_row(
+                "
+                SELECT 1 FROM tournament_matches
+                WHERE tournament_id = ?1
+                  AND phase != 'pool'
+                  AND elo_match_id IS NOT NULL
+                  AND (player1_name_key = ?2 OR player2_name_key = ?2)
+                LIMIT 1
+                ",
+                params![tournament_id, player_key],
+                |_| Ok(()),
+            )
+            .optional()?;
+        return Ok(found.is_some());
+    }
+    if tournament.structure != TournamentStructure::PoolsFinal {
+        return Ok(false);
+    }
+    let pools = list_pool_positions_in_conn(conn, tournament_id)?;
+    let final_ids: Vec<i64> = pools
+        .into_iter()
+        .filter(|(_, position)| (*position as u32) > u32::from(tournament.pool_count))
+        .map(|(id, _)| id)
+        .collect();
+    player_has_started_pool_ids_match_in_conn(conn, tournament_id, player_key, &final_ids)
+}
+
+fn player_has_started_pool_ids_match_in_conn(
+    conn: &Connection,
+    tournament_id: i64,
+    player_key: &str,
+    pool_ids: &[i64],
+) -> Result<bool> {
+    if pool_ids.is_empty() {
+        return Ok(false);
+    }
+    let placeholders = pool_ids
+        .iter()
+        .map(|_| "?")
+        .collect::<Vec<_>>()
+        .join(", ");
+    let sql = format!(
+        "
+        SELECT 1 FROM tournament_matches
+        WHERE tournament_id = ?
+          AND phase = 'pool'
+          AND elo_match_id IS NOT NULL
+          AND pool_id IN ({placeholders})
+          AND (player1_name_key = ? OR player2_name_key = ?)
+        LIMIT 1
+        "
+    );
+    let mut params: Vec<rusqlite::types::Value> = vec![tournament_id.into()];
+    for id in pool_ids {
+        params.push((*id).into());
+    }
+    params.push(player_key.to_string().into());
+    params.push(player_key.to_string().into());
+    let mut stmt = conn.prepare(&sql)?;
+    let found = stmt
+        .query_row(rusqlite::params_from_iter(params), |_| Ok(()))
+        .optional()?;
+    Ok(found.is_some())
+}
+
+fn list_pool_positions_in_conn(conn: &Connection, tournament_id: i64) -> Result<Vec<(i64, u8)>> {
+    let mut stmt = conn.prepare(
+        "SELECT id, position FROM pools WHERE tournament_id = ?1 ORDER BY position",
+    )?;
+    let rows = stmt.query_map(params![tournament_id], |row| {
+        Ok((row.get::<_, i64>(0)?, row.get::<_, u8>(1)?))
+    })?;
+    rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
 }
 
 fn insert_round_robin_matches(

@@ -218,22 +218,32 @@ function registrationFor(name: string | null | undefined) {
   )
 }
 
+const isFinalPhaseTournamentMatch = computed(() => {
+  const match = tournamentMatch.value
+  const detail = tournamentDetail.value
+  if (!match) return false
+  if (match.phase !== 'pool') return true
+  if (!detail || detail.structure !== 'pools_final' || match.pool_id == null) return false
+  const pool = detail.pools.find((candidate) => candidate.id === match.pool_id)
+  return pool != null && pool.position > detail.pool_count
+})
+
 const tournamentListLabel = computed(() =>
-  tournamentMatch.value?.phase === 'pool' ? 'Liste d’inscription' : 'Liste d’arbre',
+  isFinalPhaseTournamentMatch.value ? 'Liste de phase finale' : 'Liste d’inscription',
 )
 
 const player1HasList2 = computed(() => {
   const reg = registrationFor(player1.value?.name)
   if (!reg) return false
-  if (tournamentMatch.value?.phase === 'pool') return Boolean(reg.has_army_list_2)
-  return Boolean(reg.has_bracket_list_2)
+  if (isFinalPhaseTournamentMatch.value) return Boolean(reg.has_bracket_list_2)
+  return Boolean(reg.has_army_list_2)
 })
 
 const player2HasList2 = computed(() => {
   const reg = registrationFor(player2.value?.name)
   if (!reg) return false
-  if (tournamentMatch.value?.phase === 'pool') return Boolean(reg.has_army_list_2)
-  return Boolean(reg.has_bracket_list_2)
+  if (isFinalPhaseTournamentMatch.value) return Boolean(reg.has_bracket_list_2)
+  return Boolean(reg.has_army_list_2)
 })
 
 const matchupLabel = computed(() => {

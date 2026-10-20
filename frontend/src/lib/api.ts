@@ -1143,6 +1143,32 @@ export function rerollPoolScenario(
   })
 }
 
+export function setFinalPoolScenarios(
+  id: number,
+  scenario_ids: number[],
+): Promise<TournamentScenarioSlot[]> {
+  return request<TournamentScenarioSlot[]>(`/api/tournaments/${id}/final-pool-scenarios`, {
+    method: 'POST',
+    body: JSON.stringify({ scenario_ids }),
+  })
+}
+
+export function drawFinalPoolScenarios(id: number): Promise<TournamentScenarioSlot[]> {
+  return request<TournamentScenarioSlot[]>(`/api/tournaments/${id}/final-pool-scenarios/draw`, {
+    method: 'POST',
+  })
+}
+
+export function rerollFinalPoolScenario(
+  id: number,
+  slot: string,
+): Promise<TournamentScenarioSlot[]> {
+  return request<TournamentScenarioSlot[]>(`/api/tournaments/${id}/final-pool-scenarios/reroll`, {
+    method: 'POST',
+    body: JSON.stringify({ slot }),
+  })
+}
+
 export function setBracketScenarioPool(
   id: number,
   scenario_ids: number[],

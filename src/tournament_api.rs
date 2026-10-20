@@ -22,7 +22,8 @@ use crate::{
 use crate::tournament_store::{
     AdminRegisterRequest, CompleteRegistrationListsRequest, CreateTournamentRequest,
     ForfeitRequest, MatchActor, RegisterRequest, RerollScenarioRequest,
-    SetBracketScenarioPoolRequest, SetPoolScenariosRequest, SetupPoolsRequest, SubmitMatchRequest,
+    SetBracketScenarioPoolRequest, SetFinalPoolScenariosRequest, SetPoolScenariosRequest,
+    SetupPoolsRequest, SubmitMatchRequest,
     UpdateBracketListsRequest, UpdateTournamentDetailsRequest, UpdateTournamentFormatRequest,
 };
 
@@ -402,6 +403,18 @@ pub fn tournament_routes() -> axum::Router<AppState> {
         .route(
             "/api/tournaments/{id}/pool-scenarios/reroll",
             post(reroll_pool_scenario),
+        )
+        .route(
+            "/api/tournaments/{id}/final-pool-scenarios",
+            post(set_final_pool_scenarios),
+        )
+        .route(
+            "/api/tournaments/{id}/final-pool-scenarios/draw",
+            post(draw_final_pool_scenarios),
+        )
+        .route(
+            "/api/tournaments/{id}/final-pool-scenarios/reroll",
+            post(reroll_final_pool_scenario),
         )
         .route(
             "/api/tournaments/{id}/bracket-scenarios",
@@ -1333,6 +1346,47 @@ async fn reroll_pool_scenario(
         .map_err(|error| ApiError::bad_request(error.to_string()))
 }
 
+async fn set_final_pool_scenarios(
+    State(state): State<AppState>,
+    session: Session,
+    Path(id): Path<i64>,
+    Json(payload): Json<SetFinalPoolScenariosRequest>,
+) -> Result<Json<Vec<crate::tournament::TournamentScenarioSlot>>, ApiError> {
+    require_admin(&state, &session).await?;
+    state
+        .tournaments
+        .set_final_pool_scenarios(id, &payload.scenario_ids)
+        .map(Json)
+        .map_err(|error| ApiError::bad_request(error.to_string()))
+}
+
+async fn draw_final_pool_scenarios(
+    State(state): State<AppState>,
+    session: Session,
+    Path(id): Path<i64>,
+) -> Result<Json<Vec<crate::tournament::TournamentScenarioSlot>>, ApiError> {
+    require_admin(&state, &session).await?;
+    state
+        .tournaments
+        .draw_final_pool_scenarios(id)
+        .map(Json)
+        .map_err(|error| ApiError::bad_request(error.to_string()))
+}
+
+async fn reroll_final_pool_scenario(
+    State(state): State<AppState>,
+    session: Session,
+    Path(id): Path<i64>,
+    Json(payload): Json<RerollScenarioRequest>,
+) -> Result<Json<Vec<crate::tournament::TournamentScenarioSlot>>, ApiError> {
+    require_admin(&state, &session).await?;
+    state
+        .tournaments
+        .reroll_final_pool_scenario(id, &payload.slot)
+        .map(Json)
+        .map_err(|error| ApiError::bad_request(error.to_string()))
+}
+
 async fn set_bracket_scenario_pool(
     State(state): State<AppState>,
     session: Session,
@@ -1650,15 +1704,28 @@ async fn start_tournament_partie(
         ));
     }
 
-    if tm.phase != crate::tournament::TournamentPhase::Pool {
-        let r1 = state
-            .tournaments
-            .get_registration_for_player(tm.tournament_id, &p1)
-            .map_err(|error| ApiError::bad_request(error.to_string()))?;
-        let r2 = state
-            .tournaments
-            .get_registration_for_player(tm.tournament_id, &p2)
-            .map_err(|error| ApiError::bad_request(error.to_string()))?;
+    let tournament = state
+        .tournaments
+        .get(tm.tournament_id)
+        .map_err(|error| ApiError::bad_request(error.to_string()))?
+        .ok_or_else(|| ApiError::bad_request("tournoi introuvable"))?;
+    let pools = state
+        .tournaments
+        .list_pools(tm.tournament_id)
+        .map_err(|error| ApiError::bad_request(error.to_string()))?;
+    let is_final_phase = tm.phase != crate::tournament::TournamentPhase::Pool
+        || crate::tournament_store::match_is_final_pool(&tournament, &pools, &tm);
+
+    let r1 = state
+        .tournaments
+        .get_registration_for_player(tm.tournament_id, &p1)
+        .map_err(|error| ApiError::bad_request(error.to_string()))?;
+    let r2 = state
+        .tournaments
+        .get_registration_for_player(tm.tournament_id, &p2)
+        .map_err(|error| ApiError::bad_request(error.to_string()))?;
+
+    if is_final_phase {
         let ready = |reg: &Option<crate::tournament::TournamentRegistration>| {
             reg.as_ref()
                 .and_then(|r| r.bracket_list_1.as_ref())
@@ -1666,18 +1733,10 @@ async fn start_tournament_partie(
         };
         if !ready(&r1) || !ready(&r2) {
             return Err(ApiError::bad_request(
-                "les deux joueurs doivent avoir saisi leurs listes d'arbre",
+                "les deux joueurs doivent avoir saisi leurs listes de phase finale",
             ));
         }
     } else {
-        let r1 = state
-            .tournaments
-            .get_registration_for_player(tm.tournament_id, &p1)
-            .map_err(|error| ApiError::bad_request(error.to_string()))?;
-        let r2 = state
-            .tournaments
-            .get_registration_for_player(tm.tournament_id, &p2)
-            .map_err(|error| ApiError::bad_request(error.to_string()))?;
         let pool_ready = |reg: &Option<crate::tournament::TournamentRegistration>| {
             reg.as_ref().is_some_and(|r| r.lists_fully_validated())
         };

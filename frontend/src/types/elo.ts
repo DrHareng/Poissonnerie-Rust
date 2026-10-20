@@ -408,6 +408,7 @@ export interface TournamentDetail extends Tournament {
   display_status: string
   top_four?: TournamentTopFourEntry[]
   pool_scenarios?: TournamentScenarioSlot[]
+  final_pool_scenarios?: TournamentScenarioSlot[]
   bracket_scenario_pool?: TournamentScenarioSlot[]
   bracket_scenarios?: TournamentScenarioSlot[]
 }

@@ -412,9 +412,9 @@ pub fn army_visible_player_keys(
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct TournamentScenarioSlot {
-    /// `pool`, `bracket_pool` (4 scénarios choisis) ou `bracket` (assignés aux tours).
+    /// `pool`, `final_pool`, `bracket_pool` ou `bracket` (assignés aux tours).
     pub kind: String,
-    /// Lettre A–E (poules), index 0–3 (bracket_pool), ou phase (`round_of_16`, …).
+    /// Lettre A–E (poules / poule finale), index 0–3 (bracket_pool), ou phase (`round_of_16`, …).
     pub slot: String,
     pub scenario_id: i64,
     pub scenario_name: String,
@@ -672,6 +672,9 @@ pub struct TournamentDetail {
     pub top_four: Vec<TournamentTopFourEntry>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub pool_scenarios: Vec<TournamentScenarioSlot>,
+    /// Scénarios de la poule finale (distincts des poules de groupe).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub final_pool_scenarios: Vec<TournamentScenarioSlot>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub bracket_scenario_pool: Vec<TournamentScenarioSlot>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]

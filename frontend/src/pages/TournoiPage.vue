@@ -25,6 +25,7 @@ import {
   registerForTournament,
   reviewRegistration,
   setBracketScenarioPool,
+  setFinalPoolScenarios,
   setPoolScenarios,
   setTournamentListValidator,
   setupTournamentBracket,
@@ -119,6 +120,7 @@ const tournamentScenarioOptions = computed((): ScenarioSummary[] => {
   const items: ScenarioSummary[] = []
   for (const slot of [
     ...(detail.value?.pool_scenarios ?? []),
+    ...(detail.value?.final_pool_scenarios ?? []),
     ...(detail.value?.bracket_scenario_pool ?? []),
     ...(detail.value?.bracket_scenarios ?? []),
   ]) {
@@ -242,6 +244,43 @@ const poolMatches = computed(() =>
   detail.value?.matches.filter((m) => m.phase === 'pool') ?? [],
 )
 
+function isGroupPool(pool: Pool) {
+  const poolCount = detail.value?.pool_count ?? 0
+  return pool.position <= poolCount
+}
+
+function isFinalPool(pool: Pool) {
+  return tournamentStructure.value === 'pools_final' && !isGroupPool(pool)
+}
+
+function isFinalPoolMatch(match: TournamentMatch) {
+  if (match.phase !== 'pool' || match.pool_id == null || !detail.value) return false
+  const pool = detail.value.pools.find((candidate) => candidate.id === match.pool_id)
+  return pool != null && isFinalPool(pool)
+}
+
+function isFinalPhaseMatch(match: TournamentMatch) {
+  return match.phase !== 'pool' || isFinalPoolMatch(match)
+}
+
+const groupPools = computed(() =>
+  [...(detail.value?.pools ?? [])]
+    .filter((pool) => isGroupPool(pool))
+    .sort((a, b) => a.position - b.position),
+)
+
+const finalPool = computed(
+  () => detail.value?.pools.find((pool) => isFinalPool(pool)) ?? null,
+)
+
+const groupPoolMatches = computed(() =>
+  poolMatches.value.filter((match) => !isFinalPoolMatch(match)),
+)
+
+const finalPoolMatches = computed(() =>
+  poolMatches.value.filter((match) => isFinalPoolMatch(match)),
+)
+
 const hasPoolWithoutMatches = computed(() => {
   const ids = new Set(
     poolMatches.value
@@ -252,6 +291,9 @@ const hasPoolWithoutMatches = computed(() => {
 })
 
 const selectedPoolId = ref<number | null>(null)
+
+type SideMatchPhase = 'poules' | 'finale'
+const sideMatchPhase = ref<SideMatchPhase>('poules')
 
 function isMatchPlayed(match: TournamentMatch) {
   return match.status === 'confirmed' && !match.is_unplayed
@@ -275,18 +317,38 @@ const myTournamentMatches = computed(() => {
     })
 })
 
+const showSidePhaseSwitch = computed(
+  () =>
+    !!detail.value?.pools_finalized_at
+    && (tournamentStructure.value === 'pools_final'
+      || tournamentStructure.value === 'pools_bracket'),
+)
+
+const sideFinaleLabel = computed(() =>
+  tournamentStructure.value === 'pools_bracket' ? 'Arbre' : 'Finale',
+)
+
+const mySideMatches = computed(() => {
+  if (!showSidePhaseSwitch.value) return myTournamentMatches.value
+  if (sideMatchPhase.value === 'finale') {
+    return myTournamentMatches.value.filter((match) => isFinalPhaseMatch(match))
+  }
+  return myTournamentMatches.value.filter((match) => !isFinalPhaseMatch(match))
+})
+
 const myUpcomingMatches = computed(() =>
-  myTournamentMatches.value.filter((match) => !isMatchPlayed(match)),
+  mySideMatches.value.filter((match) => !isMatchPlayed(match)),
 )
 
 const myPlayedMatches = computed(() =>
-  myTournamentMatches.value.filter((match) => isMatchPlayed(match)),
+  mySideMatches.value.filter((match) => isMatchPlayed(match)),
 )
 
-type TournamentTabId = 'arbre' | 'poules' | 'inscriptions' | 'maps' | 'admin'
+type TournamentTabId = 'arbre' | 'finale' | 'poules' | 'inscriptions' | 'maps' | 'admin'
 
 const TAB_PRIORITY: TournamentTabId[] = [
   'arbre',
+  'finale',
   'poules',
   'inscriptions',
   'maps',
@@ -303,7 +365,7 @@ const showPoolsOverviewMatches = computed(
 )
 
 const poolOverviewPlayedMatches = computed(() =>
-  poolMatches.value
+  groupPoolMatches.value
     .filter((match) => isMatchPlayed(match))
     .slice()
     .sort((a, b) => {
@@ -350,11 +412,18 @@ const showArbreTab = computed(
       || !!detail.value?.pools_finalized_at),
 )
 
+const showFinaleTab = computed(
+  () =>
+    tournamentStructure.value === 'pools_final'
+    && !!detail.value?.pools_finalized_at
+    && !!finalPool.value,
+)
+
 const showPoulesTab = computed(
   () =>
     tournamentStructure.value === 'swiss'
       ? detail.value?.status === 'started' || detail.value?.status === 'completed'
-      : (detail.value?.pools.length ?? 0) > 0 || canEditPools.value,
+      : groupPools.value.length > 0 || canEditPools.value,
 )
 
 const poolsEndDateLabel = computed(() => {
@@ -433,6 +502,9 @@ const tournamentTabs = computed(() => {
   if (showArbreTab.value) {
     tabs.push({ id: 'arbre', label: "L'arbre" })
   }
+  if (showFinaleTab.value) {
+    tabs.push({ id: 'finale', label: 'Poule finale' })
+  }
   if (showPoulesTab.value) {
     tabs.push({
       id: 'poules',
@@ -462,6 +534,10 @@ function tournamentQuery(tab: TournamentTabId, poolId: number | null = null): Lo
     delete query.poolId
   }
   return query
+}
+
+function setSideMatchPhase(phase: SideMatchPhase) {
+  sideMatchPhase.value = phase
 }
 
 function replaceTournamentQuery(query: LocationQuery) {
@@ -506,7 +582,7 @@ function selectPool(poolId: number) {
 }
 
 function selectedPool() {
-  return sortedPools.value.find((pool) => pool.id === selectedPoolId.value) ?? null
+  return groupPools.value.find((pool) => pool.id === selectedPoolId.value) ?? null
 }
 
 function applyPoolDeepLink() {
@@ -515,7 +591,7 @@ function applyPoolDeepLink() {
   const hasPool =
     Number.isFinite(poolId)
     && poolId > 0
-    && detail.value.pools.some((pool) => pool.id === poolId)
+    && groupPools.value.some((pool) => pool.id === poolId)
   if (hasPool) {
     selectedPoolId.value = poolId
   }
@@ -529,6 +605,13 @@ function applyPoolDeepLink() {
   if (!hasPool) {
     selectedPoolId.value = null
   }
+}
+
+function applyFinaleDeepLink() {
+  if (route.query.tab !== 'finale') return
+  if (!tournamentTabs.value.some((tab) => tab.id === 'finale')) return
+  userPickedTab.value = true
+  activeTab.value = 'finale'
 }
 
 const bracketMatches = computed(() =>
@@ -630,7 +713,7 @@ const adminAddRequiresPool = computed(
 )
 
 const adminPoolOptions = computed(() =>
-  sortedPools.value
+  groupPools.value
     .filter((pool) => (pool.players?.length ?? 0) < 6)
     .map((pool) => ({
       value: String(pool.id),
@@ -748,7 +831,7 @@ const canEditPools = computed(
   () =>
     isAdmin.value &&
     detail.value?.status === 'started' &&
-    poolMatches.value.length === 0 &&
+    groupPoolMatches.value.length === 0 &&
     tournamentStructure.value !== 'swiss',
 )
 
@@ -761,13 +844,14 @@ const canEditBracket = computed(
     bracketMatches.value.every((match) => match.status !== 'confirmed'),
 )
 
+/** Toutes les poules (groupes + éventuelle poule finale), triées. */
 const sortedPools = computed(() =>
   [...(detail.value?.pools ?? [])].sort((a, b) => a.position - b.position),
 )
 
 const isRoundOf16Format = computed(
   () =>
-    sortedPools.value.length === 4
+    groupPools.value.length === 4
     && detail.value?.bracket_format !== 'quarters_direct',
 )
 
@@ -959,10 +1043,32 @@ const needsRegistrationLists = computed(() => {
   return !reg.has_army_lists
 })
 
+const registrationListsLocked = computed(() => {
+  if (!player.value || !detail.value) return false
+  const name = player.value.name.toLowerCase()
+  return groupPoolMatches.value.some(
+    (match) =>
+      match.elo_match_id != null
+      && (match.player1?.toLowerCase() === name || match.player2?.toLowerCase() === name),
+  )
+})
+
+const finalPhaseListsLocked = computed(() => {
+  if (!player.value || !detail.value) return false
+  const name = player.value.name.toLowerCase()
+  return detail.value.matches.some(
+    (match) =>
+      match.elo_match_id != null
+      && isFinalPhaseMatch(match)
+      && (match.player1?.toLowerCase() === name || match.player2?.toLowerCase() === name),
+  )
+})
+
 /** Modifier les listes tant que le tournoi n'est pas terminé (y compris après démarrage). */
 const canEditRegistrationLists = computed(() => {
   if (!myRegistration.value || !detail.value) return false
   if (myRegistration.value.status === 'rejected') return false
+  if (registrationListsLocked.value) return false
   return (
     detail.value.status === 'registration_open'
     || detail.value.status === 'registration_closed'
@@ -1136,7 +1242,7 @@ async function saveBracketLists() {
   const list1 = normalizeArmyListCode(bracketList1.value)
   const list2 = normalizeArmyListCode(bracketList2.value)
   if (!list1) {
-    toast.error('Indiquez le code de la liste d’arbre 1.')
+    toast.error('Indiquez le code de la liste de phase finale 1.')
     return
   }
   if (list2 && list2 === list1) {
@@ -1146,7 +1252,7 @@ async function saveBracketLists() {
   savingBracketLists.value = true
   try {
     await updateMyBracketLists(tournamentId.value, list1, list2)
-    toast.success('Listes d’arbre enregistrées')
+    toast.success('Listes de phase finale enregistrées')
     bracketList1.value = list1
     bracketList2.value = list2
     await refresh()
@@ -1175,6 +1281,19 @@ async function onSavePoolScenarios(ids: number[]) {
   try {
     await setPoolScenarios(tournamentId.value, ids)
     toast.success('Scénarios de poule enregistrés')
+    await refresh()
+  } catch (error) {
+    toast.error(error instanceof Error ? error.message : 'Erreur')
+  } finally {
+    scenarioBusy.value = false
+  }
+}
+
+async function onSaveFinalPoolScenarios(ids: number[]) {
+  scenarioBusy.value = true
+  try {
+    await setFinalPoolScenarios(tournamentId.value, ids)
+    toast.success('Scénarios de poule finale enregistrés')
     await refresh()
   } catch (error) {
     toast.error(error instanceof Error ? error.message : 'Erreur')
@@ -1217,20 +1336,41 @@ const canEditPoolScenarios = computed(
     && !detail.value.pools_finalized_at,
 )
 
+const canEditFinalPoolScenarios = computed(
+  () =>
+    isAdmin.value
+    && tournamentStructure.value === 'pools_final'
+    && !!detail.value?.pools_finalized_at
+    && detail.value.status !== 'completed'
+    && finalPoolMatches.value.every((match) => match.status === 'scheduled' && !match.elo_match_id),
+)
+
 const canEditBracketScenarios = computed(
   () =>
     isAdmin.value
+    && tournamentStructure.value === 'pools_bracket'
     && !!detail.value?.pools_finalized_at
     && detail.value.status !== 'completed',
 )
 
+const finalPoolScenarioSlots = computed(() => {
+  const n = Math.max(2, finalPool.value?.players.length ?? 2)
+  const count = Math.min(26, n)
+  return Array.from({ length: count }, (_, index) => {
+    const letter = String.fromCharCode(65 + index)
+    return { key: letter, label: `Mission ${letter}` }
+  })
+})
+
 const canSubmitBracketLists = computed(
   () =>
-    tournamentStructure.value === 'pools_bracket'
+    (tournamentStructure.value === 'pools_bracket'
+      || tournamentStructure.value === 'pools_final')
     && !!myRegistration.value
     && myRegistration.value.status === 'approved'
     && !!detail.value?.pools_finalized_at
-    && detail.value.status !== 'completed',
+    && detail.value.status !== 'completed'
+    && !finalPhaseListsLocked.value,
 )
 
 watch(
@@ -1305,8 +1445,8 @@ function initManualPools() {
 
   const letters = 'ABCDEFGH'.slice(0, detail.value.pool_count).split('')
 
-  if (detail.value.pools.length > 0) {
-    manualPools.value = detail.value.pools.map((pool) => ({
+  if (groupPools.value.length > 0) {
+    manualPools.value = groupPools.value.map((pool) => ({
       name: pool.name,
       position: pool.position,
       players: pool.players.map((player) => player.player_name),
@@ -1403,7 +1543,7 @@ function poolLetter(pool: Pool, index: number) {
 
 function playerOptionLabel(poolIndex: number, rank: number, player: PoolPlayer) {
   const ordinal = rank === 1 ? '1er' : rank === 2 ? '2ème' : `${rank}ème`
-  const letter = poolLetter(sortedPools.value[poolIndex], poolIndex)
+  const letter = poolLetter(groupPools.value[poolIndex], poolIndex)
   const name = player.player_display_name ?? player.player_name
   return `${ordinal} ${letter} — ${name}`
 }
@@ -1412,7 +1552,7 @@ const qualifiedPlayerOptions = computed(() => {
   if (!detail.value) return []
   const topN = isRoundOf16Format.value ? 3 : 2
   const options: { value: string; label: string }[] = []
-  sortedPools.value.forEach((pool, poolIndex) => {
+  groupPools.value.forEach((pool, poolIndex) => {
     sortedPoolPlayers(pool).slice(0, topN).forEach((pp, rankIndex) => {
       options.push({
         value: pp.player_name,
@@ -1425,7 +1565,7 @@ const qualifiedPlayerOptions = computed(() => {
 
 function defaultBracketSlots(): ManualBracketSlot[] {
   if (!detail.value) return []
-  const ranked = sortedPools.value.map(sortedPoolPlayers)
+  const ranked = groupPools.value.map(sortedPoolPlayers)
   const first = (index: number) => ranked[index]?.[0]?.player_name
   const second = (index: number) => ranked[index]?.[1]?.player_name
   const third = (index: number) => ranked[index]?.[2]?.player_name
@@ -1580,39 +1720,39 @@ function registrationFor(name: string | null | undefined) {
 function matchListsReady(match: TournamentMatch) {
   const r1 = registrationFor(match.player1)
   const r2 = registrationFor(match.player2)
-  if (match.phase === 'pool') {
-    return registrationListsFullyValidated(r1) && registrationListsFullyValidated(r2)
+  if (isFinalPhaseMatch(match)) {
+    return Boolean(r1?.has_bracket_lists && r2?.has_bracket_lists)
   }
-  return Boolean(r1?.has_bracket_lists && r2?.has_bracket_lists)
+  return registrationListsFullyValidated(r1) && registrationListsFullyValidated(r2)
 }
 
 function matchListsReadyMessage(match: TournamentMatch) {
   const missing: string[] = []
-  if (match.phase === 'pool') {
-    if (!registrationListsFullyValidated(registrationFor(match.player1))) {
+  if (isFinalPhaseMatch(match)) {
+    if (!registrationFor(match.player1)?.has_bracket_lists) {
       missing.push(match.player1_display_name ?? match.player1 ?? 'Joueur 1')
     }
-    if (!registrationListsFullyValidated(registrationFor(match.player2))) {
+    if (!registrationFor(match.player2)?.has_bracket_lists) {
       missing.push(match.player2_display_name ?? match.player2 ?? 'Joueur 2')
     }
     if (missing.length === 0) return ''
-    return `Listes non validées pour : ${missing.join(', ')}.`
+    return `Listes de phase finale manquantes pour : ${missing.join(', ')}.`
   }
-  if (!registrationFor(match.player1)?.has_bracket_lists) {
+  if (!registrationListsFullyValidated(registrationFor(match.player1))) {
     missing.push(match.player1_display_name ?? match.player1 ?? 'Joueur 1')
   }
-  if (!registrationFor(match.player2)?.has_bracket_lists) {
+  if (!registrationListsFullyValidated(registrationFor(match.player2))) {
     missing.push(match.player2_display_name ?? match.player2 ?? 'Joueur 2')
   }
   if (missing.length === 0) return ''
-  return `Listes d’arbre manquantes pour : ${missing.join(', ')}.`
+  return `Listes non validées pour : ${missing.join(', ')}.`
 }
 
 function matchHasList2(match: TournamentMatch, slot: 'player1' | 'player2') {
   const reg = registrationFor(slot === 'player1' ? match.player1 : match.player2)
   if (!reg) return false
-  if (match.phase === 'pool') return Boolean(reg.has_army_list_2)
-  return Boolean(reg.has_bracket_list_2)
+  if (isFinalPhaseMatch(match)) return Boolean(reg.has_bracket_list_2)
+  return Boolean(reg.has_army_list_2)
 }
 
 async function startPartie(match: TournamentMatch) {
@@ -1768,6 +1908,7 @@ function matchStatusLabel(match: TournamentMatch) {
 watch(() => tournamentId.value, () => {
   userPickedTab.value = false
   selectedPoolId.value = null
+  sideMatchPhase.value = 'poules'
   void refresh()
 }, { immediate: true })
 watch(tournamentTabs, (tabs) => {
@@ -1775,11 +1916,13 @@ watch(tournamentTabs, (tabs) => {
     activeTab.value = defaultTournamentTab(tabs)
   }
   applyPoolDeepLink()
+  applyFinaleDeepLink()
 }, { immediate: true })
 watch(
   () => [route.query.tab, route.query.poolId, detail.value?.id] as const,
   () => {
     applyPoolDeepLink()
+    applyFinaleDeepLink()
   },
 )
 watch(
@@ -1787,16 +1930,28 @@ watch(
   (active) => setCustomSide(active),
   { immediate: true },
 )
+watch(
+  () => [detail.value?.pools_finalized_at, tournamentStructure.value] as const,
+  () => {
+    if (showSidePhaseSwitch.value) {
+      sideMatchPhase.value = 'finale'
+    } else {
+      sideMatchPhase.value = 'poules'
+    }
+  },
+  { immediate: true },
+)
 watch(detail, () => {
   initManualPools()
   initManualBracket()
   if (
     selectedPoolId.value
-    && !detail.value?.pools.some((pool) => pool.id === selectedPoolId.value)
+    && !groupPools.value.some((pool) => pool.id === selectedPoolId.value)
   ) {
     selectedPoolId.value = null
   }
   applyPoolDeepLink()
+  applyFinaleDeepLink()
 }, { deep: true })
 onMounted(refresh)
 </script>
@@ -1933,41 +2088,127 @@ onMounted(refresh)
             v-else-if="showMyMatchesSide"
             class="flex h-full min-h-0 flex-col gap-3"
           >
+            <nav
+              v-if="showSidePhaseSwitch"
+              class="pool-tabs shrink-0"
+              aria-label="Phase des matchs"
+            >
+              <button
+                type="button"
+                class="pool-tab"
+                :class="{ 'pool-tab--active': sideMatchPhase === 'poules' }"
+                @click="setSideMatchPhase('poules')"
+              >
+                Poules
+              </button>
+              <button
+                type="button"
+                class="pool-tab"
+                :class="{ 'pool-tab--active': sideMatchPhase === 'finale' }"
+                @click="setSideMatchPhase('finale')"
+              >
+                {{ sideFinaleLabel }}
+              </button>
+            </nav>
             <Card class="neon-panel shrink-0">
               <CardHeader class="shrink-0 pb-3">
-                <CardTitle>Mes listes</CardTitle>
+                <CardTitle>
+                  {{
+                    showSidePhaseSwitch && sideMatchPhase === 'finale'
+                      ? 'Listes de phase finale'
+                      : 'Mes listes'
+                  }}
+                </CardTitle>
                 <CardDescription>
-                  Vos listes validées pour ce tournoi.
+                  <template v-if="showSidePhaseSwitch && sideMatchPhase === 'finale'">
+                    {{
+                      finalPhaseListsLocked
+                        ? 'Verrouillées : un match de phase finale a démarré.'
+                        : 'Liste 1 obligatoire avant de jouer. Liste 2 optionnelle.'
+                    }}
+                  </template>
+                  <template v-else>
+                    {{
+                      registrationListsLocked
+                        ? 'Verrouillées : un match de poule a démarré.'
+                        : 'Vos listes validées pour les poules.'
+                    }}
+                  </template>
                 </CardDescription>
               </CardHeader>
               <CardContent class="grid gap-2">
-                <div class="flex flex-wrap items-center gap-2">
-                  <span class="w-14 shrink-0 text-xs text-muted-foreground">Liste 1</span>
-                  <Input
-                    :model-value="myRegistration?.army_list_1 ?? ''"
-                    readonly
-                    class="min-w-0 flex-1 text-xs"
-                  />
-                  <ArmyListQuickActions :code="myRegistration?.army_list_1" />
-                </div>
-                <div
-                  v-if="myRegistration?.army_list_2"
-                  class="flex flex-wrap items-center gap-2"
-                >
-                  <span class="w-14 shrink-0 text-xs text-muted-foreground">Liste 2</span>
-                  <Input
-                    :model-value="myRegistration.army_list_2"
-                    readonly
-                    class="min-w-0 flex-1 text-xs"
-                  />
-                  <ArmyListQuickActions :code="myRegistration.army_list_2" />
-                </div>
-                <p
-                  v-else
-                  class="text-xs text-muted-foreground italic"
-                >
-                  pas de liste 2
-                </p>
+                <template v-if="showSidePhaseSwitch && sideMatchPhase === 'finale'">
+                  <div class="grid gap-2">
+                    <Label for="side-bracket-list-1" class="text-xs">Liste 1</Label>
+                    <div class="flex flex-wrap items-center gap-2">
+                      <Input
+                        id="side-bracket-list-1"
+                        v-model="bracketList1"
+                        class="min-w-0 flex-1 text-xs"
+                        placeholder="Code Army…"
+                        :readonly="!canSubmitBracketLists"
+                      />
+                      <ArmyListQuickActions :code="bracketList1" />
+                    </div>
+                  </div>
+                  <div class="grid gap-2">
+                    <Label for="side-bracket-list-2" class="text-xs">Liste 2 (optionnel)</Label>
+                    <div class="flex flex-wrap items-center gap-2">
+                      <Input
+                        id="side-bracket-list-2"
+                        v-model="bracketList2"
+                        class="min-w-0 flex-1 text-xs"
+                        placeholder="Code Army… (optionnel)"
+                        :readonly="!canSubmitBracketLists"
+                      />
+                      <ArmyListQuickActions :code="bracketList2" />
+                    </div>
+                    <p
+                      v-if="myRegistration?.has_bracket_lists && !bracketList2.trim()"
+                      class="text-xs text-muted-foreground italic"
+                    >
+                      pas de liste 2
+                    </p>
+                  </div>
+                  <Button
+                    v-if="canSubmitBracketLists"
+                    class="w-fit"
+                    size="sm"
+                    :disabled="savingBracketLists"
+                    @click="saveBracketLists"
+                  >
+                    {{ savingBracketLists ? 'Enregistrement...' : 'Enregistrer' }}
+                  </Button>
+                </template>
+                <template v-else>
+                  <div class="flex flex-wrap items-center gap-2">
+                    <span class="w-14 shrink-0 text-xs text-muted-foreground">Liste 1</span>
+                    <Input
+                      :model-value="myRegistration?.army_list_1 ?? ''"
+                      readonly
+                      class="min-w-0 flex-1 text-xs"
+                    />
+                    <ArmyListQuickActions :code="myRegistration?.army_list_1" />
+                  </div>
+                  <div
+                    v-if="myRegistration?.army_list_2"
+                    class="flex flex-wrap items-center gap-2"
+                  >
+                    <span class="w-14 shrink-0 text-xs text-muted-foreground">Liste 2</span>
+                    <Input
+                      :model-value="myRegistration.army_list_2"
+                      readonly
+                      class="min-w-0 flex-1 text-xs"
+                    />
+                    <ArmyListQuickActions :code="myRegistration.army_list_2" />
+                  </div>
+                  <p
+                    v-else
+                    class="text-xs text-muted-foreground italic"
+                  >
+                    pas de liste 2
+                  </p>
+                </template>
               </CardContent>
             </Card>
             <Card class="neon-panel flex min-h-0 flex-1 flex-col">
@@ -1976,7 +2217,7 @@ onMounted(refresh)
               </CardHeader>
               <CardContent class="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto">
                 <p
-                  v-if="myTournamentMatches.length === 0"
+                  v-if="mySideMatches.length === 0"
                   class="text-sm text-muted-foreground"
                 >
                   Aucun match pour le moment.
@@ -2155,41 +2396,127 @@ onMounted(refresh)
         </Card>
 
         <template v-else-if="showMyMatchesSide">
+          <nav
+            v-if="showSidePhaseSwitch"
+            class="pool-tabs mb-4 lg:hidden"
+            aria-label="Phase des matchs"
+          >
+            <button
+              type="button"
+              class="pool-tab"
+              :class="{ 'pool-tab--active': sideMatchPhase === 'poules' }"
+              @click="setSideMatchPhase('poules')"
+            >
+              Poules
+            </button>
+            <button
+              type="button"
+              class="pool-tab"
+              :class="{ 'pool-tab--active': sideMatchPhase === 'finale' }"
+              @click="setSideMatchPhase('finale')"
+            >
+              {{ sideFinaleLabel }}
+            </button>
+          </nav>
           <Card class="neon-panel mb-4 lg:hidden">
             <CardHeader>
-              <CardTitle>Mes listes</CardTitle>
+              <CardTitle>
+                {{
+                  showSidePhaseSwitch && sideMatchPhase === 'finale'
+                    ? 'Listes de phase finale'
+                    : 'Mes listes'
+                }}
+              </CardTitle>
               <CardDescription>
-                Vos listes validées pour ce tournoi.
+                <template v-if="showSidePhaseSwitch && sideMatchPhase === 'finale'">
+                  {{
+                    finalPhaseListsLocked
+                      ? 'Verrouillées : un match de phase finale a démarré.'
+                      : 'Liste 1 obligatoire avant de jouer. Liste 2 optionnelle.'
+                  }}
+                </template>
+                <template v-else>
+                  {{
+                    registrationListsLocked
+                      ? 'Verrouillées : un match de poule a démarré.'
+                      : 'Vos listes validées pour les poules.'
+                  }}
+                </template>
               </CardDescription>
             </CardHeader>
             <CardContent class="grid gap-2">
-              <div class="flex flex-wrap items-center gap-2">
-                <span class="w-14 shrink-0 text-xs text-muted-foreground">Liste 1</span>
-                <Input
-                  :model-value="myRegistration?.army_list_1 ?? ''"
-                  readonly
-                  class="min-w-0 flex-1 text-xs"
-                />
-                <ArmyListQuickActions :code="myRegistration?.army_list_1" />
-              </div>
-              <div
-                v-if="myRegistration?.army_list_2"
-                class="flex flex-wrap items-center gap-2"
-              >
-                <span class="w-14 shrink-0 text-xs text-muted-foreground">Liste 2</span>
-                <Input
-                  :model-value="myRegistration.army_list_2"
-                  readonly
-                  class="min-w-0 flex-1 text-xs"
-                />
-                <ArmyListQuickActions :code="myRegistration.army_list_2" />
-              </div>
-              <p
-                v-else
-                class="text-xs text-muted-foreground italic"
-              >
-                pas de liste 2
-              </p>
+              <template v-if="showSidePhaseSwitch && sideMatchPhase === 'finale'">
+                <div class="grid gap-2">
+                  <Label for="mobile-bracket-list-1" class="text-xs">Liste 1</Label>
+                  <div class="flex flex-wrap items-center gap-2">
+                    <Input
+                      id="mobile-bracket-list-1"
+                      v-model="bracketList1"
+                      class="min-w-0 flex-1 text-xs"
+                      placeholder="Code Army…"
+                      :readonly="!canSubmitBracketLists"
+                    />
+                    <ArmyListQuickActions :code="bracketList1" />
+                  </div>
+                </div>
+                <div class="grid gap-2">
+                  <Label for="mobile-bracket-list-2" class="text-xs">Liste 2 (optionnel)</Label>
+                  <div class="flex flex-wrap items-center gap-2">
+                    <Input
+                      id="mobile-bracket-list-2"
+                      v-model="bracketList2"
+                      class="min-w-0 flex-1 text-xs"
+                      placeholder="Code Army… (optionnel)"
+                      :readonly="!canSubmitBracketLists"
+                    />
+                    <ArmyListQuickActions :code="bracketList2" />
+                  </div>
+                  <p
+                    v-if="myRegistration?.has_bracket_lists && !bracketList2.trim()"
+                    class="text-xs text-muted-foreground italic"
+                  >
+                    pas de liste 2
+                  </p>
+                </div>
+                <Button
+                  v-if="canSubmitBracketLists"
+                  class="w-fit"
+                  size="sm"
+                  :disabled="savingBracketLists"
+                  @click="saveBracketLists"
+                >
+                  {{ savingBracketLists ? 'Enregistrement...' : 'Enregistrer' }}
+                </Button>
+              </template>
+              <template v-else>
+                <div class="flex flex-wrap items-center gap-2">
+                  <span class="w-14 shrink-0 text-xs text-muted-foreground">Liste 1</span>
+                  <Input
+                    :model-value="myRegistration?.army_list_1 ?? ''"
+                    readonly
+                    class="min-w-0 flex-1 text-xs"
+                  />
+                  <ArmyListQuickActions :code="myRegistration?.army_list_1" />
+                </div>
+                <div
+                  v-if="myRegistration?.army_list_2"
+                  class="flex flex-wrap items-center gap-2"
+                >
+                  <span class="w-14 shrink-0 text-xs text-muted-foreground">Liste 2</span>
+                  <Input
+                    :model-value="myRegistration.army_list_2"
+                    readonly
+                    class="min-w-0 flex-1 text-xs"
+                  />
+                  <ArmyListQuickActions :code="myRegistration.army_list_2" />
+                </div>
+                <p
+                  v-else
+                  class="text-xs text-muted-foreground italic"
+                >
+                  pas de liste 2
+                </p>
+              </template>
             </CardContent>
           </Card>
           <Card class="neon-panel mb-4 lg:hidden">
@@ -2198,7 +2525,7 @@ onMounted(refresh)
             </CardHeader>
             <CardContent class="flex flex-col gap-3">
               <p
-                v-if="myTournamentMatches.length === 0"
+                v-if="mySideMatches.length === 0"
                 class="text-sm text-muted-foreground"
               >
                 Aucun match pour le moment.
@@ -2505,7 +2832,7 @@ onMounted(refresh)
           </Card>
 
           <Alert
-            v-if="detail.pools.length > 0 && !canEditPools && poolsEndDateLabel"
+            v-if="groupPools.length > 0 && !canEditPools && poolsEndDateLabel"
             class="neon-panel"
           >
             <CircleAlert />
@@ -2515,7 +2842,7 @@ onMounted(refresh)
           </Alert>
 
           <Card
-            v-if="detail.pools.length > 0 && !canEditPools"
+            v-if="groupPools.length > 0 && !canEditPools"
             class="neon-panel"
           >
             <CardHeader>
@@ -2530,7 +2857,7 @@ onMounted(refresh)
                   Poules
                 </button>
                 <button
-                  v-for="pool in sortedPools"
+                  v-for="pool in groupPools"
                   :key="pool.id"
                   type="button"
                   class="pool-tab"
@@ -2545,9 +2872,9 @@ onMounted(refresh)
             <CardContent class="grid gap-3">
               <template v-if="!selectedPoolId">
                 <TournamentPoolsPreview
-                  :pools="sortedPools"
+                  :pools="groupPools"
                   :registrations="detail.registrations"
-                  :matches="poolMatches"
+                  :matches="groupPoolMatches"
                   :qualified-per-pool="detail.qualified_per_pool ?? 0"
                   selectable
                   @select-pool="selectPool"
@@ -2590,7 +2917,7 @@ onMounted(refresh)
                 <TournamentPoolsPreview
                   :pools="[selectedPool()!]"
                   :registrations="detail.registrations"
-                  :matches="poolMatches"
+                  :matches="groupPoolMatches"
                   :qualified-per-pool="detail.qualified_per_pool ?? 0"
                   stacked
                 />
@@ -2622,6 +2949,57 @@ onMounted(refresh)
                   Aucun match pour cette poule.
                 </p>
               </section>
+            </CardContent>
+          </Card>
+        </template>
+
+        <template v-else-if="activeTab === 'finale'">
+          <Card v-if="finalPool" class="neon-panel">
+            <CardHeader>
+              <CardTitle>{{ finalPool.name }}</CardTitle>
+              <CardDescription>
+                Phase finale après les poules de groupe.
+              </CardDescription>
+            </CardHeader>
+            <CardContent class="grid gap-3">
+              <TournamentPoolsPreview
+                :pools="[finalPool]"
+                :registrations="detail.registrations"
+                :matches="finalPoolMatches"
+                :qualified-per-pool="0"
+                stacked
+              />
+              <PoolMatchesTable
+                v-if="finalPoolMatches.length > 0"
+                :matches="finalPoolMatches"
+                :is-admin="isAdmin"
+                :current-player-name="player?.name"
+                :get-form="getForm"
+                :can-interact="canInteractWithMatch"
+                :player-army-id="matchPlayerArmyId"
+                :player-has-list2="matchHasList2"
+                :status-label="matchStatusLabel"
+                :lists-ready="matchListsReady"
+                :lists-ready-message="matchListsReadyMessage"
+                :is-online="isOnline"
+                @start="startPartie"
+                @resume="resumePartie"
+                @confirm="confirmMatch"
+                @correct="correctMatch"
+                @forfeit="forfeitMatch"
+                @cancel-forfeit="cancelForfeit"
+                @unplayed="markMatchUnplayed"
+              />
+              <p
+                v-else
+                class="rounded-lg border border-dashed p-4 text-center text-sm text-muted-foreground"
+              >
+                {{
+                  (detail.final_pool_scenarios?.length ?? 0) > 0
+                    ? 'Aucun match : générez les matchs de la poule finale.'
+                    : 'Choisissez d’abord les scénarios de la poule finale (admin).'
+                }}
+              </p>
             </CardContent>
           </Card>
         </template>
@@ -2741,35 +3119,41 @@ onMounted(refresh)
               </p>
 
               <div
-                v-if="canSubmitBracketLists"
+                v-if="canSubmitBracketLists || (myRegistration?.has_bracket_lists && detail.pools_finalized_at)"
                 class="mt-2 grid gap-3 rounded-lg border p-3"
               >
                 <div>
-                  <h3 class="font-semibold">Listes pour l'arbre</h3>
+                  <h3 class="font-semibold">Listes de phase finale</h3>
                   <p class="text-sm text-muted-foreground">
-                    Liste 1 obligatoire avant de jouer un match d’arbre. Liste 2 optionnelle.
+                    {{
+                      finalPhaseListsLocked
+                        ? 'Verrouillées : un match de phase finale a démarré.'
+                        : 'Liste 1 obligatoire avant de jouer un match de phase finale. Liste 2 optionnelle.'
+                    }}
                   </p>
                 </div>
                 <div class="grid gap-2 sm:max-w-2xl">
-                  <Label for="bracket-list-1">Liste arbre 1 (code)</Label>
+                  <Label for="bracket-list-1">Liste phase finale 1 (code)</Label>
                   <div class="flex flex-wrap items-center gap-2">
                     <Input
                       id="bracket-list-1"
                       v-model="bracketList1"
                       class="min-w-0 flex-1"
                       placeholder="Code Army…"
+                      :readonly="!canSubmitBracketLists"
                     />
                     <ArmyListQuickActions :code="bracketList1" />
                   </div>
                 </div>
                 <div class="grid gap-2 sm:max-w-2xl">
-                  <Label for="bracket-list-2">Liste arbre 2 (optionnel)</Label>
+                  <Label for="bracket-list-2">Liste phase finale 2 (optionnel)</Label>
                   <div class="flex flex-wrap items-center gap-2">
                     <Input
                       id="bracket-list-2"
                       v-model="bracketList2"
                       class="min-w-0 flex-1"
                       placeholder="Code Army… (optionnel)"
+                      :readonly="!canSubmitBracketLists"
                     />
                     <ArmyListQuickActions :code="bracketList2" />
                   </div>
@@ -2781,6 +3165,7 @@ onMounted(refresh)
                   </p>
                 </div>
                 <Button
+                  v-if="canSubmitBracketLists"
                   class="w-fit"
                   :disabled="savingBracketLists"
                   @click="saveBracketLists"
@@ -3215,6 +3600,29 @@ onMounted(refresh)
               >
                 Réassigner aux tours
               </Button>
+            </CardContent>
+          </Card>
+
+          <Card
+            v-if="isAdmin && detail.pools_finalized_at && tournamentStructure === 'pools_final'"
+            class="neon-panel"
+          >
+            <CardHeader>
+              <CardTitle>Scénarios de la poule finale</CardTitle>
+              <CardDescription>
+                Missions dédiées à la poule finale (distinctes des poules de groupe).
+                Définissez-les avant de générer les matchs.
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <TournamentScenarioPicker
+                title="Missions poule finale"
+                :slots="finalPoolScenarioSlots"
+                :values="detail.final_pool_scenarios ?? []"
+                :can-edit="canEditFinalPoolScenarios"
+                :saving="scenarioBusy"
+                @save="onSaveFinalPoolScenarios"
+              />
             </CardContent>
           </Card>
 
