@@ -82,8 +82,6 @@ const inScope = computed(() => {
   if (props.armyId) {
     const known = new Set(labels.value.map((label) => label.isc.trim().toLowerCase()))
     rows = rows.filter((figurine) => known.has(figurine.isc.trim().toLowerCase()))
-  } else if (!painter) {
-    return []
   }
   if (painter) {
     rows = rows.filter((figurine) => figurine.painter.trim().toLowerCase() === painter)
@@ -719,21 +717,20 @@ onBeforeUnmount(() => {
 
     <p v-else-if="loading" class="shrink-0 text-sm text-muted-foreground">Chargement...</p>
 
-    <p v-else-if="!armyId && !painterFilter.trim()" class="shrink-0 text-sm text-muted-foreground">
-      Choisis une sectorielle ou un peintre pour afficher les figurines.
-    </p>
-
     <p v-else-if="!filtered.length" class="shrink-0 text-sm text-muted-foreground">
       {{
         inScope.length
           ? 'Aucune figurine ne correspond.'
           : armyId
             ? 'Aucune figurine pour cette sectorielle.'
-            : 'Aucune figurine pour ce peintre.'
+            : painterFilter.trim()
+              ? 'Aucune figurine pour ce peintre.'
+              : 'Aucune figurine.'
       }}
     </p>
 
-    <div v-else class="grid min-h-0 flex-1 grid-cols-2 content-start gap-3 overflow-y-auto lg:grid-cols-4">
+    <div v-else class="min-h-0 flex-1 overflow-y-auto">
+      <div class="grid grid-cols-2 items-start gap-3 lg:grid-cols-4">
       <article
         v-for="figurine in filtered"
         :key="figurine.id"
@@ -808,6 +805,7 @@ onBeforeUnmount(() => {
           </div>
         </button>
       </article>
+      </div>
     </div>
   </div>
 </template>

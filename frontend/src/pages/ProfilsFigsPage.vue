@@ -54,9 +54,9 @@ const isFigsTab = computed(() => route.name === 'profils-figs-figs')
 const isListsTab = computed(() => route.name === 'profils-figs-listes')
 
 const showSearch = computed(() => {
+  if (isFigsTab.value) return true
   if (isProfilesTab.value) return !!armyId.value
-  if (!isFigsTab.value) return false
-  return !!armyId.value || !!painterFilter.value.trim()
+  return false
 })
 
 const showSectorialBar = computed(() => !isListsTab.value)
