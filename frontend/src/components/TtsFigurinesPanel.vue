@@ -18,6 +18,7 @@ import {
   createTtsFigurine,
   deleteTtsFigurine,
   fetchTtsFigurineLabels,
+  fetchTtsProfileLabels,
   fetchTtsSectorialColor,
   fetchTtsFigurineLoadouts,
   fetchTtsFigurineObject,
@@ -423,11 +424,15 @@ watch(
       draft.value.loadout = ''
       return
     }
+    // Ne pas effacer le loadout tant que les libellés ne sont pas chargés
+    // (ex. bascule sans sectorielle → catalogue global).
+    if (labels.value.length === 0) return
     const allowed = new Set(
       labels.value
         .filter((label) => label.isc.trim().toLowerCase() === key)
         .map((label) => label.loadout.trim().toLowerCase()),
     )
+    if (allowed.size === 0) return
     if (draft.value.loadout && !allowed.has(draft.value.loadout.trim().toLowerCase())) {
       draft.value.loadout = ''
     }
@@ -460,7 +465,17 @@ async function loadFactionColor() {
 async function loadLabels() {
   const armyId = Number(props.armyId)
   if (!armyId) {
-    labels.value = []
+    try {
+      const rows = await fetchTtsProfileLabels()
+      if (Number(props.armyId)) return
+      labels.value = rows.map((row) => ({
+        isc: row.isc,
+        loadout: row.loadout,
+        silhouette: '',
+      }))
+    } catch {
+      if (!Number(props.armyId)) labels.value = []
+    }
     return
   }
   try {
@@ -585,18 +600,32 @@ onBeforeUnmount(() => {
           <Button type="button" variant="ghost" size="sm" @click="closePanel">Fermer</Button>
         </div>
       </CardHeader>
-      <CardContent class="min-h-0 flex-1 space-y-4 overflow-y-auto pt-0">
-        <form class="space-y-4" @submit.prevent="save">
-          <div class="space-y-1.5">
-            <Label>ISC</Label>
-            <PlayerPicker
-              :model-value="draft.isc || undefined"
-              :options="iscPickerOptions"
-              :disabled="!canEditContent"
-              placeholder="Choisir un ISC"
-              empty-message="Aucun ISC dans cette sectorielle."
-              @update:model-value="draft.isc = $event ?? ''"
-            />
+      <CardContent class="min-h-0 flex-1 overflow-y-auto pt-0">
+        <form class="flex min-h-full flex-col gap-4" @submit.prevent="save">
+          <div class="grid grid-cols-2 gap-3">
+            <div class="min-w-0 space-y-1.5">
+              <Label>ISC</Label>
+              <PlayerPicker
+                :model-value="draft.isc || undefined"
+                :options="iscPickerOptions"
+                :disabled="!canEditContent"
+                placeholder="Choisir un ISC"
+                :empty-message="armyId ? 'Aucun ISC dans cette sectorielle.' : 'Aucun ISC connu.'"
+                @update:model-value="draft.isc = $event ?? ''"
+              />
+            </div>
+            <div class="min-w-0 space-y-1.5">
+              <Label>Peintre</Label>
+              <PlayerPicker
+                :model-value="draft.painter || undefined"
+                :options="painterOptions"
+                :disabled="!canEditContent"
+                allow-custom
+                placeholder="Choisir ou saisir un peintre"
+                empty-message="Aucun peintre connu."
+                @update:model-value="draft.painter = $event ?? ''"
+              />
+            </div>
           </div>
 
           <div class="space-y-1.5">
@@ -608,19 +637,6 @@ onBeforeUnmount(() => {
               placeholder="Choisir un loadout"
               empty-message="Aucun loadout pour cet ISC."
               @update:model-value="draft.loadout = $event ?? ''"
-            />
-          </div>
-
-          <div class="space-y-1.5">
-            <Label>Peintre</Label>
-            <PlayerPicker
-              :model-value="draft.painter || undefined"
-              :options="painterOptions"
-              :disabled="!canEditContent"
-              allow-custom
-              placeholder="Choisir ou saisir un peintre"
-              empty-message="Aucun peintre connu."
-              @update:model-value="draft.painter = $event ?? ''"
             />
           </div>
 
@@ -638,11 +654,26 @@ onBeforeUnmount(() => {
             />
           </div>
 
-          <div class="space-y-1.5">
+          <div v-if="canEditContent" class="flex flex-wrap gap-2">
+            <Button type="submit" :disabled="saving">
+              {{ saving ? 'Enregistrement…' : 'Enregistrer' }}
+            </Button>
+            <Button
+              v-if="editingId != null"
+              type="button"
+              variant="destructive"
+              :disabled="saving"
+              @click="removeCurrent"
+            >
+              Supprimer
+            </Button>
+          </div>
+
+          <div class="flex min-h-0 flex-1 flex-col space-y-1.5">
             <Label>Photo</Label>
             <button
               type="button"
-              class="flex min-h-36 w-full flex-col items-center justify-center gap-2 rounded-lg border border-dashed border-border bg-muted/20 px-3 py-4 text-center text-sm text-muted-foreground"
+              class="flex min-h-64 w-full flex-1 flex-col items-center justify-center gap-2 rounded-lg border border-dashed border-border bg-muted/20 px-3 py-4 text-center text-sm text-muted-foreground"
               :disabled="!canEditContent"
               @click="canEditContent && fileInput?.click()"
               @dragover.prevent
@@ -652,7 +683,7 @@ onBeforeUnmount(() => {
                 v-if="previewSrc"
                 :src="previewSrc"
                 alt="Aperçu de la figurine"
-                class="max-h-48 w-full object-contain"
+                class="max-h-[min(28rem,55vh)] w-full object-contain"
               />
               <span v-else-if="canEditContent">Colle une capture, ou clique pour choisir un fichier.</span>
               <span v-else>Aucune photo.</span>
@@ -669,24 +700,10 @@ onBeforeUnmount(() => {
               type="button"
               variant="ghost"
               size="xs"
+              class="self-start"
               @click="forgetPhoto"
             >
               Retirer la photo
-            </Button>
-          </div>
-
-          <div v-if="canEditContent" class="flex flex-wrap gap-2">
-            <Button type="submit" :disabled="saving">
-              {{ saving ? 'Enregistrement…' : 'Enregistrer' }}
-            </Button>
-            <Button
-              v-if="editingId != null"
-              type="button"
-              variant="destructive"
-              :disabled="saving"
-              @click="removeCurrent"
-            >
-              Supprimer
             </Button>
           </div>
         </form>
@@ -694,19 +711,19 @@ onBeforeUnmount(() => {
     </Card>
   </Teleport>
 
-  <div class="space-y-4">
-    <Alert v-if="loadError" variant="destructive" class="neon-panel-accent">
+  <div class="flex min-h-0 flex-1 flex-col gap-4">
+    <Alert v-if="loadError" variant="destructive" class="neon-panel-accent shrink-0">
       <AlertTitle>Chargement impossible</AlertTitle>
       <AlertDescription>{{ loadError }}</AlertDescription>
     </Alert>
 
-    <p v-else-if="loading" class="text-sm text-muted-foreground">Chargement...</p>
+    <p v-else-if="loading" class="shrink-0 text-sm text-muted-foreground">Chargement...</p>
 
-    <p v-else-if="!armyId && !painterFilter.trim()" class="text-sm text-muted-foreground">
+    <p v-else-if="!armyId && !painterFilter.trim()" class="shrink-0 text-sm text-muted-foreground">
       Choisis une sectorielle ou un peintre pour afficher les figurines.
     </p>
 
-    <p v-else-if="!filtered.length" class="text-sm text-muted-foreground">
+    <p v-else-if="!filtered.length" class="shrink-0 text-sm text-muted-foreground">
       {{
         inScope.length
           ? 'Aucune figurine ne correspond.'
@@ -716,7 +733,7 @@ onBeforeUnmount(() => {
       }}
     </p>
 
-    <div v-else class="grid grid-cols-2 gap-3 lg:grid-cols-4">
+    <div v-else class="grid min-h-0 flex-1 grid-cols-2 content-start gap-3 overflow-y-auto lg:grid-cols-4">
       <article
         v-for="figurine in filtered"
         :key="figurine.id"

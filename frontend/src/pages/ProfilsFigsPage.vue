@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, onBeforeUnmount, ref, watch } from 'vue'
-import { useRoute, useRouter } from 'vue-router'
+import { useRoute, useRouter, type LocationQuery, type LocationQueryRaw } from 'vue-router'
 import PageTitleTabs from '@/components/PageTitleTabs.vue'
 import PlayerPicker from '@/components/PlayerPicker.vue'
 import SectorialPicker from '@/components/SectorialPicker.vue'
@@ -39,12 +39,15 @@ const { canEditContent } = useAdminEditMode()
 const { armyId, ensureLoaded: ensureSectorial, setArmyId } = useTtsSectorial()
 const extraArmies = ref<Army[]>([])
 const pickerError = ref('')
-const search = ref('')
-const painterFilter = ref('')
 const painterOptions = ref<{ value: string; label: string }[]>([])
 const figurineIscs = ref<string[]>([])
-const figFilter = ref<FigFilter>('tous')
 const figsPanel = ref<{ openCreate: () => void } | null>(null)
+
+/** Champ contrôlé localement ; l’URL est mise à jour (replace) à chaque changement. */
+const searchDraft = ref('')
+const filtersReady = ref(false)
+let searchSyncTimer: ReturnType<typeof setTimeout> | null = null
+let writingQuery = false
 
 const isProfilesTab = computed(() => route.name === 'profils-figs-profils')
 const isFigsTab = computed(() => route.name === 'profils-figs-figs')
@@ -64,36 +67,18 @@ const pickerArmies = computed(() => {
     .filter((army) => isListableArmy(army))
 })
 
-const filterQuery = computed(() => {
-  const query: Record<string, string> = {}
-  const sectorielle = armyId.value?.trim()
-  if (sectorielle) query[QUERY_SECTORIELLE] = sectorielle
-  const peintre = painterFilter.value.trim()
-  if (peintre) query[QUERY_PEINTRE] = peintre
-  const recherche = search.value.trim()
-  if (recherche) query[QUERY_RECHERCHE] = recherche
-  if (figFilter.value !== 'tous') query[QUERY_FIGS] = figFilter.value
-  return query
-})
-
-const tabs = computed((): PageTitleTab[] =>
-  profilsFigsTabs.map((tab) => ({
-    ...tab,
-    to: {
-      ...(typeof tab.to === 'object' ? tab.to : { path: String(tab.to) }),
-      query: filterQuery.value,
-    },
-  })),
-)
-
-let writingQuery = false
-let applyingFromRoute = false
-let filtersReady = false
-let searchSyncTimer: ReturnType<typeof setTimeout> | null = null
-
 function firstQueryValue(raw: unknown): string {
   const value = Array.isArray(raw) ? raw[0] : raw
   return typeof value === 'string' ? value.trim() : ''
+}
+
+function queryFromRoute(query: LocationQuery = route.query) {
+  return {
+    sectorielle: firstQueryValue(query[QUERY_SECTORIELLE]),
+    peintre: firstQueryValue(query[QUERY_PEINTRE]),
+    recherche: firstQueryValue(query[QUERY_RECHERCHE]),
+    figs: parseFigFilter(firstQueryValue(query[QUERY_FIGS])),
+  }
 }
 
 function parseFigFilter(raw: string): FigFilter {
@@ -101,53 +86,117 @@ function parseFigFilter(raw: string): FigFilter {
   return 'tous'
 }
 
-function readFiltersFromRoute(options?: { clearMissingSectorielle?: boolean }) {
-  const sectorielle = firstQueryValue(route.query[QUERY_SECTORIELLE])
-  if (sectorielle) setArmyId(sectorielle)
-  else if (options?.clearMissingSectorielle) setArmyId(undefined)
-  painterFilter.value = firstQueryValue(route.query[QUERY_PEINTRE])
-  search.value = firstQueryValue(route.query[QUERY_RECHERCHE])
-  figFilter.value = parseFigFilter(firstQueryValue(route.query[QUERY_FIGS]))
+function buildFilterQuery(overrides: {
+  sectorielle?: string
+  peintre?: string
+  recherche?: string
+  figs?: FigFilter
+} = {}): LocationQueryRaw {
+  const current = queryFromRoute()
+  const sectorielle = (overrides.sectorielle ?? armyId.value ?? current.sectorielle).trim()
+  const peintre = (overrides.peintre ?? painterFilter.value ?? current.peintre).trim()
+  const recherche = (overrides.recherche ?? searchDraft.value ?? current.recherche).trim()
+  const figs = overrides.figs ?? figFilter.value ?? current.figs
+
+  const query: LocationQueryRaw = {}
+  if (sectorielle) query[QUERY_SECTORIELLE] = sectorielle
+  if (peintre) query[QUERY_PEINTRE] = peintre
+  if (recherche) query[QUERY_RECHERCHE] = recherche
+  if (figs !== 'tous') query[QUERY_FIGS] = figs
+  return query
 }
 
-function sameFilterQuery(
-  left: Record<string, string>,
-  right: Record<string, unknown>,
-) {
-  const keys = new Set([
-    ...Object.keys(left),
-    QUERY_SECTORIELLE,
-    QUERY_PEINTRE,
-    QUERY_RECHERCHE,
-    QUERY_FIGS,
-  ])
+const painterFilter = computed({
+  get: () => queryFromRoute().peintre,
+  set: (value: string) => {
+    void writeFilters({ peintre: value.trim() }, 'push')
+  },
+})
+
+const figFilter = computed({
+  get: () => queryFromRoute().figs,
+  set: (value: FigFilter) => {
+    void writeFilters({ figs: value }, 'push')
+  },
+})
+
+const filterQuery = computed(() => {
+  const query = buildFilterQuery()
+  const out: Record<string, string> = {}
+  for (const [key, value] of Object.entries(query)) {
+    if (typeof value === 'string' && value.trim()) out[key] = value.trim()
+  }
+  return out
+})
+
+const tabs = computed((): PageTitleTab[] =>
+  profilsFigsTabs.map((tab) => {
+    const base = typeof tab.to === 'object' ? tab.to : { path: String(tab.to) }
+    return {
+      ...tab,
+      to: {
+        ...base,
+        query: { ...filterQuery.value },
+      },
+    }
+  }),
+)
+
+function sameFilterQuery(left: LocationQueryRaw, right: LocationQuery) {
+  const keys = [QUERY_SECTORIELLE, QUERY_PEINTRE, QUERY_RECHERCHE, QUERY_FIGS]
   for (const key of keys) {
-    const a = left[key] ?? ''
+    const a = firstQueryValue(left[key])
     const b = firstQueryValue(right[key])
     if (a !== b) return false
   }
   return true
 }
 
-function persistFilters(mode: 'push' | 'replace') {
-  if (!filtersReady || applyingFromRoute) return
-  if (typeof route.name !== 'string' || !route.name.startsWith('profils-figs')) return
-  const query = filterQuery.value
-  if (sameFilterQuery(query, route.query)) return
+async function writeFilters(
+  overrides: Parameters<typeof buildFilterQuery>[0],
+  mode: 'push' | 'replace',
+  name = typeof route.name === 'string' ? route.name : undefined,
+) {
+  if (!filtersReady.value) return
+  if (!name?.startsWith('profils-figs')) return
+  const query = buildFilterQuery(overrides)
+  if (name === route.name && sameFilterQuery(query, route.query)) return
   writingQuery = true
-  const navigate = mode === 'push' ? router.push : router.replace
-  void navigate({ name: route.name, query }).finally(() => {
+  try {
+    const navigate = mode === 'push' ? router.push : router.replace
+    await navigate({ name, query })
+  } finally {
     writingQuery = false
-  })
+  }
 }
 
-function scheduleSearchPersist() {
-  if (!filtersReady || applyingFromRoute) return
+function syncSearchDraftFromRoute() {
+  searchDraft.value = queryFromRoute().recherche
+}
+
+function scheduleSearchUrlSync() {
+  if (!filtersReady.value) return
   if (searchSyncTimer != null) clearTimeout(searchSyncTimer)
   searchSyncTimer = setTimeout(() => {
     searchSyncTimer = null
-    persistFilters('push')
-  }, 300)
+    void writeFilters({ recherche: searchDraft.value }, 'replace')
+  }, 200)
+}
+
+function flushSearchToUrl() {
+  // Annule le debounce : les liens d’onglets lisent déjà searchDraft via filterQuery.
+  if (searchSyncTimer != null) {
+    clearTimeout(searchSyncTimer)
+    searchSyncTimer = null
+  }
+  const expected = searchDraft.value.trim()
+  if (expected === queryFromRoute().recherche) return
+  void writeFilters({ recherche: searchDraft.value }, 'replace')
+}
+
+function onSectorialChange(value: string | undefined) {
+  setArmyId(value)
+  void writeFilters({ sectorielle: value?.trim() || '' }, 'push')
 }
 
 async function refreshPainterOptions() {
@@ -176,26 +225,26 @@ async function refreshPainterOptions() {
 }
 
 watch(
-  () => route.query,
+  () => [route.name, route.fullPath] as const,
   () => {
-    if (writingQuery || !filtersReady) return
+    if (writingQuery) return
     if (typeof route.name !== 'string' || !route.name.startsWith('profils-figs')) return
-    applyingFromRoute = true
-    try {
-      readFiltersFromRoute({ clearMissingSectorielle: true })
-    } finally {
-      applyingFromRoute = false
-    }
+    const { sectorielle } = queryFromRoute()
+    if (sectorielle) setArmyId(sectorielle)
+    syncSearchDraftFromRoute()
   },
 )
 
-watch(armyId, () => persistFilters('push'))
-watch(painterFilter, () => persistFilters('push'))
-watch(figFilter, () => persistFilters('push'))
-watch(search, () => scheduleSearchPersist())
+watch(searchDraft, () => {
+  if (!filtersReady.value || writingQuery) return
+  if (searchDraft.value.trim() === queryFromRoute().recherche) return
+  scheduleSearchUrlSync()
+})
 
 onMounted(async () => {
-  readFiltersFromRoute({ clearMissingSectorielle: false })
+  const fromRoute = queryFromRoute()
+  if (fromRoute.sectorielle) setArmyId(fromRoute.sectorielle)
+  syncSearchDraftFromRoute()
   try {
     await Promise.all([
       ensureLoaded(),
@@ -215,10 +264,10 @@ onMounted(async () => {
         })
       }),
     ])
-    filtersReady = true
-    persistFilters('replace')
+    filtersReady.value = true
+    await writeFilters({}, 'replace')
   } catch (error) {
-    filtersReady = true
+    filtersReady.value = true
     pickerError.value = error instanceof Error ? error.message : 'Impossible de charger les sectorielles'
   }
 })
@@ -229,13 +278,15 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div class="page-stack">
-    <PageTitleTabs
-      ariaLabel="Profils et figurines"
-      :tabs="tabs"
-    />
+  <div class="page-stack min-h-0 flex-1 lg:overflow-hidden">
+    <div class="shrink-0" @click.capture="flushSearchToUrl">
+      <PageTitleTabs
+        ariaLabel="Profils et figurines"
+        :tabs="tabs"
+      />
+    </div>
 
-    <div v-if="showSectorialBar" class="space-y-1.5">
+    <div v-if="showSectorialBar" class="shrink-0 space-y-1.5">
       <div class="flex flex-wrap items-end gap-2">
         <div class="grid min-w-56 flex-1 gap-1.5 sm:max-w-md">
           <Label>Sectorielle</Label>
@@ -244,7 +295,7 @@ onBeforeUnmount(() => {
             :armies="pickerArmies"
             :clearable="isFigsTab"
             placeholder="Choisir une sectorielle"
-            @update:model-value="setArmyId"
+            @update:model-value="onSectorialChange"
           />
         </div>
         <div v-if="isFigsTab" class="grid min-w-44 flex-1 gap-1.5 sm:max-w-xs">
@@ -273,7 +324,7 @@ onBeforeUnmount(() => {
         </div>
         <Input
           v-if="showSearch"
-          v-model="search"
+          v-model="searchDraft"
           class="w-full max-w-xs"
           :placeholder="isFigsTab ? 'ISC, loadout, peintre…' : 'ISC, loadout, nom…'"
           autocomplete="off"
@@ -289,27 +340,31 @@ onBeforeUnmount(() => {
       <p v-if="pickerError" class="text-sm text-destructive">{{ pickerError }}</p>
     </div>
 
-    <TtsProfilesPanel
-      v-if="isProfilesTab"
-      v-model:search="search"
-      :army-id="armyId"
-      :fig-filter="figFilter"
-      :figurine-iscs="figurineIscs"
-    />
+    <div class="flex min-h-0 flex-1 flex-col overflow-hidden">
+      <TtsProfilesPanel
+        v-if="isProfilesTab"
+        v-model:search="searchDraft"
+        :army-id="armyId"
+        :fig-filter="figFilter"
+        :figurine-iscs="figurineIscs"
+        :filter-query="filterQuery"
+      />
 
-    <TtsFigurinesPanel
-      v-else-if="isFigsTab"
-      ref="figsPanel"
-      v-model:search="search"
-      v-model:painter="painterFilter"
-      :army-id="armyId"
-      @saved="refreshPainterOptions"
-    />
+      <TtsFigurinesPanel
+        v-else-if="isFigsTab"
+        ref="figsPanel"
+        v-model:search="searchDraft"
+        v-model:painter="painterFilter"
+        :army-id="armyId"
+        @saved="refreshPainterOptions"
+      />
 
-    <TtsListsPanel
-      v-else-if="isListsTab"
-      :painter-options="painterOptions"
-      @update:army-id="setArmyId"
-    />
+      <div v-else-if="isListsTab" class="min-h-0 flex-1 overflow-y-auto">
+        <TtsListsPanel
+          :painter-options="painterOptions"
+          @update:army-id="onSectorialChange"
+        />
+      </div>
+    </div>
   </div>
 </template>

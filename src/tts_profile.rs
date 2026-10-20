@@ -1133,22 +1133,61 @@ impl TtsProfileStore {
 
     pub fn list_labels(&self) -> Result<Vec<TtsProfileLabel>> {
         let conn = self.conn.lock().unwrap();
+        let mut labels: BTreeMap<(String, String), TtsProfileLabel> = BTreeMap::new();
         let mut stmt = conn.prepare(
             "
-            SELECT DISTINCT isc, loadout
+            SELECT isc, loadout
             FROM tts_profiles
-            ORDER BY isc COLLATE NOCASE, loadout COLLATE NOCASE
+            ORDER BY isc COLLATE NOCASE, loadout COLLATE NOCASE, id
             ",
         )?;
-        let rows = stmt
-            .query_map([], |row| {
-                Ok(TtsProfileLabel {
-                    isc: row.get(0)?,
-                    loadout: row.get(1)?,
+        let profile_rows = stmt.query_map([], |row| {
+            Ok(TtsProfileLabel {
+                isc: row.get(0)?,
+                loadout: row.get(1)?,
+            })
+        })?;
+        for row in profile_rows {
+            let label = row?;
+            let key = (
+                label.isc.trim().to_ascii_lowercase(),
+                label.loadout.trim().to_ascii_lowercase(),
+            );
+            labels.entry(key).or_insert(label);
+        }
+        let mut stmt = conn.prepare(
+            "
+            SELECT isc, loadout
+            FROM tts_profile_forms
+            WHERE state_index = 900
+            ORDER BY isc COLLATE NOCASE, loadout COLLATE NOCASE, id
+            ",
+        )?;
+        let form_rows = stmt.query_map([], |row| {
+            Ok(TtsProfileLabel {
+                isc: row.get(0)?,
+                loadout: row.get(1)?,
+            })
+        })?;
+        for row in form_rows {
+            let label = row?;
+            let key = (
+                label.isc.trim().to_ascii_lowercase(),
+                label.loadout.trim().to_ascii_lowercase(),
+            );
+            labels.entry(key).or_insert(label);
+        }
+        let mut rows: Vec<_> = labels.into_values().collect();
+        rows.sort_by(|left, right| {
+            left.isc
+                .to_ascii_lowercase()
+                .cmp(&right.isc.to_ascii_lowercase())
+                .then_with(|| {
+                    left.loadout
+                        .to_ascii_lowercase()
+                        .cmp(&right.loadout.to_ascii_lowercase())
                 })
-            })?
-            .collect::<std::result::Result<Vec<_>, _>>()
-            .context("lecture des libellés de profils")?;
+        });
         Ok(rows)
     }
 

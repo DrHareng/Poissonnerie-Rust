@@ -38,9 +38,12 @@ const props = withDefaults(defineProps<{
   armyId?: string
   figFilter?: FigFilter
   figurineIscs?: string[]
+  /** Query courante (sectorielle, peintre, recherche, figs) à conserver vers Figs. */
+  filterQuery?: Record<string, string>
 }>(), {
   figFilter: 'tous',
   figurineIscs: () => [],
+  filterQuery: () => ({}),
 })
 
 const { armies, ensureLoaded } = useArmies()
@@ -79,10 +82,9 @@ function hasFigurine(profile: { isc: string }) {
 }
 
 function figurinesLink(profile: { isc: string }) {
-  const query: Record<string, string> = {
-    recherche: profile.isc.trim(),
-  }
+  const query: Record<string, string> = { ...props.filterQuery }
   if (props.armyId?.trim()) query.sectorielle = props.armyId.trim()
+  query.recherche = profile.isc.trim()
   return { name: 'profils-figs-figs' as const, query }
 }
 
@@ -299,95 +301,99 @@ onBeforeUnmount(() => setCustomSide(false))
       </CardContent>
     </Card>
   </Teleport>
-  <div class="grid gap-4">
+  <div class="flex min-h-0 flex-1 flex-col gap-4">
     <label
       v-if="armyId"
-      class="flex items-start gap-2 text-sm text-muted-foreground"
+      class="flex shrink-0 items-start gap-2 text-sm text-muted-foreground"
     >
       <input v-model="showSpecialOps" type="checkbox" class="mt-1" />
       <span>Voir les team-ops/spec-ops</span>
     </label>
 
-    <Alert v-if="loadError" variant="destructive" class="neon-panel-accent">
+    <Alert v-if="loadError" variant="destructive" class="neon-panel-accent shrink-0">
       <AlertTitle>Chargement impossible</AlertTitle>
       <AlertDescription>{{ loadError }}</AlertDescription>
     </Alert>
 
-    <p v-else-if="!armyId" class="text-sm text-muted-foreground">
+    <p v-else-if="!armyId" class="shrink-0 text-sm text-muted-foreground">
       Choisis une sectorielle pour afficher ses profils.
     </p>
-    <p v-else-if="loading" class="text-sm text-muted-foreground">
+    <p v-else-if="loading" class="shrink-0 text-sm text-muted-foreground">
       Chargement…
     </p>
-    <p v-else-if="filteredProfiles.length === 0" class="text-sm text-muted-foreground">
+    <p v-else-if="filteredProfiles.length === 0" class="shrink-0 text-sm text-muted-foreground">
       Aucun profil.
     </p>
 
-    <div v-else class="profile-table max-h-[32rem] overflow-auto rounded-lg border border-border">
-      <Table class="table-fixed border-separate border-spacing-0">
-        <colgroup>
-          <col style="width: 25%" />
-          <col />
-          <col style="width: 2.75rem" />
-        </colgroup>
-        <TableHeader>
-          <TableRow>
-            <TableHead class="sticky top-0 z-20 w-1/4 border-b border-border bg-background whitespace-normal">ISC</TableHead>
-            <TableHead class="sticky top-0 z-20 border-b border-border bg-background whitespace-normal">Loadout</TableHead>
-            <TableHead class="sticky top-0 z-20 w-10 border-b border-border bg-background text-center">Fig</TableHead>
-          </TableRow>
-        </TableHeader>
-        <TableBody>
-          <TableRow
-            v-for="row in tableRows"
-            :key="row.profile.id"
-            class="cursor-pointer"
-            :class="detail?.id === row.profile.id ? 'bg-primary/10' : undefined"
-            @click="openProfile(row.profile.id)"
-          >
-            <TableCell
-              v-if="row.showIsc"
-              :rowspan="row.iscSpan"
-              class="w-1/4 border-b border-border bg-background align-top font-medium whitespace-normal"
-            >
-              <div class="sticky top-10 z-10 bg-background">
-                {{ row.profile.isc }}
-              </div>
-            </TableCell>
-            <TableCell class="border-b border-border whitespace-normal">
-              {{ row.profile.loadout || '—' }}
-            </TableCell>
-            <TableCell
-              v-if="row.showIsc"
-              :rowspan="row.iscSpan"
-              class="w-10 border-b border-border bg-background text-center align-top"
-            >
-              <div class="sticky top-10 z-10 flex justify-center bg-background py-0.5">
-                <RouterLink
-                  v-if="hasFigurine(row.profile)"
-                  :to="figurinesLink(row.profile)"
-                  class="text-muted-foreground hover:text-foreground inline-flex size-7 items-center justify-center rounded-md"
-                  title="Voir les figurines"
-                  @click.stop
-                >
-                  <Box class="size-4" />
-                </RouterLink>
-              </div>
-            </TableCell>
-          </TableRow>
-        </TableBody>
-      </Table>
-    </div>
-
-    <p v-if="!loading && armyId" class="text-xs text-muted-foreground">
-      {{ filteredProfiles.length }} profil{{ filteredProfiles.length > 1 ? 's' : '' }}
-    </p>
-
-    <form
-      v-if="draft"
-      class="grid gap-4 rounded-lg border border-border p-4"
-      @submit.prevent="saveProfile"
+    <div
+      v-else
+      class="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto"
     >
+      <div class="profile-table overflow-visible rounded-lg border border-border">
+        <Table class="table-fixed border-separate border-spacing-0">
+          <colgroup>
+            <col style="width: 25%" />
+            <col />
+            <col style="width: 2.75rem" />
+          </colgroup>
+          <TableHeader>
+            <TableRow>
+              <TableHead class="sticky top-0 z-20 w-1/4 border-b border-border bg-background whitespace-normal">ISC</TableHead>
+              <TableHead class="sticky top-0 z-20 border-b border-border bg-background whitespace-normal">Loadout</TableHead>
+              <TableHead class="sticky top-0 z-20 w-10 border-b border-border bg-background text-center">Fig</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            <TableRow
+              v-for="row in tableRows"
+              :key="row.profile.id"
+              class="cursor-pointer"
+              :class="detail?.id === row.profile.id ? 'bg-primary/10' : undefined"
+              @click="openProfile(row.profile.id)"
+            >
+              <TableCell
+                v-if="row.showIsc"
+                :rowspan="row.iscSpan"
+                class="w-1/4 border-b border-border bg-background align-top font-medium whitespace-normal"
+              >
+                <div class="sticky top-10 z-10 bg-background">
+                  {{ row.profile.isc }}
+                </div>
+              </TableCell>
+              <TableCell class="border-b border-border whitespace-normal">
+                {{ row.profile.loadout || '—' }}
+              </TableCell>
+              <TableCell
+                v-if="row.showIsc"
+                :rowspan="row.iscSpan"
+                class="w-10 border-b border-border bg-background text-center align-top"
+              >
+                <div class="sticky top-10 z-10 flex justify-center bg-background py-0.5">
+                  <RouterLink
+                    v-if="hasFigurine(row.profile)"
+                    :to="figurinesLink(row.profile)"
+                    class="text-muted-foreground hover:text-foreground inline-flex size-7 items-center justify-center rounded-md"
+                    title="Voir les figurines"
+                    @click.stop
+                  >
+                    <Box class="size-4" />
+                  </RouterLink>
+                </div>
+              </TableCell>
+            </TableRow>
+          </TableBody>
+        </Table>
+      </div>
+
+      <p v-if="!loading && armyId" class="text-xs text-muted-foreground">
+        {{ filteredProfiles.length }} profil{{ filteredProfiles.length > 1 ? 's' : '' }}
+      </p>
+
+      <form
+        v-if="draft"
+        class="grid gap-4 rounded-lg border border-border p-4"
+        @submit.prevent="saveProfile"
+      >
       <fieldset :disabled="!canEditContent" class="m-0 grid min-w-0 gap-4 border-0 p-0">
       <div class="grid gap-2">
         <Label>Sectorielles associées</Label>
@@ -548,6 +554,7 @@ onBeforeUnmount(() => setCustomSide(false))
         </Button>
       </div>
     </form>
+    </div>
   </div>
 </template>
 
