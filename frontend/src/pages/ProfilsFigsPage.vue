@@ -278,15 +278,22 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div class="page-stack min-h-0 flex-1 lg:overflow-hidden">
-    <div class="shrink-0" @click.capture="flushSearchToUrl">
+  <div
+    class="page-stack"
+    :class="isFigsTab ? 'min-h-0 flex-1 lg:overflow-hidden' : undefined"
+  >
+    <div :class="isFigsTab ? 'shrink-0' : undefined" @click.capture="flushSearchToUrl">
       <PageTitleTabs
         ariaLabel="Profils et figurines"
         :tabs="tabs"
       />
     </div>
 
-    <div v-if="showSectorialBar" class="shrink-0 space-y-1.5">
+    <div
+      v-if="showSectorialBar"
+      class="space-y-1.5"
+      :class="isFigsTab ? 'shrink-0' : undefined"
+    >
       <div class="flex flex-wrap items-end gap-2">
         <div class="grid min-w-56 flex-1 gap-1.5 sm:max-w-md">
           <Label>Sectorielle</Label>
@@ -340,31 +347,29 @@ onBeforeUnmount(() => {
       <p v-if="pickerError" class="text-sm text-destructive">{{ pickerError }}</p>
     </div>
 
-    <div class="flex min-h-0 flex-1 flex-col overflow-hidden">
-      <TtsProfilesPanel
-        v-if="isProfilesTab"
-        v-model:search="searchDraft"
-        :army-id="armyId"
-        :fig-filter="figFilter"
-        :figurine-iscs="figurineIscs"
-        :filter-query="filterQuery"
-      />
+    <TtsProfilesPanel
+      v-if="isProfilesTab"
+      v-model:search="searchDraft"
+      :army-id="armyId"
+      :fig-filter="figFilter"
+      :figurine-iscs="figurineIscs"
+      :filter-query="filterQuery"
+    />
 
+    <div v-else-if="isFigsTab" class="flex min-h-0 flex-1 flex-col overflow-hidden">
       <TtsFigurinesPanel
-        v-else-if="isFigsTab"
         ref="figsPanel"
         v-model:search="searchDraft"
         v-model:painter="painterFilter"
         :army-id="armyId"
         @saved="refreshPainterOptions"
       />
-
-      <div v-else-if="isListsTab" class="min-h-0 flex-1 overflow-y-auto">
-        <TtsListsPanel
-          :painter-options="painterOptions"
-          @update:army-id="onSectorialChange"
-        />
-      </div>
     </div>
+
+    <TtsListsPanel
+      v-else-if="isListsTab"
+      :painter-options="painterOptions"
+      @update:army-id="onSectorialChange"
+    />
   </div>
 </template>
