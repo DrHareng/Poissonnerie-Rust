@@ -16,7 +16,9 @@ import {
   formatPoolsEndSummary,
   formatRegistrationSummary,
   isTournamentCompleted,
+  isTournamentFinalPoolPhase,
   isTournamentPoolsPhase,
+  isTournamentPoolsStandingsPreview,
   isTournamentRegistrationPhase,
   tournamentRegistrationCapacity,
 } from '@/lib/tournamentDisplay'
@@ -138,10 +140,21 @@ async function create() {
   }
 }
 
-function openTournamentPool(tournamentId: number, poolId: number) {
+function openTournamentPool(
+  tournament: TournamentListEntry,
+  poolId: number,
+) {
+  if (isTournamentFinalPoolPhase(tournament)) {
+    void router.push({
+      name: 'tournoi',
+      params: { id: tournament.id },
+      query: { tab: 'finale' },
+    })
+    return
+  }
   void router.push({
     name: 'tournoi',
-    params: { id: tournamentId },
+    params: { id: tournament.id },
     query: { tab: 'poules', poolId: String(poolId) },
   })
 }
@@ -334,14 +347,18 @@ onMounted(() => {
 
             <template v-else>
               <TournamentPoolsPreview
-                v-if="isTournamentPoolsPhase(tournament)"
+                v-if="isTournamentPoolsStandingsPreview(tournament)"
                 :pools="tournament.pools ?? []"
                 :registrations="tournament.registrations ?? []"
                 :matches="tournament.pool_matches ?? []"
-                :qualified-per-pool="tournament.qualified_per_pool ?? 0"
+                :qualified-per-pool="
+                  isTournamentFinalPoolPhase(tournament)
+                    ? 0
+                    : (tournament.qualified_per_pool ?? 0)
+                "
                 selectable
                 @click.stop
-                @select-pool="openTournamentPool(tournament.id, $event)"
+                @select-pool="openTournamentPool(tournament, $event)"
               />
               <TournamentDescriptionWithRegistrants
                 v-else-if="
@@ -365,7 +382,7 @@ onMounted(() => {
                 v-if="
                   (tournament.pool_scenarios?.length ?? 0) > 0
                   && !isTournamentRegistrationPhase(tournament.status)
-                  && !isTournamentPoolsPhase(tournament)
+                  && !isTournamentPoolsStandingsPreview(tournament)
                 "
                 class="space-y-1"
               >

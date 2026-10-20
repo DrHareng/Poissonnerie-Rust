@@ -354,27 +354,31 @@ impl TournamentStore {
                     Vec::new()
                 };
                 enrich_top_four_armies(&mut top_four, &registrations);
-                let pool_matches: Vec<_> = matches
-                    .iter()
-                    .filter(|m| m.phase == TournamentPhase::Pool)
-                    .cloned()
-                    .collect();
                 let bracket_matches: Vec<_> = matches
-                    .into_iter()
+                    .iter()
                     .filter(|m| m.phase != TournamentPhase::Pool)
+                    .cloned()
                     .collect();
                 let pool_scenarios = self.list_scenarios_in_conn(&conn, tournament.id, "pool")?;
                 let in_pools_phase = tournament.status == TournamentStatus::Started
                     && tournament.pools_finalized_at.is_none()
                     && tournament.structure.uses_pools();
+                let in_final_pool_phase = tournament.status == TournamentStatus::Started
+                    && tournament.structure == TournamentStructure::PoolsFinal
+                    && tournament.pools_finalized_at.is_some();
 
                 let mut pools = if in_pools_phase {
                     self.list_pools_in_conn(&conn, tournament.id)?
+                } else if in_final_pool_phase {
+                    self.list_pools_in_conn(&conn, tournament.id)?
+                        .into_iter()
+                        .filter(|pool| is_final_pool(&tournament, pool))
+                        .collect()
                 } else {
                     Vec::new()
                 };
 
-                let army_visible = if in_pools_phase {
+                let army_visible = if in_pools_phase || in_final_pool_phase {
                     army_visible_player_keys(&tournament, &registrations, &pools)
                 } else {
                     HashSet::new()
@@ -389,10 +393,33 @@ impl TournamentStore {
                     }
                 }
 
+                let final_pool_ids: HashSet<i64> = if in_final_pool_phase {
+                    pools.iter().map(|pool| pool.id).collect()
+                } else {
+                    HashSet::new()
+                };
+                let pool_matches: Vec<_> = if in_pools_phase {
+                    matches
+                        .into_iter()
+                        .filter(|m| m.phase == TournamentPhase::Pool)
+                        .collect()
+                } else if in_final_pool_phase {
+                    matches
+                        .into_iter()
+                        .filter(|m| {
+                            m.phase == TournamentPhase::Pool
+                                && m.pool_id.is_some_and(|id| final_pool_ids.contains(&id))
+                        })
+                        .collect()
+                } else {
+                    Vec::new()
+                };
+
                 let registration_previews = if matches!(
                     tournament.status,
                     TournamentStatus::RegistrationOpen | TournamentStatus::RegistrationClosed
                 ) || in_pools_phase
+                    || in_final_pool_phase
                 {
                     registrations
                         .iter()
@@ -433,11 +460,7 @@ impl TournamentStore {
                     display_status,
                     top_four,
                     bracket_matches,
-                    pool_matches: if in_pools_phase {
-                        pool_matches
-                    } else {
-                        Vec::new()
-                    },
+                    pool_matches,
                     pool_scenarios,
                     pools,
                     registrations: registration_previews,
@@ -4727,12 +4750,11 @@ impl TournamentStore {
         pool_id: i64,
         tournament_id: i64,
     ) -> Result<Vec<PoolPlayer>> {
+        // Stats (PT/PO/PS) uniquement depuis les matchs de *cette* poule — la poule
+        // finale repart donc à zéro, sans report des poules de groupe.
         let mut stmt = conn.prepare(
             "
             SELECT pp.player_name, pp.seed,
-                   COALESCE(tp.pool_points, 0),
-                   COALESCE(tp.pool_objectives, 0),
-                   COALESCE(tp.pool_survivors, 0),
                    tr.army_id,
                    tp.start_rating
             FROM pool_players pp
@@ -4744,24 +4766,81 @@ impl TournamentStore {
             ORDER BY pp.seed
             ",
         )?;
-        let rows = stmt.query_map(params![pool_id, tournament_id], |row| {
-            Ok(PoolPlayer {
-                player_name: row.get(0)?,
-                player_display_name: None,
-                army_id: row.get(5)?,
-                seed: row.get(1)?,
-                points: row.get(2)?,
-                objectives: row.get(3)?,
-                survivors: row.get(4)?,
-                wins: 0,
-                draws: 0,
-                losses: 0,
-                rating: row.get(6)?,
-                avatar_url: None,
-                army_matches: None,
-            })
+        let mut players: Vec<PoolPlayer> = stmt
+            .query_map(params![pool_id, tournament_id], |row| {
+                Ok(PoolPlayer {
+                    player_name: row.get(0)?,
+                    player_display_name: None,
+                    army_id: row.get(2)?,
+                    seed: row.get(1)?,
+                    points: 0,
+                    objectives: 0,
+                    survivors: 0,
+                    wins: 0,
+                    draws: 0,
+                    losses: 0,
+                    rating: row.get(3)?,
+                    avatar_url: None,
+                    army_matches: None,
+                })
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+
+        let key_to_index: HashMap<String, usize> = players
+            .iter()
+            .enumerate()
+            .map(|(index, player)| (normalize_name(&player.player_name), index))
+            .collect();
+
+        let mut match_stmt = conn.prepare(
+            "
+            SELECT player1, player2,
+                   player1_tournament_points, player2_tournament_points,
+                   player1_objectives, player2_objectives,
+                   player1_survivors, player2_survivors,
+                   is_unplayed
+            FROM tournament_matches
+            WHERE pool_id = ?1 AND status = 'confirmed'
+            ",
+        )?;
+        let match_rows = match_stmt.query_map(params![pool_id], |row| {
+            Ok((
+                row.get::<_, Option<String>>(0)?,
+                row.get::<_, Option<String>>(1)?,
+                row.get::<_, u8>(2)?,
+                row.get::<_, u8>(3)?,
+                row.get::<_, u8>(4)?,
+                row.get::<_, u8>(5)?,
+                row.get::<_, u16>(6)?,
+                row.get::<_, u16>(7)?,
+                row.get::<_, i64>(8)? != 0,
+            ))
         })?;
-        rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
+
+        for row in match_rows {
+            let (p1, p2, tp1, tp2, obj1, obj2, surv1, surv2, is_unplayed) = row?;
+            if is_unplayed {
+                continue;
+            }
+            if let Some(name) = p1.as_deref() {
+                if let Some(&index) = key_to_index.get(&normalize_name(name)) {
+                    let player = &mut players[index];
+                    player.points = player.points.saturating_add(u32::from(tp1));
+                    player.objectives = player.objectives.saturating_add(u32::from(obj1));
+                    player.survivors = player.survivors.saturating_add(u32::from(surv1));
+                }
+            }
+            if let Some(name) = p2.as_deref() {
+                if let Some(&index) = key_to_index.get(&normalize_name(name)) {
+                    let player = &mut players[index];
+                    player.points = player.points.saturating_add(u32::from(tp2));
+                    player.objectives = player.objectives.saturating_add(u32::from(obj2));
+                    player.survivors = player.survivors.saturating_add(u32::from(surv2));
+                }
+            }
+        }
+
+        Ok(players)
     }
 
     fn list_matches_in_conn(

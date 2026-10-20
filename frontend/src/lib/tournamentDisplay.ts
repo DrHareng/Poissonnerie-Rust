@@ -133,6 +133,31 @@ export function isTournamentPoolsPhase(tournament: {
   return (tournament.pools?.length ?? 0) > 0
 }
 
+/** Poule finale en cours (après clôture des poules de groupe). */
+export function isTournamentFinalPoolPhase(tournament: {
+  status: string
+  structure?: string
+  pools_finalized_at?: number | null
+  pools?: unknown[] | null
+}): boolean {
+  if (tournament.status !== 'started') return false
+  if (tournament.structure !== 'pools_final') return false
+  if (!tournament.pools_finalized_at) return false
+  return (tournament.pools?.length ?? 0) > 0
+}
+
+/** Résumé listes : tableau des poules de groupe ou de la poule finale. */
+export function isTournamentPoolsStandingsPreview(tournament: {
+  status: string
+  structure?: string
+  pools_finalized_at?: number | null
+  pools?: unknown[] | null
+}): boolean {
+  return (
+    isTournamentPoolsPhase(tournament) || isTournamentFinalPoolPhase(tournament)
+  )
+}
+
 import { formatMatchDate } from '@/lib/tournamentMatchDisplay'
 
 /** Durée par défaut de la phase de poules (alignée sur l'historique Coupe). */

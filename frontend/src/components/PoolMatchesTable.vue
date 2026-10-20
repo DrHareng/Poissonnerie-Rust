@@ -42,8 +42,8 @@ const props = withDefaults(
     playerHasList2?: (match: TournamentMatch, slot: 'player1' | 'player2') => boolean
     statusLabel: (match: TournamentMatch) => string
     allowUnplayed?: boolean
+    /** Gate le bouton Démarrer ; le message reste dans « Mes matchs ». */
     listsReady?: (match: TournamentMatch) => boolean
-    listsReadyMessage?: (match: TournamentMatch) => string
     isOnline?: boolean
   }>(),
   {
@@ -258,13 +258,8 @@ function canSaveCorrection(match: TournamentMatch) {
 }
 
 function showEditRow(match: TournamentMatch) {
-  if (isCorrecting(match)) return true
-  return (
-    props.canInteract(match)
-    && matchIsOpenForPlay(match)
-    && Boolean(props.listsReady)
-    && !(props.listsReady?.(match) ?? true)
-  )
+  // Le message « listes manquantes » reste dans « Mes matchs », pas dans la table poule.
+  return isCorrecting(match)
 }
 
 watch(
@@ -484,35 +479,27 @@ watch(
         >
           <td colspan="5">
             <div class="pool-match-edit-panel">
-              <template v-if="isCorrecting(match)">
-                <TournamentMatchScoreboard
-                  :match="match"
-                  mode="form"
-                  :form="getForm(match)"
-                  :player1-army-id="playerArmyId(match, 'player1')"
-                  :player2-army-id="playerArmyId(match, 'player2')"
-                  :player1-has-list2="playerHasList2?.(match, 'player1')"
-                  :player2-has-list2="playerHasList2?.(match, 'player2')"
-                />
-                <div class="pool-match-edit-actions">
-                  <Button
-                    size="sm"
-                    :disabled="!canSaveCorrection(match)"
-                    @click="saveCorrection(match)"
-                  >
-                    Enregistrer
-                  </Button>
-                  <Button size="sm" variant="outline" @click="correctingMatchId = null">
-                    Annuler
-                  </Button>
-                </div>
-              </template>
-              <p
-                v-else
-                class="text-sm text-amber-600 dark:text-amber-400"
-              >
-                {{ listsReadyMessage?.(match) || 'Listes d’arbre manquantes.' }}
-              </p>
+              <TournamentMatchScoreboard
+                :match="match"
+                mode="form"
+                :form="getForm(match)"
+                :player1-army-id="playerArmyId(match, 'player1')"
+                :player2-army-id="playerArmyId(match, 'player2')"
+                :player1-has-list2="playerHasList2?.(match, 'player1')"
+                :player2-has-list2="playerHasList2?.(match, 'player2')"
+              />
+              <div class="pool-match-edit-actions">
+                <Button
+                  size="sm"
+                  :disabled="!canSaveCorrection(match)"
+                  @click="saveCorrection(match)"
+                >
+                  Enregistrer
+                </Button>
+                <Button size="sm" variant="outline" @click="correctingMatchId = null">
+                  Annuler
+                </Button>
+              </div>
             </div>
           </td>
         </tr>

@@ -25,7 +25,15 @@ import { useArmies } from '@/composables/useArmies'
 import { useAuth } from '@/composables/useAuth'
 import { scoreBadgeMinCh as computeScoreBadgeMinCh } from '@/lib/matchResultBadges'
 import { visibleMainNavLinks } from '@/lib/mainNav'
-import { formatPoolsEndSummary, formatRegistrationSummary, isTournamentPoolsPhase, isTournamentRegistrationPhase, tournamentRegistrationCapacity } from '@/lib/tournamentDisplay'
+import {
+  formatPoolsEndSummary,
+  formatRegistrationSummary,
+  isTournamentFinalPoolPhase,
+  isTournamentPoolsPhase,
+  isTournamentPoolsStandingsPreview,
+  isTournamentRegistrationPhase,
+  tournamentRegistrationCapacity,
+} from '@/lib/tournamentDisplay'
 import TournamentDescriptionWithRegistrants from '@/components/TournamentDescriptionWithRegistrants.vue'
 import TournamentPoolsPreview from '@/components/TournamentPoolsPreview.vue'
 import { Badge } from '@/components/ui/badge'
@@ -104,6 +112,14 @@ function openTournament() {
 
 function openTournamentPool(poolId: number) {
   if (!tournament.value) return
+  if (isTournamentFinalPoolPhase(tournament.value)) {
+    void router.push({
+      name: 'tournoi',
+      params: { id: tournament.value.id },
+      query: { tab: 'finale' },
+    })
+    return
+  }
   void router.push({
     name: 'tournoi',
     params: { id: tournament.value.id },
@@ -272,11 +288,15 @@ onMounted(async () => {
                 </Badge>
               </div>
               <TournamentPoolsPreview
-                v-if="isTournamentPoolsPhase(tournament)"
+                v-if="isTournamentPoolsStandingsPreview(tournament)"
                 :pools="tournament.pools ?? []"
                 :registrations="tournament.registrations ?? []"
                 :matches="tournament.pool_matches ?? []"
-                :qualified-per-pool="tournament.qualified_per_pool ?? 0"
+                :qualified-per-pool="
+                  isTournamentFinalPoolPhase(tournament)
+                    ? 0
+                    : (tournament.qualified_per_pool ?? 0)
+                "
                 stacked
                 selectable
                 @click.stop
@@ -304,7 +324,7 @@ onMounted(async () => {
                 v-if="
                   (tournament.pool_scenarios?.length ?? 0) > 0
                   && !isTournamentRegistrationPhase(tournament.status)
-                  && !isTournamentPoolsPhase(tournament)
+                  && !isTournamentPoolsStandingsPreview(tournament)
                 "
                 class="space-y-1 text-left"
               >
