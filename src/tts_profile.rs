@@ -1067,6 +1067,17 @@ pub struct ProfileUpdate {
     pub sectorial_ids: Vec<i64>,
 }
 
+/// Sous-profil référencé par une option d'unité Army (`group_id = 0` dans les listes).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UnitOptionInclude {
+    pub unit_id: i64,
+    pub unit_option_id: i64,
+    pub sort_order: i64,
+    pub group_id: i64,
+    pub option_id: i64,
+    pub quantity: i64,
+}
+
 pub struct TtsProfileStore {
     conn: Mutex<Connection>,
 }
@@ -1207,6 +1218,22 @@ impl TtsProfileStore {
     ) -> Result<Option<TtsProfileSummary>> {
         let conn = self.conn.lock().unwrap();
         find_by_army_source(&conn, unit_id, group_id, option_id, army_id)
+    }
+
+    /// Sous-profils d'une option d'unité Army (`group_id = 0` dans les listes).
+    pub fn unit_option_includes(
+        &self,
+        unit_id: u32,
+        unit_option_id: u32,
+    ) -> Result<Vec<UnitOptionInclude>> {
+        let conn = self.conn.lock().unwrap();
+        unit_option_includes(&conn, unit_id, unit_option_id)
+    }
+
+    /// Remplace le cache local des includes pour une option d'unité.
+    pub fn replace_unit_option_includes(&self, includes: &[UnitOptionInclude]) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+        replace_unit_option_includes(&conn, includes)
     }
 
     pub fn update(&self, id: i64, update: &ProfileUpdate) -> Result<TtsProfileDetail> {
@@ -1698,6 +1725,68 @@ fn find_by_army_source(
         }
     }
     Ok(fallback)
+}
+
+fn unit_option_includes(
+    conn: &Connection,
+    unit_id: u32,
+    unit_option_id: u32,
+) -> Result<Vec<UnitOptionInclude>> {
+    let mut stmt = conn.prepare(
+        "
+        SELECT unit_id, unit_option_id, sort_order,
+               included_group_id, included_option_id, quantity
+        FROM tts_army_unit_includes
+        WHERE unit_id = ?1 AND unit_option_id = ?2
+        ORDER BY sort_order
+        ",
+    )?;
+    let rows = stmt
+        .query_map(params![i64::from(unit_id), i64::from(unit_option_id)], |row| {
+            Ok(UnitOptionInclude {
+                unit_id: row.get(0)?,
+                unit_option_id: row.get(1)?,
+                sort_order: row.get(2)?,
+                group_id: row.get(3)?,
+                option_id: row.get(4)?,
+                quantity: row.get(5)?,
+            })
+        })?
+        .collect::<std::result::Result<Vec<_>, _>>()
+        .context("lecture des includes d'option d'unité")?;
+    Ok(rows)
+}
+
+fn replace_unit_option_includes(conn: &Connection, includes: &[UnitOptionInclude]) -> Result<()> {
+    if includes.is_empty() {
+        return Ok(());
+    }
+    let unit_id = includes[0].unit_id;
+    let unit_option_id = includes[0].unit_option_id;
+    conn.execute(
+        "DELETE FROM tts_army_unit_includes WHERE unit_id = ?1 AND unit_option_id = ?2",
+        params![unit_id, unit_option_id],
+    )?;
+    for include in includes {
+        conn.execute(
+            "
+            INSERT INTO tts_army_unit_includes (
+                unit_id, unit_option_id, sort_order,
+                included_group_id, included_option_id, quantity
+            )
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+            ",
+            params![
+                include.unit_id,
+                include.unit_option_id,
+                include.sort_order,
+                include.group_id,
+                include.option_id,
+                include.quantity,
+            ],
+        )?;
+    }
+    Ok(())
 }
 
 fn marker_mesh_catalog(conn: &Connection) -> Result<BTreeMap<String, String>> {

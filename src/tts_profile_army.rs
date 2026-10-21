@@ -8,7 +8,7 @@ use rusqlite::{params, Connection};
 use serde_json::Value;
 
 use crate::migrate::migrate;
-use crate::tts_profile::parse_models_json;
+use crate::tts_profile::{parse_models_json, UnitOptionInclude};
 
 const METADATA_URL: &str = "https://api.corvusbelli.com/army/infinity/en/metadata";
 const ORIGIN: &str = "https://infinityuniverse.com";
@@ -112,6 +112,7 @@ pub fn import_from_army_api(
     let metadata = fetch_json(&client, METADATA_URL)?;
     let mut names = names_from_metadata(&metadata);
     let mut drafts: BTreeMap<(i64, i64, i64), ProfileDraft> = BTreeMap::new();
+    let mut unit_includes: BTreeMap<(i64, i64), Vec<UnitOptionInclude>> = BTreeMap::new();
     let mut failed = 0usize;
     let mut fetched = 0usize;
     for army in armies.iter().filter(|army| importable_army(army)) {
@@ -132,6 +133,7 @@ pub fn import_from_army_api(
         eprintln!("  {} ({})", army.name, army.id);
         absorb_filters(&mut names, &document);
         absorb_units(&mut drafts, &names, army, &armies, &document);
+        absorb_unit_includes(&mut unit_includes, &document);
     }
     let mut profiles: Vec<ProfileDraft> = drafts.into_values().collect();
     if profiles.is_empty() {
@@ -144,12 +146,126 @@ pub fn import_from_army_api(
     if let Some(path) = mesh_file.filter(|path| path.exists()) {
         profiles.extend(mod_only_profiles(path, &armies)?);
     }
-    let report = store_profiles(conn, &profiles)?;
+    let includes: Vec<UnitOptionInclude> = unit_includes.into_values().flatten().collect();
+    let report = store_profiles(conn, &profiles, &includes)?;
     Ok(ArmyImportReport {
         armies: fetched,
         failed_armies: failed,
         ..report
     })
+}
+
+/// Récupère les `includes` d'une option d'unité depuis l'API Army (sectorielle donnée).
+pub fn fetch_unit_option_includes(
+    army_id: u32,
+    unit_id: u32,
+    unit_option_id: u32,
+) -> Result<Vec<UnitOptionInclude>> {
+    let client = reqwest::blocking::Client::builder()
+        .user_agent("poissonnerie-elo/0.1")
+        .build()?;
+    let url = format!("https://api.corvusbelli.com/army/units/en/{army_id}");
+    let document = fetch_json(&client, &url)?;
+    Ok(unit_option_includes_from_document(
+        &document,
+        i64::from(unit_id),
+        i64::from(unit_option_id),
+    ))
+}
+
+fn unit_option_includes_from_document(
+    document: &Value,
+    unit_id: i64,
+    unit_option_id: i64,
+) -> Vec<UnitOptionInclude> {
+    let Some(units) = document.get("units").and_then(Value::as_array) else {
+        return Vec::new();
+    };
+    let Some(unit) = units
+        .iter()
+        .find(|candidate| candidate.get("id").and_then(Value::as_i64) == Some(unit_id))
+    else {
+        return Vec::new();
+    };
+    parse_unit_option_includes(unit, unit_id, unit_option_id)
+}
+
+fn parse_unit_option_includes(
+    unit: &Value,
+    unit_id: i64,
+    unit_option_id: i64,
+) -> Vec<UnitOptionInclude> {
+    let Some(options) = unit.get("options").and_then(Value::as_array) else {
+        return Vec::new();
+    };
+    let Some(option) = options.iter().find(|candidate| {
+        candidate.get("id").and_then(Value::as_i64) == Some(unit_option_id)
+            && !candidate
+                .get("disabled")
+                .and_then(Value::as_bool)
+                .unwrap_or(false)
+    }) else {
+        return Vec::new();
+    };
+    let Some(includes) = option.get("includes").and_then(Value::as_array) else {
+        return Vec::new();
+    };
+    includes
+        .iter()
+        .enumerate()
+        .filter_map(|(sort_order, include)| {
+            let group_id = include.get("group").and_then(Value::as_i64)?;
+            let option_id = include.get("option").and_then(Value::as_i64)?;
+            let quantity = include
+                .get("q")
+                .and_then(Value::as_i64)
+                .unwrap_or(1)
+                .max(1);
+            Some(UnitOptionInclude {
+                unit_id,
+                unit_option_id,
+                sort_order: sort_order as i64,
+                group_id,
+                option_id,
+                quantity,
+            })
+        })
+        .collect()
+}
+
+fn absorb_unit_includes(
+    dest: &mut BTreeMap<(i64, i64), Vec<UnitOptionInclude>>,
+    document: &Value,
+) {
+    let Some(units) = document.get("units").and_then(Value::as_array) else {
+        return;
+    };
+    for unit in units {
+        let Some(unit_id) = unit.get("id").and_then(Value::as_i64) else {
+            continue;
+        };
+        let Some(options) = unit.get("options").and_then(Value::as_array) else {
+            continue;
+        };
+        for option in options {
+            if option
+                .get("disabled")
+                .and_then(Value::as_bool)
+                .unwrap_or(false)
+            {
+                continue;
+            }
+            let Some(unit_option_id) = option.get("id").and_then(Value::as_i64) else {
+                continue;
+            };
+            let includes = parse_unit_option_includes(unit, unit_id, unit_option_id);
+            if includes.is_empty() {
+                continue;
+            }
+            dest.entry((unit_id, unit_option_id))
+                .or_insert(includes);
+        }
+    }
 }
 
 fn fetch_json(client: &reqwest::blocking::Client, url: &str) -> Result<Value> {
@@ -1545,12 +1661,36 @@ fn snapshot_colors(conn: &Connection) -> Result<HashMap<String, String>> {
     Ok(colors)
 }
 
-fn store_profiles(conn: &Connection, profiles: &[ProfileDraft]) -> Result<ArmyImportReport> {
+fn store_profiles(
+    conn: &Connection,
+    profiles: &[ProfileDraft],
+    includes: &[UnitOptionInclude],
+) -> Result<ArmyImportReport> {
     let tx = conn.unchecked_transaction()?;
     tx.execute("DELETE FROM tts_profile_traits", [])?;
     tx.execute("DELETE FROM tts_profile_sectorials", [])?;
     tx.execute("DELETE FROM tts_profile_forms", [])?;
     tx.execute("DELETE FROM tts_profiles", [])?;
+    tx.execute("DELETE FROM tts_army_unit_includes", [])?;
+    for include in includes {
+        tx.execute(
+            "
+            INSERT INTO tts_army_unit_includes (
+                unit_id, unit_option_id, sort_order,
+                included_group_id, included_option_id, quantity
+            )
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+            ",
+            params![
+                include.unit_id,
+                include.unit_option_id,
+                include.sort_order,
+                include.group_id,
+                include.option_id,
+                include.quantity,
+            ],
+        )?;
+    }
     let mut forms = 0usize;
     let mut sectorials = 0usize;
     for profile in profiles {
@@ -2081,6 +2221,67 @@ mod tests {
                 .filter(|profile| profile.isc.contains("Polaris") || profile.isc.contains("Masha"))
                 .count(),
             3
+        );
+
+        let mut includes = BTreeMap::new();
+        absorb_unit_includes(&mut includes, &document);
+        assert_eq!(
+            includes.get(&(1522, 1)).map(Vec::as_slice),
+            Some(
+                [
+                    UnitOptionInclude {
+                        unit_id: 1522,
+                        unit_option_id: 1,
+                        sort_order: 0,
+                        group_id: 1,
+                        option_id: 1,
+                        quantity: 1,
+                    },
+                    UnitOptionInclude {
+                        unit_id: 1522,
+                        unit_option_id: 1,
+                        sort_order: 1,
+                        group_id: 2,
+                        option_id: 1,
+                        quantity: 1,
+                    },
+                ]
+                .as_slice()
+            )
+        );
+        assert_eq!(
+            includes.get(&(1522, 2)).map(|rows| rows
+                .iter()
+                .map(|row| (row.group_id, row.option_id))
+                .collect::<Vec<_>>()),
+            Some(vec![(1, 1), (2, 2)])
+        );
+    }
+
+    #[test]
+    fn parses_mirage_unit_option_includes() {
+        let document = serde_json::json!({
+            "units": [{
+                "id": 258,
+                "name": "EQUIPE MIRAGE-5",
+                "options": [{
+                    "id": 1,
+                    "name": "EQUIPE MIRAGE-5 (MARGOT & DUROC)",
+                    "disabled": false,
+                    "includes": [
+                        {"q": 1, "group": 1, "option": 1},
+                        {"q": 1, "group": 2, "option": 1}
+                    ]
+                }]
+            }]
+        });
+        let includes = unit_option_includes_from_document(&document, 258, 1);
+        assert_eq!(
+            includes
+                .iter()
+                .map(|row| (row.group_id, row.option_id, row.quantity))
+                .collect::<Vec<_>>(),
+            vec![(1, 1, 1), (2, 1, 1)]
         );
     }
 }

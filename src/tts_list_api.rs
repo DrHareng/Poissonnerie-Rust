@@ -257,12 +257,113 @@ fn expand_member(
     sectorial_iscs: &HashSet<String>,
     preferred_painter: Option<&str>,
 ) -> Result<Vec<ExpandEntry>, ApiError> {
+    let slots = resolve_profile_slots(state, member, army_id)?;
+    let mut entries = Vec::new();
+    for (slot_index, slot) in slots.iter().enumerate() {
+        let customization = if slot_index == 0 {
+            member.customization_json.clone()
+        } else {
+            None
+        };
+        entries.extend(expand_profile_slot(
+            state,
+            member,
+            slot.group_id,
+            slot.option_id,
+            army_id,
+            customization,
+            all_figurines,
+            sectorial_iscs,
+            preferred_painter,
+        )?);
+    }
+    Ok(entries)
+}
+
+#[derive(Debug, Clone, Copy)]
+struct ProfileSlot {
+    group_id: u32,
+    option_id: u32,
+}
+
+/// `group_id = 0` = option d'unité (Mirage-5, Polaris…) → un slot par `includes`.
+fn resolve_profile_slots(
+    state: &AppState,
+    member: &ArmyListMember,
+    army_id: u32,
+) -> Result<Vec<ProfileSlot>, ApiError> {
+    if member.group_id != 0 {
+        return Ok(vec![ProfileSlot {
+            group_id: member.group_id,
+            option_id: member.option_id,
+        }]);
+    }
+
+    let mut includes = state
+        .tts_profiles
+        .unit_option_includes(member.unit_id, member.option_id)
+        .map_err(|error| ApiError::bad_request(error.to_string()))?;
+
+    if includes.is_empty() {
+        // Cache local absent (import antérieur) : résoudre via l'API Army.
+        match crate::tts_profile_army::fetch_unit_option_includes(
+            army_id,
+            member.unit_id,
+            member.option_id,
+        ) {
+            Ok(fetched) if !fetched.is_empty() => {
+                let _ = state.tts_profiles.replace_unit_option_includes(&fetched);
+                includes = fetched;
+            }
+            Ok(_) => {}
+            Err(error) => {
+                eprintln!(
+                    "includes unit {} opt {} (army {}) : {error}",
+                    member.unit_id, member.option_id, army_id
+                );
+            }
+        }
+    }
+
+    if includes.is_empty() {
+        return Ok(vec![ProfileSlot {
+            group_id: member.group_id,
+            option_id: member.option_id,
+        }]);
+    }
+
+    let mut slots = Vec::new();
+    for include in includes {
+        let group_id = u32::try_from(include.group_id).unwrap_or(0);
+        let option_id = u32::try_from(include.option_id).unwrap_or(0);
+        let quantity = usize::try_from(include.quantity.max(1)).unwrap_or(1);
+        for _ in 0..quantity {
+            slots.push(ProfileSlot {
+                group_id,
+                option_id,
+            });
+        }
+    }
+    Ok(slots)
+}
+
+fn expand_profile_slot(
+    state: &AppState,
+    member: &ArmyListMember,
+    group_id: u32,
+    option_id: u32,
+    army_id: u32,
+    customization_json: Option<String>,
+    all_figurines: &[TtsFigurine],
+    sectorial_iscs: &HashSet<String>,
+    preferred_painter: Option<&str>,
+) -> Result<Vec<ExpandEntry>, ApiError> {
     let profile = state
         .tts_profiles
         .find_by_army_source(
             member.unit_id,
-            member.group_id,
-            member.option_id,
+            group_id,
+            option_id,
             Some(i64::from(army_id)),
         )
         .map_err(|error| ApiError::bad_request(error.to_string()))?;
@@ -281,11 +382,11 @@ fn expand_member(
     let mut entries = vec![ExpandEntry {
         index: 0,
         unit_id: member.unit_id,
-        group_id: member.group_id,
-        option_id: member.option_id,
+        group_id,
+        option_id,
         combat_group: member.combat_group,
         reinforcements: member.reinforcements,
-        customization_json: member.customization_json.clone(),
+        customization_json,
         form_id: None,
         holomask: false,
         holomask_silhouette_size: None,
@@ -318,8 +419,8 @@ fn expand_member(
                     entries.push(ExpandEntry {
                         index: 0,
                         unit_id: member.unit_id,
-                        group_id: member.group_id,
-                        option_id: member.option_id,
+                        group_id,
+                        option_id,
                         combat_group: member.combat_group,
                         reinforcements: member.reinforcements,
                         customization_json: None,
@@ -336,8 +437,8 @@ fn expand_member(
                 entries.push(ExpandEntry {
                     index: 0,
                     unit_id: member.unit_id,
-                    group_id: member.group_id,
-                    option_id: member.option_id,
+                    group_id,
+                    option_id,
                     combat_group: member.combat_group,
                     reinforcements: member.reinforcements,
                     customization_json: None,

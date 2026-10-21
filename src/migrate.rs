@@ -1164,6 +1164,19 @@ fn migrate_tts_profiles(conn: &Connection) -> Result<()> {
         );
         CREATE INDEX IF NOT EXISTS idx_tts_profile_traits_profile
             ON tts_profile_traits(profile_id, form_id, sort_order);
+
+        -- Options d'unité Army (group_id = 0) → sous-profils inclus (Mirage-5, Polaris…).
+        CREATE TABLE IF NOT EXISTS tts_army_unit_includes (
+            unit_id INTEGER NOT NULL,
+            unit_option_id INTEGER NOT NULL,
+            sort_order INTEGER NOT NULL,
+            included_group_id INTEGER NOT NULL,
+            included_option_id INTEGER NOT NULL,
+            quantity INTEGER NOT NULL DEFAULT 1,
+            PRIMARY KEY (unit_id, unit_option_id, sort_order)
+        );
+        CREATE INDEX IF NOT EXISTS idx_tts_army_unit_includes_lookup
+            ON tts_army_unit_includes(unit_id, unit_option_id);
         ",
     )?;
     Ok(())
