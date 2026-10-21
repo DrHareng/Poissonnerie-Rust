@@ -207,7 +207,7 @@ async fn build_bag(
         } else {
             color_g2
         };
-        let (model, description) = if let Some(form_id) = pick.form_id {
+        let (model, description, deployable_traits) = if let Some(form_id) = pick.form_id {
             let (form, parent_id) = state
                 .tts_profiles
                 .get_peripheral_form(form_id)
@@ -226,6 +226,8 @@ async fn build_bag(
                     color,
                 ),
                 description,
+                // Périphérique : pas de déployables (évite le doublon avec le profil parent).
+                None,
             )
         } else {
             let profile = state
@@ -234,6 +236,7 @@ async fn build_bag(
                 .map_err(|error| ApiError::bad_request(error.to_string()))?
                 .ok_or_else(|| ApiError::bad_request("profil introuvable"))?;
             let description = profile.description_tts.clone();
+            let traits = profile.traits.clone();
             (
                 tts_object::saved_model(
                     &figurine.asset_bundle_url,
@@ -241,9 +244,15 @@ async fn build_bag(
                     color,
                 ),
                 description,
+                Some(traits),
             )
         };
         models.extend(tts_object::expand_echo_models(model, &description));
+        if let Some(traits) = deployable_traits {
+            models.extend(crate::tts_deployable::tinted_deployables_for_traits(
+                &traits, color,
+            ));
+        }
     }
 
     Ok(Json(tts_object::save_bag(&body.bag_name, models)))

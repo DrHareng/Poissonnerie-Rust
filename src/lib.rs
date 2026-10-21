@@ -22,6 +22,7 @@ pub mod store;
 pub mod tournament;
 pub mod tournament_api;
 pub mod tournament_store;
+pub mod tts_deployable;
 pub mod tts_figurine;
 pub mod tts_figurine_api;
 pub mod tts_list_api;
