@@ -18,6 +18,7 @@ import {
   expandTtsList,
   fetchTtsFigurineLabels,
   fetchTtsFigurines,
+  fetchTtsProfiles,
 } from '@/lib/api'
 import { isListableArmy } from '@/lib/army'
 import { normalizeArmyListCode } from '@/lib/armyList'
@@ -50,6 +51,10 @@ const error = ref('')
 const result = ref<TtsListExpandResult | null>(null)
 /** index d'entrée → figurine sélectionnée (suggestion ou catalogue) */
 const picks = ref<Record<number, TtsFigurine | TtsListRankedFigurine>>({})
+/** index d'entrée Holomask → profil de couverture choisi */
+const holomaskProfiles = ref<Record<number, TtsProfileSummary>>({})
+/** Profils de la sectorielle (pour le choix Holomask). */
+const sectorProfiles = ref<TtsProfileSummary[]>([])
 
 const bagName = ref('')
 const colorG1 = ref('FFFFFF')
@@ -72,17 +77,28 @@ const zoomEntryIndex = ref<number | null>(null)
 const zoomIndex = ref(0)
 
 const unresolvedCount = computed(
-  () => result.value?.entries.filter((entry) => !entry.profile).length ?? 0,
+  () =>
+    result.value?.entries.filter((entry) => !entry.holomask && !entry.profile).length ?? 0,
 )
 
 const missingFigCount = computed(
   () =>
-    result.value?.entries.filter((entry) => entry.profile && !picks.value[entry.index]).length ?? 0,
+    result.value?.entries.filter((entry) => {
+      if (entry.holomask) {
+        return !holomaskProfiles.value[entry.index] || !picks.value[entry.index]
+      }
+      return Boolean(entry.profile && !picks.value[entry.index])
+    }).length ?? 0,
 )
 
 const readyPickCount = computed(() => {
   if (!result.value) return 0
-  return result.value.entries.filter((entry) => entry.profile && picks.value[entry.index]).length
+  return result.value.entries.filter((entry) => {
+    if (entry.holomask) {
+      return Boolean(holomaskProfiles.value[entry.index] && picks.value[entry.index])
+    }
+    return Boolean(entry.profile && picks.value[entry.index])
+  }).length
 })
 
 const pickerArmies = computed(() => armies.value.filter((army) => isListableArmy(army)))
@@ -99,8 +115,10 @@ const pickerEntry = computed(() => {
 
 /** Seule la taille compte pour le choix d’une autre fig (pas le type camo/imp). */
 const requiredSilhouetteSize = computed(() => {
-  const size = pickerEntry.value?.profile?.silhouette_size?.trim()
-  return size || ''
+  const entry = pickerEntry.value
+  if (!entry) return ''
+  if (entry.holomask) return entry.holomask_silhouette_size?.trim() || ''
+  return effectiveProfile(entry)?.silhouette_size?.trim() || ''
 })
 
 const pickerFiltered = computed(() => {
@@ -190,6 +208,11 @@ function fullPhotoSrc(figurine: Pick<TtsFigurine, 'photo_url' | 'updated_at'>) {
   return withBase(`${figurine.photo_url}?v=${figurine.updated_at}`)
 }
 
+function effectiveProfile(entry: TtsListExpandEntry) {
+  if (entry.holomask) return holomaskProfiles.value[entry.index] ?? null
+  return entry.profile
+}
+
 function pickFor(entry: TtsListExpandEntry) {
   return picks.value[entry.index] ?? null
 }
@@ -199,9 +222,38 @@ function pickExactLoadout(entry: TtsListExpandEntry) {
   return Boolean(pick && 'exact_loadout' in pick && pick.exact_loadout)
 }
 
+function rankCatalogFigurines(isc: string, loadout: string): TtsListRankedFigurine[] {
+  const iscKey = isc.trim().toLowerCase()
+  const loadoutKey = loadout.trim().toLowerCase()
+  const painterKey = preferredPainter.value.trim().toLowerCase()
+  const ranked = catalog.value
+    .filter((figurine) => figurine.isc.trim().toLowerCase() === iscKey)
+    .map((figurine) => {
+      const exact_loadout =
+        Boolean(loadoutKey) && figurine.loadout.trim().toLowerCase() === loadoutKey
+      let score = 0
+      if (exact_loadout) score += 100
+      if (painterKey && figurine.painter.trim().toLowerCase() === painterKey) score += 10
+      if (figurine.asset_bundle_url.trim()) score += 1
+      return { ...figurine, score, exact_loadout }
+    })
+  ranked.sort(
+    (left, right) =>
+      right.score - left.score ||
+      left.painter.localeCompare(right.painter, 'fr', { sensitivity: 'base' }) ||
+      left.id - right.id,
+  )
+  return ranked
+}
+
 function choiceFigurines(entry: TtsListExpandEntry) {
   const selected = picks.value[entry.index]
-  const rows = [...entry.figurines]
+  const rows = entry.holomask
+    ? (() => {
+        const profile = holomaskProfiles.value[entry.index]
+        return profile ? rankCatalogFigurines(profile.isc, profile.loadout) : []
+      })()
+    : [...entry.figurines]
   if (selected && !rows.some((figurine) => figurine.id === selected.id)) {
     rows.unshift(selected as TtsListRankedFigurine)
   }
@@ -210,6 +262,40 @@ function choiceFigurines(entry: TtsListExpandEntry) {
 
 function selectFigurine(entryIndex: number, figurine: TtsFigurine | TtsListRankedFigurine) {
   picks.value = { ...picks.value, [entryIndex]: figurine }
+}
+
+function holomaskProfileOptions(entry: TtsListExpandEntry) {
+  const size = entry.holomask_silhouette_size?.trim()
+  if (!size) return [] as { value: string; label: string }[]
+  return sectorProfiles.value
+    .filter((profile) => profile.silhouette_size?.trim() === size)
+    .map((profile) => ({
+      value: String(profile.id),
+      label: `${profile.isc} · ${profile.loadout || '—'}`,
+    }))
+}
+
+async function selectHolomaskProfile(entryIndex: number, profileId: string | undefined) {
+  if (!profileId) {
+    const next = { ...holomaskProfiles.value }
+    delete next[entryIndex]
+    holomaskProfiles.value = next
+    const nextPicks = { ...picks.value }
+    delete nextPicks[entryIndex]
+    picks.value = nextPicks
+    return
+  }
+  const profile = sectorProfiles.value.find((row) => String(row.id) === profileId)
+  if (!profile) return
+  holomaskProfiles.value = { ...holomaskProfiles.value, [entryIndex]: profile }
+  await ensureCatalog()
+  const first = rankCatalogFigurines(profile.isc, profile.loadout)[0]
+  if (first) selectFigurine(entryIndex, first)
+  else {
+    const nextPicks = { ...picks.value }
+    delete nextPicks[entryIndex]
+    picks.value = nextPicks
+  }
 }
 
 function scrollChoices(entryIndex: number, direction: -1 | 1) {
@@ -301,8 +387,16 @@ async function loadPickerLabels() {
 }
 
 async function openPicker(entry: TtsListExpandEntry) {
-  if (!entry.profile || !result.value) return
-  if (!entry.profile.silhouette_size?.trim()) {
+  if (!result.value) return
+  const profile = effectiveProfile(entry)
+  if (!profile) {
+    toast.error(entry.holomask ? 'Choisis d’abord un profil de couverture' : 'Profil manquant')
+    return
+  }
+  const size = entry.holomask
+    ? entry.holomask_silhouette_size?.trim()
+    : profile.silhouette_size?.trim()
+  if (!size) {
     toast.error('Ce profil n’a pas de taille de silhouette définie')
     return
   }
@@ -340,20 +434,27 @@ function chooseFromCatalog(figurine: TtsFigurine) {
 async function downloadBag() {
   if (!result.value || downloading.value) return
   const bagPicks = result.value.entries.flatMap((entry) => {
-    const profile = entry.profile
+    const profile = effectiveProfile(entry)
     const figurine = picks.value[entry.index]
     if (!profile || !figurine) return []
     return [
       {
         figurine_id: figurine.id,
         profile_id: profile.id,
-        form_id: entry.form_id ?? undefined,
+        form_id: entry.holomask ? undefined : entry.form_id ?? undefined,
         combat_group: entry.combat_group,
       },
     ]
   })
   if (!bagPicks.length) {
     toast.error('Sélectionne au moins une figurine avec un profil')
+    return
+  }
+  const incompleteHolomask = result.value.entries.some(
+    (entry) => entry.holomask && (!holomaskProfiles.value[entry.index] || !picks.value[entry.index]),
+  )
+  if (incompleteHolomask) {
+    toast.error('Choisis un profil et une figurine pour chaque Holomask')
     return
   }
   downloading.value = true
@@ -387,6 +488,8 @@ async function launch() {
   error.value = ''
   result.value = null
   picks.value = {}
+  holomaskProfiles.value = {}
+  sectorProfiles.value = []
   try {
     const expanded = await expandTtsList(normalized, preferredPainter.value || undefined)
     result.value = expanded
@@ -400,6 +503,10 @@ async function launch() {
       if (first) next[entry.index] = first
     }
     picks.value = next
+    if (expanded.entries.some((entry) => entry.holomask)) {
+      await ensureCatalog()
+      sectorProfiles.value = await fetchTtsProfiles({ armyId: expanded.army_id })
+    }
     if (expanded.entries.length === 0) {
       toast.message('Liste vide')
     } else {
@@ -475,7 +582,13 @@ async function launch() {
           <div class="flex flex-wrap items-baseline justify-between gap-2">
             <div>
               <p class="font-medium">
-                <template v-if="entry.profile">
+                <template v-if="entry.holomask">
+                  Holomask
+                  <span class="text-muted-foreground font-normal">
+                    · pour {{ entry.holomask_source_isc || '—' }}
+                  </span>
+                </template>
+                <template v-else-if="entry.profile">
                   {{ entry.profile.isc }}
                   <span class="text-muted-foreground font-normal">· {{ entry.profile.loadout || '—' }}</span>
                 </template>
@@ -488,19 +601,35 @@ async function launch() {
               </p>
               <p class="text-muted-foreground text-xs">
                 CG {{ entry.combat_group }}
+                <span v-if="entry.holomask">
+                  · couverture S{{ entry.holomask_silhouette_size || '—' }}
+                </span>
                 <span v-if="entry.form_id"> · périphérique</span>
                 <span v-if="entry.reinforcements"> · renforts</span>
                 <span v-if="entry.customization_json"> · custom</span>
-                <span v-if="entry.profile && silhouetteOf(entry.profile)">
+                <span v-if="!entry.holomask && entry.profile && silhouetteOf(entry.profile)">
                   · {{ silhouetteOf(entry.profile) }}
                 </span>
-                <span v-if="!entry.profile" class="text-destructive"> · profil absent</span>
+                <span v-if="!entry.holomask && !entry.profile" class="text-destructive"> · profil absent</span>
               </p>
             </div>
             <p v-if="pickFor(entry)" class="text-muted-foreground text-xs">
               {{ pickFor(entry)?.painter || 'Sans peintre' }}
               <span v-if="pickExactLoadout(entry)"> · loadout exact</span>
             </p>
+          </div>
+
+          <div v-if="entry.holomask" class="mt-3 grid gap-1.5 sm:max-w-md">
+            <Label>Profil de couverture</Label>
+            <PlayerPicker
+              :model-value="holomaskProfiles[entry.index] ? String(holomaskProfiles[entry.index].id) : undefined"
+              :options="holomaskProfileOptions(entry)"
+              allow-empty
+              empty-label="Choisir un profil…"
+              placeholder="Même sectorielle · même silhouette"
+              empty-message="Aucun profil de cette taille dans la sectorielle."
+              @update:model-value="selectHolomaskProfile(entry.index, $event)"
+            />
           </div>
 
           <div class="mt-3 flex items-stretch gap-1">
@@ -559,7 +688,7 @@ async function launch() {
               </button>
 
               <button
-                v-if="entry.profile"
+                v-if="effectiveProfile(entry)"
                 type="button"
                 class="border-border hover:border-foreground/40 focus-visible:ring-ring text-muted-foreground hover:text-foreground flex w-28 shrink-0 flex-col items-center justify-center gap-1 rounded-md border border-dashed px-2 py-3 text-center transition focus-visible:outline-none focus-visible:ring-2"
                 @click="openPicker(entry)"
@@ -582,7 +711,13 @@ async function launch() {
           </div>
 
           <p
-            v-if="entry.profile && !choiceFigurines(entry).length"
+            v-if="entry.holomask && !holomaskProfiles[entry.index]"
+            class="text-muted-foreground mt-2 text-sm"
+          >
+            Choisis un profil de la sectorielle avec la silhouette S{{ entry.holomask_silhouette_size || '—' }}.
+          </p>
+          <p
+            v-else-if="effectiveProfile(entry) && !choiceFigurines(entry).length"
             class="text-muted-foreground mt-2 text-sm"
           >
             Aucune figurine suggérée pour cet ISC — utilise « Choisir une autre figurine ».

@@ -211,7 +211,7 @@ fn paint_nickname(nickname: &str, hex: &str) -> String {
     }
 }
 
-fn description_plain(description: &str) -> String {
+pub fn description_plain(description: &str) -> String {
     let lowered: String = description
         .chars()
         .filter(|char| !char.is_whitespace())
@@ -287,9 +287,8 @@ pub fn saved_model(
         &profile.description_tts,
         color,
     );
-    let mut states = Map::new();
-    let mut index = 2_i64;
-    push_profile_silhouettes(&mut states, &mut index, profile, color);
+    let mut items: Vec<StateItem> = Vec::new();
+    push_profile_silhouettes(&mut items, profile, color);
     let mut forms: Vec<&ModelForm> = profile
         .forms
         .iter()
@@ -306,14 +305,51 @@ pub fn saved_model(
                 color,
             ),
         };
-        push(&mut states, &mut index, body);
-        push_form_silhouettes(&mut states, &mut index, form, color);
+        items.push(StateItem::Body(body));
+        push_form_silhouettes(&mut items, form, color);
     }
     object
         .as_object_mut()
         .expect("objet TTS")
-        .insert("States".to_string(), Value::Object(states));
+        .insert("States".to_string(), Value::Object(states_from_items(items)));
     object
+}
+
+enum StateItem {
+    /// Forme / état figurine (transmutation, sapper…).
+    Body(Value),
+    /// Silhouette dédupliquée par clé (taille) : on ne garde que la dernière.
+    Silhouette { key: String, object: Value },
+}
+
+fn states_from_items(items: Vec<StateItem>) -> Map<String, Value> {
+    let mut states = Map::new();
+    let mut index = 2_i64;
+    for item in items {
+        match item {
+            StateItem::Body(object) | StateItem::Silhouette { object, .. } => {
+                push(&mut states, &mut index, object);
+            }
+        }
+    }
+    states
+}
+
+fn push_silhouette(items: &mut Vec<StateItem>, key: String, object: Value) {
+    items.retain(|item| match item {
+        StateItem::Silhouette { key: existing, .. } => existing != &key,
+        StateItem::Body(_) => true,
+    });
+    items.push(StateItem::Silhouette { key, object });
+}
+
+fn size_silhouette_key(source: &impl SilhouetteSource) -> String {
+    source
+        .silhouette_size()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or("2")
+        .to_string()
 }
 
 /// TTS charge un fichier importé comme une sauvegarde : `Grid` y est un
@@ -407,41 +443,40 @@ impl SilhouetteSource for ModelForm {
 }
 
 /// Imp-1 : états fig → IMP-2 → IMP-1. Imp-2 : fig → IMP-2. Sinon silhouette taille/camo.
+/// Les silhouettes de même taille (ex. S4 transmutation + S4 sapper) ne gardent que la dernière.
 fn push_profile_silhouettes(
-    states: &mut Map<String, Value>,
-    index: &mut i64,
+    items: &mut Vec<StateItem>,
     profile: &ModelProfile,
     color: DiffuseColor,
 ) {
     let kind = profile.silhouette_type.as_deref().unwrap_or("normale");
     match kind {
         "imp-1" => {
-            push(states, index, clone_imp_object("imp-2", color));
-            push(states, index, clone_imp_object("imp-1", color));
+            push_silhouette(items, "imp-2".to_string(), clone_imp_object("imp-2", color));
+            push_silhouette(items, "imp-1".to_string(), clone_imp_object("imp-1", color));
         }
         "imp-2" => {
-            push(states, index, clone_imp_object("imp-2", color));
+            push_silhouette(items, "imp-2".to_string(), clone_imp_object("imp-2", color));
         }
-        _ => push(states, index, silhouette(profile, color)),
+        _ => push_silhouette(
+            items,
+            size_silhouette_key(profile),
+            silhouette(profile, color),
+        ),
     }
 }
 
-fn push_form_silhouettes(
-    states: &mut Map<String, Value>,
-    index: &mut i64,
-    form: &ModelForm,
-    color: DiffuseColor,
-) {
+fn push_form_silhouettes(items: &mut Vec<StateItem>, form: &ModelForm, color: DiffuseColor) {
     let kind = form.silhouette_type.as_deref().unwrap_or("normale");
     match kind {
         "imp-1" => {
-            push(states, index, clone_imp_object("imp-2", color));
-            push(states, index, clone_imp_object("imp-1", color));
+            push_silhouette(items, "imp-2".to_string(), clone_imp_object("imp-2", color));
+            push_silhouette(items, "imp-1".to_string(), clone_imp_object("imp-1", color));
         }
         "imp-2" => {
-            push(states, index, clone_imp_object("imp-2", color));
+            push_silhouette(items, "imp-2".to_string(), clone_imp_object("imp-2", color));
         }
-        _ => push(states, index, silhouette(form, color)),
+        _ => push_silhouette(items, size_silhouette_key(form), silhouette(form, color)),
     }
 }
 
@@ -858,6 +893,60 @@ mod tests {
         assert!(config.imp.contains_key("imp-1"));
         assert!(config.imp.contains_key("imp-2"));
         assert!(config.imp["imp-1"].object["AttachedDecals"].is_array());
+    }
+
+    #[test]
+    fn duplicate_silhouette_sizes_keep_only_the_last() {
+        let mut profile = profile();
+        profile.silhouette_size = Some("2".to_string());
+        profile.forms = vec![
+            ModelForm {
+                id: 1,
+                state_index: 1,
+                nom_tts: "FORM A".to_string(),
+                description_tts: "[B]S[/B]: 4\n".to_string(),
+                marker_name: Some("Silhouette 4".to_string()),
+                silhouette_size: Some("4".to_string()),
+                silhouette_type: Some("normale".to_string()),
+                mesh_url: Some("https://example.test/a.obj".to_string()),
+                marker_mesh_url: None,
+            },
+            ModelForm {
+                id: 2,
+                state_index: 2,
+                nom_tts: "FORM B (sapper)".to_string(),
+                description_tts: "[B]S[/B]: 4\n".to_string(),
+                marker_name: Some("Silhouette 4".to_string()),
+                silhouette_size: Some("4".to_string()),
+                silhouette_type: Some("normale".to_string()),
+                mesh_url: Some("https://example.test/b.obj".to_string()),
+                marker_mesh_url: None,
+            },
+        ];
+        let object = saved_model("https://example.test/bundle", &profile, tint());
+        let states = object["States"].as_object().unwrap();
+        let silhouettes: Vec<_> = states
+            .values()
+            .filter(|state| {
+                state["Nickname"]
+                    .as_str()
+                    .is_some_and(|name| name.starts_with("Silhouette "))
+            })
+            .collect();
+        assert_eq!(silhouettes.len(), 2); // S2 + une seule S4
+        assert!(states.values().any(|state| state["Nickname"] == "Silhouette 2"));
+        assert!(states.values().any(|state| state["Nickname"] == "Silhouette 4"));
+        // La S4 restante suit la dernière forme (sapper).
+        let keys: Vec<_> = states.keys().cloned().collect();
+        let idx_b = keys
+            .iter()
+            .find(|key| states[*key]["Nickname"] == "FORM B (sapper)")
+            .unwrap();
+        let idx_s4 = keys
+            .iter()
+            .find(|key| states[*key]["Nickname"] == "Silhouette 4")
+            .unwrap();
+        assert!(idx_s4.parse::<i64>().unwrap() > idx_b.parse::<i64>().unwrap());
     }
 
     #[test]

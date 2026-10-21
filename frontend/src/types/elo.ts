@@ -704,6 +704,10 @@ export interface TtsListExpandEntry {
   customization_json?: string | null
   /** Périphérique (Auxbot, Crabbot…) : id de la forme state 900. */
   form_id?: number | null
+  /** Slot Holomask : profil de couverture à choisir (même sectorielle / silhouette). */
+  holomask?: boolean
+  holomask_silhouette_size?: string | null
+  holomask_source_isc?: string | null
   profile: TtsProfileSummary | null
   figurines: TtsListRankedFigurine[]
 }

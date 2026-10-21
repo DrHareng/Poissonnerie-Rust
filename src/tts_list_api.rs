@@ -55,12 +55,21 @@ struct ExpandEntry {
     /// Présent pour un périphérique (Auxbot, Crabbot…) : id de la forme state 900.
     #[serde(skip_serializing_if = "Option::is_none")]
     form_id: Option<i64>,
+    /// Slot Holomask : choisir un profil de couverture (même sectorielle / silhouette).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    holomask: bool,
+    /// Taille de silhouette imposée (celle du porteur).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    holomask_silhouette_size: Option<String>,
+    /// ISC du porteur (affichage UI).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    holomask_source_isc: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     profile: Option<TtsProfileSummary>,
     figurines: Vec<RankedFigurine>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Serialize)]
 struct RankedFigurine {
     #[serde(flatten)]
     figurine: TtsFigurine,
@@ -278,6 +287,9 @@ fn expand_member(
         reinforcements: member.reinforcements,
         customization_json: member.customization_json.clone(),
         form_id: None,
+        holomask: false,
+        holomask_silhouette_size: None,
+        holomask_source_isc: None,
         profile: profile.clone(),
         figurines,
     }];
@@ -301,6 +313,26 @@ fn expand_member(
                     sectorial_iscs,
                     preferred_painter,
                 );
+                let quantity = peripheral_quantity(&detail, form);
+                for _ in 0..quantity {
+                    entries.push(ExpandEntry {
+                        index: 0,
+                        unit_id: member.unit_id,
+                        group_id: member.group_id,
+                        option_id: member.option_id,
+                        combat_group: member.combat_group,
+                        reinforcements: member.reinforcements,
+                        customization_json: None,
+                        form_id: Some(form.id),
+                        holomask: false,
+                        holomask_silhouette_size: None,
+                        holomask_source_isc: None,
+                        profile: Some(peri_summary.clone()),
+                        figurines: peri_figurines.clone(),
+                    });
+                }
+            }
+            if has_holomask(&detail) {
                 entries.push(ExpandEntry {
                     index: 0,
                     unit_id: member.unit_id,
@@ -309,15 +341,88 @@ fn expand_member(
                     combat_group: member.combat_group,
                     reinforcements: member.reinforcements,
                     customization_json: None,
-                    form_id: Some(form.id),
-                    profile: Some(peri_summary),
-                    figurines: peri_figurines,
+                    form_id: None,
+                    holomask: true,
+                    holomask_silhouette_size: summary
+                        .silhouette_size
+                        .clone()
+                        .or_else(|| detail.silhouette_size.clone()),
+                    holomask_source_isc: Some(summary.isc.clone()),
+                    profile: None,
+                    figurines: Vec::new(),
                 });
             }
         }
     }
 
     Ok(entries)
+}
+
+fn has_holomask(detail: &TtsProfileDetail) -> bool {
+    if detail.traits.iter().any(|trait_| {
+        trait_.kind.eq_ignore_ascii_case("equipment")
+            && trait_.name.trim().eq_ignore_ascii_case("holomask")
+    }) {
+        return true;
+    }
+    tts_object::description_plain(&detail.description_tts).contains("holomask")
+}
+
+/// `ANTIPODE (x3)` / trait `detail: x3` → 3 entrées dans la liste.
+fn peripheral_quantity(detail: &TtsProfileDetail, form: &TtsProfileForm) -> usize {
+    let form_isc = form.isc.trim();
+    for trait_ in detail.traits.iter().chain(form.traits.iter()) {
+        if !trait_.kind.eq_ignore_ascii_case("equipment") {
+            continue;
+        }
+        if !trait_.name.trim().eq_ignore_ascii_case(form_isc) {
+            continue;
+        }
+        return parse_x_quantity(trait_.detail.as_deref()).max(1);
+    }
+    quantity_from_labeled_text(&detail.loadout, form_isc)
+        .or_else(|| quantity_from_labeled_text(&detail.description_tts, form_isc))
+        .or_else(|| quantity_from_labeled_text(&form.loadout, form_isc))
+        .or_else(|| quantity_from_labeled_text(&form.description_tts, form_isc))
+        .unwrap_or(1)
+        .max(1)
+}
+
+fn parse_x_quantity(raw: Option<&str>) -> usize {
+    let Some(raw) = raw.map(str::trim).filter(|value| !value.is_empty()) else {
+        return 1;
+    };
+    let digits = raw
+        .trim_start_matches(['x', 'X', '×'])
+        .trim()
+        .chars()
+        .take_while(|char| char.is_ascii_digit())
+        .collect::<String>();
+    digits.parse::<usize>().unwrap_or(1).max(1)
+}
+
+fn quantity_from_labeled_text(text: &str, name: &str) -> Option<usize> {
+    let needle = name.trim();
+    if needle.is_empty() {
+        return None;
+    }
+    let lower = text.to_ascii_lowercase();
+    let name_lower = needle.to_ascii_lowercase();
+    let mut rest = lower.as_str();
+    while let Some(pos) = rest.find(&name_lower) {
+        let after = rest[pos + name_lower.len()..].trim_start();
+        // « NAME x3 », « NAME(x3) », « NAME (x3) »
+        let after = after.strip_prefix('(').unwrap_or(after).trim_start();
+        if after.starts_with('x')
+            || after.starts_with('X')
+            || after.starts_with('×')
+            || after.chars().next().is_some_and(|char| char.is_ascii_digit())
+        {
+            return Some(parse_x_quantity(Some(after)));
+        }
+        rest = &rest[pos + name_lower.len()..];
+    }
+    None
 }
 
 fn summary_from_peripheral(
