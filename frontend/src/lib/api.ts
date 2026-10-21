@@ -120,6 +120,19 @@ export function expandTtsList(code: string, painter?: string): Promise<TtsListEx
   })
 }
 
+export function buildTtsListBag(payload: {
+  bag_name: string
+  color_g1?: string
+  color_g2?: string
+  army_id: number
+  picks: Array<{ figurine_id: number; profile_id: number; combat_group: number }>
+}): Promise<unknown> {
+  return request<unknown>('/api/tts-lists/bag', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  })
+}
+
 export function createTtsFigurine(payload: TtsFigurineWrite): Promise<TtsFigurine> {
   return request<TtsFigurine>('/api/tts-figurines', {
     method: 'POST',

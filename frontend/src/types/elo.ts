@@ -713,7 +713,22 @@ export interface TtsListExpandResult {
   sectoral_name: string
   name: string
   max_points: number
+  default_color: string
   entries: TtsListExpandEntry[]
+}
+
+export interface TtsListBagPick {
+  figurine_id: number
+  profile_id: number
+  combat_group: number
+}
+
+export interface TtsListBagRequest {
+  bag_name: string
+  color_g1?: string
+  color_g2?: string
+  army_id: number
+  picks: TtsListBagPick[]
 }
 
 export interface TtsProfileUpdate {

@@ -356,6 +356,7 @@ onMounted(() => {
                     ? 0
                     : (tournament.qualified_per_pool ?? 0)
                 "
+                :stacked="isTournamentFinalPoolPhase(tournament)"
                 selectable
                 @click.stop
                 @select-pool="openTournamentPool(tournament, $event)"

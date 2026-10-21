@@ -213,9 +213,71 @@ pub fn save_file(model: Value) -> Value {
     let name = model
         .get("Nickname")
         .and_then(|value| value.as_str())
-        .unwrap_or("Figurine");
+        .unwrap_or("Figurine")
+        .to_string();
+    save_objects(&name, vec![model])
+}
+
+/// Sac TTS contenant plusieurs figurines (états / silhouettes déjà sur chaque modèle).
+pub fn save_bag(bag_name: &str, models: Vec<Value>) -> Value {
+    let nickname = bag_name.trim();
+    let nickname = if nickname.is_empty() {
+        "Liste TTS".to_string()
+    } else {
+        nickname.to_string()
+    };
+    let bag = json!({
+        "Name": "Custom_Model_Bag",
+        "Transform": {
+            "posX": 0.0,
+            "posY": 1.0,
+            "posZ": 0.0,
+            "rotX": 0.0,
+            "rotY": 90.0,
+            "rotZ": 0.0,
+            "scaleX": 4.0,
+            "scaleY": 4.0,
+            "scaleZ": 4.0
+        },
+        "Nickname": nickname,
+        "Description": format!("{} figurine{}", models.len(), if models.len() > 1 { "s" } else { "" }),
+        "GMNotes": "",
+        "ColorDiffuse": { "r": 0.7, "g": 0.7, "b": 0.7 },
+        "Locked": false,
+        "Grid": true,
+        "Snap": true,
+        "IgnoreFoW": false,
+        "MeasureMovement": false,
+        "DragSelectable": true,
+        "Autoraise": true,
+        "Sticky": true,
+        "Tooltip": true,
+        "GridProjection": false,
+        "HideWhenFaceDown": false,
+        "Hands": false,
+        "MaterialIndex": -1,
+        "MeshIndex": -1,
+        "CustomMesh": {
+            "MeshURL": "http://cloud-3.steamusercontent.com/ugc/502526366065245451/F664D7049EE36B94AE02C97FB705AD4872DC04E1/",
+            "DiffuseURL": "http://cloud-3.steamusercontent.com/ugc/502526366065246579/FC165962015416BA8F5D7B9B849CC819CB818785/",
+            "NormalURL": "http://cloud-3.steamusercontent.com/ugc/502526366065246920/A5B7D90D38B8837254CF2DAABD1ED58DF79BEBF3/",
+            "ColliderURL": "http://cloud-3.steamusercontent.com/ugc/502526366065245451/F664D7049EE36B94AE02C97FB705AD4872DC04E1/",
+            "Convex": true,
+            "MaterialIndex": 0,
+            "TypeIndex": 6,
+            "CastShadows": true
+        },
+        "LuaScript": "",
+        "LuaScriptState": "",
+        "XmlUI": "",
+        "ContainedObjects": models
+    });
+    save_objects(&nickname, vec![bag])
+}
+
+fn save_objects(save_name: &str, objects: Vec<Value>) -> Value {
     json!({
-        "SaveName": name,
+        "SaveName": save_name,
         "GameMode": "",
         "Date": "",
         "Table": "",
@@ -231,7 +293,7 @@ pub fn save_file(model: Value) -> Value {
             "xSize": 2.0,
             "ySize": 2.0
         },
-        "ObjectStates": [model]
+        "ObjectStates": objects
     })
 }
 
