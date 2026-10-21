@@ -211,24 +211,34 @@ fn paint_nickname(nickname: &str, hex: &str) -> String {
     }
 }
 
-/// Compétence Holoecho (L1, etc.) : trois copies A/B/C dans le sac.
-pub fn has_holoecho(description: &str) -> bool {
+fn description_plain(description: &str) -> String {
     let lowered: String = description
         .chars()
         .filter(|char| !char.is_whitespace())
         .flat_map(|char| char.to_lowercase())
         .collect();
-    // Ignore le balisage TTS ([B], [-], …) pour matcher « Holoecho » / « Holoecho L1 ».
-    let plain: String = lowered
+    // Ignore le balisage TTS ([B], [-], …).
+    lowered
         .chars()
         .filter(|char| char.is_ascii_alphanumeric() || *char == '(' || *char == ')' || *char == '-')
-        .collect();
-    plain.contains("holoecho")
+        .collect()
+}
+
+/// Nombre de copies à générer : Holoprojector / Decoy (2) → 3 (A–C), Decoy (1) → 2 (A–B), sinon 1.
+pub fn echo_copy_count(description: &str) -> usize {
+    let plain = description_plain(description);
+    if plain.contains("holoprojector") || plain.contains("decoy(2)") {
+        return 3;
+    }
+    if plain.contains("decoy(1)") {
+        return 2;
+    }
+    1
 }
 
 /// Insère la lettre juste avant la fin de la balise de couleur `[-]`.
 /// Ex. `[00B0F2]FUSILIER[-] Combi` → `[00B0F2]FUSILIER A[-] Combi`.
-pub fn insert_holoecho_letter(nickname: &str, letter: char) -> String {
+pub fn insert_echo_letter(nickname: &str, letter: char) -> String {
     if let Some(pos) = nickname.find("[-]") {
         let before = nickname[..pos].trim_end();
         format!("{before} {letter}{}", &nickname[pos..])
@@ -237,7 +247,7 @@ pub fn insert_holoecho_letter(nickname: &str, letter: char) -> String {
     }
 }
 
-fn with_holoecho_letter(mut model: Value, letter: char) -> Value {
+fn with_echo_letter(mut model: Value, letter: char) -> Value {
     if let Some(nickname) = model
         .get("Nickname")
         .and_then(|value| value.as_str())
@@ -246,21 +256,23 @@ fn with_holoecho_letter(mut model: Value, letter: char) -> Value {
         if let Some(object) = model.as_object_mut() {
             object.insert(
                 "Nickname".to_string(),
-                Value::String(insert_holoecho_letter(&nickname, letter)),
+                Value::String(insert_echo_letter(&nickname, letter)),
             );
         }
     }
     model
 }
 
-/// Une figurine, ou trois copies A/B/C si le profil a Holoecho.
-pub fn expand_holoecho_models(model: Value, description: &str) -> Vec<Value> {
-    if !has_holoecho(description) {
+/// Une figurine, ou plusieurs copies lettrées (Holoprojector / Decoy).
+pub fn expand_echo_models(model: Value, description: &str) -> Vec<Value> {
+    let count = echo_copy_count(description);
+    if count <= 1 {
         return vec![model];
     }
     ['A', 'B', 'C']
         .into_iter()
-        .map(|letter| with_holoecho_letter(model.clone(), letter))
+        .take(count)
+        .map(|letter| with_echo_letter(model.clone(), letter))
         .collect()
 }
 
@@ -849,34 +861,31 @@ mod tests {
     }
 
     #[test]
-    fn holoecho_letter_goes_before_the_color_close_tag() {
-        assert!(has_holoecho("[B]Skills[/B]\n● Holoecho L1\n"));
-        assert!(!has_holoecho("[B]S[/B]: 2\n"));
+    fn echo_letters_follow_holoprojector_and_decoy() {
+        assert_eq!(echo_copy_count("[B]S[/B]: 2\n"), 1);
         assert_eq!(
-            insert_holoecho_letter("[00B0F2]FUSILIER[-] Combi Rifle", 'A'),
+            echo_copy_count("[B]Equipment[/B]\n● Holoprojector\n"),
+            3
+        );
+        assert_eq!(echo_copy_count("[B]Skills[/B]\n● Decoy (1)\n"), 2);
+        assert_eq!(echo_copy_count("[B]Skills[/B]\n● Decoy (2)\n"), 3);
+        assert_eq!(
+            insert_echo_letter("[00B0F2]FUSILIER[-] Combi Rifle", 'A'),
             "[00B0F2]FUSILIER A[-] Combi Rifle"
         );
+
         let model = saved_model(
             "https://example.test/bundle",
             &profile(),
             parse_color("00B0F2").expect("couleur"),
         );
-        let copies = expand_holoecho_models(
-            model,
-            "[B]Skills[/B] ● Holoecho\n[B]S[/B]: 2\n",
-        );
-        assert_eq!(copies.len(), 3);
-        assert_eq!(
-            copies[0]["Nickname"],
-            "[00B0F2]YUAN YUAN A[-] Chain Rifle"
-        );
-        assert_eq!(
-            copies[1]["Nickname"],
-            "[00B0F2]YUAN YUAN B[-] Chain Rifle"
-        );
-        assert_eq!(
-            copies[2]["Nickname"],
-            "[00B0F2]YUAN YUAN C[-] Chain Rifle"
-        );
+        let decoy1 = expand_echo_models(model.clone(), "● Decoy (1)\n");
+        assert_eq!(decoy1.len(), 2);
+        assert_eq!(decoy1[0]["Nickname"], "[00B0F2]YUAN YUAN A[-] Chain Rifle");
+        assert_eq!(decoy1[1]["Nickname"], "[00B0F2]YUAN YUAN B[-] Chain Rifle");
+
+        let holo = expand_echo_models(model, "● Holoprojector\n");
+        assert_eq!(holo.len(), 3);
+        assert_eq!(holo[2]["Nickname"], "[00B0F2]YUAN YUAN C[-] Chain Rifle");
     }
 }

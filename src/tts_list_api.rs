@@ -196,7 +196,7 @@ async fn build_bag(
             &model_from_detail(&profile),
             color,
         );
-        models.extend(tts_object::expand_holoecho_models(
+        models.extend(tts_object::expand_echo_models(
             model,
             &profile.description_tts,
         ));
