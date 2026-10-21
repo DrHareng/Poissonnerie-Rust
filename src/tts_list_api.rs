@@ -191,10 +191,14 @@ async fn build_bag(
         } else {
             color_g2
         };
-        models.push(tts_object::saved_model(
+        let model = tts_object::saved_model(
             &figurine.asset_bundle_url,
             &model_from_detail(&profile),
             color,
+        );
+        models.extend(tts_object::expand_holoecho_models(
+            model,
+            &profile.description_tts,
         ));
     }
 

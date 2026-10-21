@@ -97,14 +97,15 @@ const pickerEntry = computed(() => {
   return result.value.entries.find((entry) => entry.index === index) ?? null
 })
 
-const requiredSilhouette = computed(() => {
-  const profile = pickerEntry.value?.profile
-  return profile ? silhouetteOf(profile) : ''
+/** Seule la taille compte pour le choix d’une autre fig (pas le type camo/imp). */
+const requiredSilhouetteSize = computed(() => {
+  const size = pickerEntry.value?.profile?.silhouette_size?.trim()
+  return size || ''
 })
 
 const pickerFiltered = computed(() => {
-  const required = requiredSilhouette.value
-  if (!required) return [] as TtsFigurine[]
+  const requiredSize = requiredSilhouetteSize.value
+  if (!requiredSize) return [] as TtsFigurine[]
 
   const armyId = Number(pickerArmyId.value) || 0
   const painter = pickerPainter.value.trim().toLowerCase()
@@ -120,7 +121,7 @@ const pickerFiltered = computed(() => {
   if (painter) {
     rows = rows.filter((figurine) => figurine.painter.trim().toLowerCase() === painter)
   }
-  rows = rows.filter((figurine) => figurineSilhouette(figurine) === required)
+  rows = rows.filter((figurine) => figurineSilhouetteSize(figurine) === requiredSize)
   if (needle) {
     rows = rows.filter((figurine) =>
       [figurine.isc, figurine.loadout, figurine.painter, figurine.asset_bundle_url]
@@ -169,14 +170,14 @@ function silhouetteOf(
   return `S${size}`
 }
 
-function figurineSilhouette(figurine: TtsFigurine) {
+function figurineSilhouetteSize(figurine: TtsFigurine) {
   const isc = figurine.isc.trim().toLowerCase()
   const loadout = figurine.loadout.trim().toLowerCase()
   const sameIsc = pickerLabels.value.filter(
-    (label) => label.isc.trim().toLowerCase() === isc && silhouetteOf(label),
+    (label) => label.isc.trim().toLowerCase() === isc && label.silhouette_size?.trim(),
   )
   const exact = sameIsc.find((label) => label.loadout.trim().toLowerCase() === loadout)
-  return silhouetteOf(exact ?? sameIsc[0] ?? { marker_name: null, silhouette_size: null, silhouette_type: null })
+  return (exact ?? sameIsc[0])?.silhouette_size?.trim() ?? ''
 }
 
 function photoSrc(figurine: Pick<TtsFigurine, 'photo_url' | 'updated_at' | 'isc'>) {
@@ -301,8 +302,8 @@ async function loadPickerLabels() {
 
 async function openPicker(entry: TtsListExpandEntry) {
   if (!entry.profile || !result.value) return
-  if (!silhouetteOf(entry.profile)) {
-    toast.error('Ce profil n’a pas de silhouette définie')
+  if (!entry.profile.silhouette_size?.trim()) {
+    toast.error('Ce profil n’a pas de taille de silhouette définie')
     return
   }
   pickerEntryIndex.value = entry.index
@@ -654,7 +655,7 @@ async function launch() {
               Choisir une figurine
             </CardTitle>
             <CardDescription>
-              {{ pickerEntry.profile?.isc }} · silhouette {{ requiredSilhouette || '—' }}
+              {{ pickerEntry.profile?.isc }} · S{{ requiredSilhouetteSize || '—' }}
             </CardDescription>
             <Button
               type="button"
@@ -713,7 +714,7 @@ async function launch() {
               v-else-if="!pickerFiltered.length"
               class="text-muted-foreground shrink-0 text-sm"
             >
-              Aucune figurine avec la silhouette {{ requiredSilhouette }}.
+              Aucune figurine en S{{ requiredSilhouetteSize }}.
             </p>
             <div v-else class="min-h-0 flex-1 overflow-y-auto">
               <div class="grid grid-cols-3 gap-2 sm:grid-cols-4 md:grid-cols-5">

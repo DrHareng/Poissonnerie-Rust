@@ -211,6 +211,59 @@ fn paint_nickname(nickname: &str, hex: &str) -> String {
     }
 }
 
+/// Compétence Holoecho (L1, etc.) : trois copies A/B/C dans le sac.
+pub fn has_holoecho(description: &str) -> bool {
+    let lowered: String = description
+        .chars()
+        .filter(|char| !char.is_whitespace())
+        .flat_map(|char| char.to_lowercase())
+        .collect();
+    // Ignore le balisage TTS ([B], [-], …) pour matcher « Holoecho » / « Holoecho L1 ».
+    let plain: String = lowered
+        .chars()
+        .filter(|char| char.is_ascii_alphanumeric() || *char == '(' || *char == ')' || *char == '-')
+        .collect();
+    plain.contains("holoecho")
+}
+
+/// Insère la lettre juste avant la fin de la balise de couleur `[-]`.
+/// Ex. `[00B0F2]FUSILIER[-] Combi` → `[00B0F2]FUSILIER A[-] Combi`.
+pub fn insert_holoecho_letter(nickname: &str, letter: char) -> String {
+    if let Some(pos) = nickname.find("[-]") {
+        let before = nickname[..pos].trim_end();
+        format!("{before} {letter}{}", &nickname[pos..])
+    } else {
+        format!("{} {letter}", nickname.trim_end())
+    }
+}
+
+fn with_holoecho_letter(mut model: Value, letter: char) -> Value {
+    if let Some(nickname) = model
+        .get("Nickname")
+        .and_then(|value| value.as_str())
+        .map(str::to_string)
+    {
+        if let Some(object) = model.as_object_mut() {
+            object.insert(
+                "Nickname".to_string(),
+                Value::String(insert_holoecho_letter(&nickname, letter)),
+            );
+        }
+    }
+    model
+}
+
+/// Une figurine, ou trois copies A/B/C si le profil a Holoecho.
+pub fn expand_holoecho_models(model: Value, description: &str) -> Vec<Value> {
+    if !has_holoecho(description) {
+        return vec![model];
+    }
+    ['A', 'B', 'C']
+        .into_iter()
+        .map(|letter| with_holoecho_letter(model.clone(), letter))
+        .collect()
+}
+
 pub fn saved_model(
     asset_bundle_url: &str,
     profile: &ModelProfile,
@@ -793,5 +846,37 @@ mod tests {
         assert!(config.imp.contains_key("imp-1"));
         assert!(config.imp.contains_key("imp-2"));
         assert!(config.imp["imp-1"].object["AttachedDecals"].is_array());
+    }
+
+    #[test]
+    fn holoecho_letter_goes_before_the_color_close_tag() {
+        assert!(has_holoecho("[B]Skills[/B]\n● Holoecho L1\n"));
+        assert!(!has_holoecho("[B]S[/B]: 2\n"));
+        assert_eq!(
+            insert_holoecho_letter("[00B0F2]FUSILIER[-] Combi Rifle", 'A'),
+            "[00B0F2]FUSILIER A[-] Combi Rifle"
+        );
+        let model = saved_model(
+            "https://example.test/bundle",
+            &profile(),
+            parse_color("00B0F2").expect("couleur"),
+        );
+        let copies = expand_holoecho_models(
+            model,
+            "[B]Skills[/B] ● Holoecho\n[B]S[/B]: 2\n",
+        );
+        assert_eq!(copies.len(), 3);
+        assert_eq!(
+            copies[0]["Nickname"],
+            "[00B0F2]YUAN YUAN A[-] Chain Rifle"
+        );
+        assert_eq!(
+            copies[1]["Nickname"],
+            "[00B0F2]YUAN YUAN B[-] Chain Rifle"
+        );
+        assert_eq!(
+            copies[2]["Nickname"],
+            "[00B0F2]YUAN YUAN C[-] Chain Rifle"
+        );
     }
 }
