@@ -171,12 +171,12 @@ async fn figurine_object(
         ));
     }
     let color = diffuse_color(&state, query.army_id, query.color.as_deref())?;
-    let model = if let Some(form_id) = query.form_id {
+    let object = if let Some(form_id) = query.form_id {
         let (form, profile_id) = state
             .tts_profiles
-            .get_peripheral_form(form_id)
+            .get_form(form_id)
             .map_err(|error| ApiError::bad_request(error.to_string()))?
-            .ok_or_else(|| ApiError::bad_request("périphérique introuvable"))?;
+            .ok_or_else(|| ApiError::bad_request("forme introuvable"))?;
         let in_army = state
             .tts_profiles
             .profile_in_army(profile_id, query.army_id)
@@ -191,7 +191,11 @@ async fn figurine_object(
                 "ce loadout ne correspond pas à cet ISC",
             ));
         }
-        model_from_form(&form)
+        tts_object::saved_model(
+            &figurine.asset_bundle_url,
+            &model_from_form(&form),
+            color,
+        )
     } else {
         let profile_id = query
             .profile_id
@@ -215,13 +219,46 @@ async fn figurine_object(
                 "ce loadout ne correspond pas à cet ISC",
             ));
         }
-        model_profile(&profile)
+        let all_figurines = state
+            .tts_figurines
+            .list()
+            .map_err(|error| ApiError::bad_request(error.to_string()))?;
+        let form_assets = form_asset_bundles_from_profile(
+            &profile,
+            &all_figurines,
+            Some(figurine.painter.as_str()),
+        );
+        tts_object::saved_model_with_form_assets(
+            &figurine.asset_bundle_url,
+            &model_profile(&profile),
+            color,
+            &form_assets,
+        )
     };
-    Ok(Json(tts_object::save_file(tts_object::saved_model(
-        &figurine.asset_bundle_url,
-        &model,
-        color,
-    ))))
+    Ok(Json(tts_object::save_file(object)))
+}
+
+fn form_asset_bundles_from_profile(
+    profile: &crate::tts_profile::TtsProfileDetail,
+    figurines: &[crate::tts_figurine::TtsFigurine],
+    preferred_painter: Option<&str>,
+) -> std::collections::HashMap<i64, String> {
+    let mut assets = std::collections::HashMap::new();
+    for form in profile
+        .forms
+        .iter()
+        .filter(|form| form.state_index != 900)
+    {
+        if let Some(url) = crate::tts_figurine::best_asset_bundle(
+            figurines,
+            &form.isc,
+            &form.loadout,
+            preferred_painter,
+        ) {
+            assets.insert(form.id, url);
+        }
+    }
+    assets
 }
 
 async fn sectorial_color(

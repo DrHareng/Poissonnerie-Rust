@@ -39,6 +39,47 @@ pub struct TtsFigurine {
     pub sectorial_ids: Vec<i64>,
 }
 
+/// Meilleur asset bundle pour un ISC/loadout (peintre préféré, loadout exact, URL non vide).
+pub fn best_asset_bundle(
+    figurines: &[TtsFigurine],
+    isc: &str,
+    loadout: &str,
+    preferred_painter: Option<&str>,
+) -> Option<String> {
+    let isc_key = isc.trim().to_ascii_lowercase();
+    let loadout_key = loadout.trim().to_ascii_lowercase();
+    let painter_key = preferred_painter
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(|value| value.to_ascii_lowercase());
+
+    let mut best: Option<(i32, &TtsFigurine)> = None;
+    for figurine in figurines {
+        if figurine.isc.trim().to_ascii_lowercase() != isc_key {
+            continue;
+        }
+        if figurine.asset_bundle_url.trim().is_empty() {
+            continue;
+        }
+        let mut score = 1;
+        if !loadout_key.is_empty()
+            && figurine.loadout.trim().to_ascii_lowercase() == loadout_key
+        {
+            score += 100;
+        }
+        if painter_key.as_ref().is_some_and(|painter| {
+            figurine.painter.trim().to_ascii_lowercase() == *painter
+        }) {
+            score += 10;
+        }
+        match best {
+            Some((best_score, _)) if best_score >= score => {}
+            _ => best = Some((score, figurine)),
+        }
+    }
+    best.map(|(_, figurine)| figurine.asset_bundle_url.clone())
+}
+
 pub struct TtsFigurineStore {
     conn: Mutex<Connection>,
     uploads_root: PathBuf,
@@ -418,6 +459,39 @@ mod tests {
         store.delete(created.id).unwrap();
         assert!(store.list().unwrap().is_empty());
         let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn best_asset_prefers_painter_and_loadout() {
+        let figurines = vec![
+            TtsFigurine {
+                id: 1,
+                isc: "DOG-WARRIOR FORM".into(),
+                loadout: "Chain Rifle".into(),
+                painter: "Alex".into(),
+                asset_bundle_url: "https://a".into(),
+                photo_url: None,
+                created_at: 0,
+                updated_at: 0,
+                sectorial_ids: Vec::new(),
+            },
+            TtsFigurine {
+                id: 2,
+                isc: "DOG-WARRIOR FORM".into(),
+                loadout: "Chain Rifle".into(),
+                painter: "Léa".into(),
+                asset_bundle_url: "https://b".into(),
+                photo_url: None,
+                created_at: 0,
+                updated_at: 0,
+                sectorial_ids: Vec::new(),
+            },
+        ];
+        assert_eq!(
+            best_asset_bundle(&figurines, "dog-warrior form", "Chain Rifle", Some("Léa"))
+                .as_deref(),
+            Some("https://b")
+        );
     }
 
     #[test]

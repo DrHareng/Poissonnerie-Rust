@@ -1004,7 +1004,7 @@ pub struct TtsProfileLabel {
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub struct TtsProfileLoadout {
     pub profile_id: i64,
-    /// Présent pour un périphérique (state_index 900) : id de la forme, pas du profil.
+    /// Présent pour une forme (périphérique, transmute…) : id de la forme, pas du profil.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub form_id: Option<i64>,
     pub loadout: String,
@@ -1110,7 +1110,8 @@ impl TtsProfileStore {
         let conn = self.conn.lock().unwrap();
         let loadouts = list_loadouts(&conn, isc, Some(army_id))?;
         if loadouts.is_empty() {
-            list_peripheral_loadouts(&conn, isc, Some(army_id))
+            // Périphériques (900) ou formes de transmute / sapper (ISC distinct).
+            list_form_loadouts(&conn, isc, Some(army_id))
         } else {
             Ok(loadouts)
         }
@@ -1134,7 +1135,13 @@ impl TtsProfileStore {
 
     pub fn get_peripheral_form(&self, form_id: i64) -> Result<Option<(TtsProfileForm, i64)>> {
         let conn = self.conn.lock().unwrap();
-        get_peripheral_form(&conn, form_id)
+        get_form(&conn, form_id, Some(900))
+    }
+
+    /// Forme de profil (transmutation, sapper, périphérique…).
+    pub fn get_form(&self, form_id: i64) -> Result<Option<(TtsProfileForm, i64)>> {
+        let conn = self.conn.lock().unwrap();
+        get_form(&conn, form_id, None)
     }
 
     pub fn marker_mesh_catalog(&self) -> Result<BTreeMap<String, String>> {
@@ -1170,7 +1177,6 @@ impl TtsProfileStore {
             "
             SELECT isc, loadout
             FROM tts_profile_forms
-            WHERE state_index = 900
             ORDER BY isc COLLATE NOCASE, loadout COLLATE NOCASE, id
             ",
         )?;
@@ -1411,7 +1417,7 @@ fn list_loadouts(
     Ok(apply_loadout_differences(rows))
 }
 
-fn list_peripheral_loadouts(
+fn list_form_loadouts(
     conn: &Connection,
     isc: &str,
     army_id: Option<i64>,
@@ -1445,8 +1451,7 @@ fn list_peripheral_loadouts(
                 f.silhouette_type, f.description_tts
             FROM tts_profile_forms f
             JOIN tts_profiles p ON p.id = f.profile_id
-            WHERE f.state_index = 900
-              AND (
+            WHERE (
                 p.army_id = ?1
                 OR EXISTS (
                     SELECT 1 FROM tts_profile_sectorials s
@@ -1459,7 +1464,7 @@ fn list_peripheral_loadouts(
         let mapped = stmt.query_map(params![army_id], map_row)?;
         mapped
             .collect::<std::result::Result<Vec<_>, _>>()
-            .context("lecture des loadouts de périphériques")?
+            .context("lecture des loadouts de formes")?
     } else {
         let mut stmt = conn.prepare(
             "
@@ -1468,14 +1473,13 @@ fn list_peripheral_loadouts(
                 f.silhouette_type, f.description_tts
             FROM tts_profile_forms f
             JOIN tts_profiles p ON p.id = f.profile_id
-            WHERE f.state_index = 900
             ORDER BY f.loadout COLLATE NOCASE, p.faction_label COLLATE NOCASE, f.id
             ",
         )?;
         let mapped = stmt.query_map([], map_row)?;
         mapped
             .collect::<std::result::Result<Vec<_>, _>>()
-            .context("lecture des loadouts de périphériques")?
+            .context("lecture des loadouts de formes")?
     };
     let rows = rows
         .into_iter()
@@ -1540,8 +1544,7 @@ fn figurine_labels_for_army(conn: &Connection, army_id: i64) -> Result<Vec<TtsFi
         SELECT f.isc, f.loadout, f.marker_name, f.silhouette_size, f.silhouette_type
         FROM tts_profile_forms f
         JOIN tts_profiles p ON p.id = f.profile_id
-        WHERE f.state_index = 900
-          AND (
+        WHERE (
             p.army_id = ?1
             OR EXISTS (
                 SELECT 1 FROM tts_profile_sectorials s
@@ -1582,7 +1585,11 @@ fn figurine_labels_for_army(conn: &Connection, army_id: i64) -> Result<Vec<TtsFi
     Ok(rows)
 }
 
-fn get_peripheral_form(conn: &Connection, form_id: i64) -> Result<Option<(TtsProfileForm, i64)>> {
+fn get_form(
+    conn: &Connection,
+    form_id: i64,
+    only_state_index: Option<i64>,
+) -> Result<Option<(TtsProfileForm, i64)>> {
     let mut stmt = conn.prepare(
         "
         SELECT
@@ -1590,10 +1597,11 @@ fn get_peripheral_form(conn: &Connection, form_id: i64) -> Result<Option<(TtsPro
             f.silhouette_size, f.silhouette_type, f.marker_name, f.mesh_url,
             f.marker_mesh_url, f.profile_id
         FROM tts_profile_forms f
-        WHERE f.id = ?1 AND f.state_index = 900
+        WHERE f.id = ?1
+          AND (?2 IS NULL OR f.state_index = ?2)
         ",
     )?;
-    let mut rows = stmt.query(params![form_id])?;
+    let mut rows = stmt.query(params![form_id, only_state_index])?;
     let Some(row) = rows.next()? else {
         return Ok(None);
     };
@@ -2712,7 +2720,7 @@ mod tests {
         let camo = loadouts.iter().find(|row| row.extra_forms == 0).unwrap();
         assert!(camo.differences.contains("Mimetism(-3)"));
 
-        let peripherals = list_peripheral_loadouts(&conn, "staldrOn", None).unwrap();
+        let peripherals = list_form_loadouts(&conn, "staldrOn", None).unwrap();
         assert_eq!(peripherals.len(), 1);
         assert_eq!(peripherals[0].form_id, Some(staldrone_id));
         assert_eq!(peripherals[0].profile_id, yuan_id);

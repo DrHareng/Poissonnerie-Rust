@@ -1,6 +1,6 @@
 //! Expansion d'un code Army en slots TTS (profils + figurines candidates) et export de sac.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use axum::{extract::State, routing::post, Json, Router};
 use serde::{Deserialize, Serialize};
@@ -9,7 +9,7 @@ use serde_json::Value;
 use crate::{
     api::{ApiError, AppState},
     army_list::{self, parse_army_list, ArmyListMember},
-    tts_figurine::TtsFigurine,
+    tts_figurine::{self, TtsFigurine},
     tts_object::{self, ModelForm, ModelProfile},
     tts_profile::{TtsProfileDetail, TtsProfileForm, TtsProfileSummary},
 };
@@ -180,6 +180,10 @@ async fn build_bag(
         &tts_object::sectorial_color_hex(&army.slug).unwrap_or_else(|| "FFFFFF".to_string()),
     )?;
     let color_g2 = parse_pick_color(body.color_g2.as_deref(), "FFFFFF")?;
+    let all_figurines = state
+        .tts_figurines
+        .list()
+        .map_err(|error| ApiError::bad_request(error.to_string()))?;
     let mut models = Vec::with_capacity(body.picks.len());
     for pick in &body.picks {
         let figurine = state
@@ -237,11 +241,17 @@ async fn build_bag(
                 .ok_or_else(|| ApiError::bad_request("profil introuvable"))?;
             let description = profile.description_tts.clone();
             let traits = profile.traits.clone();
+            let form_assets = form_asset_bundles_from_profile(
+                &profile,
+                &all_figurines,
+                Some(figurine.painter.as_str()),
+            );
             (
-                tts_object::saved_model(
+                tts_object::saved_model_with_form_assets(
                     &figurine.asset_bundle_url,
                     &model_from_detail(&profile),
                     color,
+                    &form_assets,
                 ),
                 description,
                 Some(traits),
@@ -608,6 +618,29 @@ fn rank_figurines(
             .then_with(|| left.figurine.id.cmp(&right.figurine.id))
     });
     ranked
+}
+
+fn form_asset_bundles_from_profile(
+    profile: &TtsProfileDetail,
+    figurines: &[TtsFigurine],
+    preferred_painter: Option<&str>,
+) -> HashMap<i64, String> {
+    let mut assets = HashMap::new();
+    for form in profile
+        .forms
+        .iter()
+        .filter(|form| form.state_index != PERIPHERAL_STATE_INDEX)
+    {
+        if let Some(url) = tts_figurine::best_asset_bundle(
+            figurines,
+            &form.isc,
+            &form.loadout,
+            preferred_painter,
+        ) {
+            assets.insert(form.id, url);
+        }
+    }
+    assets
 }
 
 fn model_from_detail(profile: &TtsProfileDetail) -> ModelProfile {

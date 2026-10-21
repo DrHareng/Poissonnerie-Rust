@@ -281,6 +281,16 @@ pub fn saved_model(
     profile: &ModelProfile,
     color: DiffuseColor,
 ) -> Value {
+    saved_model_with_form_assets(asset_bundle_url, profile, color, &HashMap::new())
+}
+
+/// Comme [`saved_model`], avec un asset bundle optionnel par forme (transmutation…).
+pub fn saved_model_with_form_assets(
+    asset_bundle_url: &str,
+    profile: &ModelProfile,
+    color: DiffuseColor,
+    form_assets: &HashMap<i64, String>,
+) -> Value {
     let mut object = asset_bundle(
         asset_bundle_url,
         &profile.nom_tts,
@@ -296,14 +306,14 @@ pub fn saved_model(
         .collect();
     forms.sort_by_key(|form| (form.state_index, form.id));
     for form in forms {
+        let form_url = form_assets
+            .get(&form.id)
+            .map(String::as_str)
+            .filter(|url| !url.trim().is_empty())
+            .unwrap_or(asset_bundle_url);
         let body = match blank(form.mesh_url.as_deref()) {
             Some(mesh) => custom_mesh(mesh, &form.nom_tts, &form.description_tts, color),
-            None => asset_bundle(
-                asset_bundle_url,
-                &form.nom_tts,
-                &form.description_tts,
-                color,
-            ),
+            None => asset_bundle(form_url, &form.nom_tts, &form.description_tts, color),
         };
         items.push(StateItem::Body(body));
         push_form_silhouettes(&mut items, form, color);
@@ -947,6 +957,38 @@ mod tests {
             .find(|key| states[*key]["Nickname"] == "Silhouette 4")
             .unwrap();
         assert!(idx_s4.parse::<i64>().unwrap() > idx_b.parse::<i64>().unwrap());
+    }
+
+    #[test]
+    fn transmute_form_can_use_a_distinct_asset_bundle() {
+        let mut profile = profile();
+        profile.forms = vec![ModelForm {
+            id: 42,
+            state_index: 1,
+            nom_tts: "DOG-WARRIOR FORM".into(),
+            description_tts: String::new(),
+            marker_name: Some("Silhouette 5".into()),
+            silhouette_size: Some("5".into()),
+            silhouette_type: Some("normale".into()),
+            mesh_url: None,
+            marker_mesh_url: None,
+        }];
+        let form_assets = HashMap::from([(42_i64, "https://example.test/form".into())]);
+        let object = saved_model_with_form_assets(
+            "https://example.test/base",
+            &profile,
+            tint(),
+            &form_assets,
+        );
+        assert_eq!(
+            object["CustomAssetbundle"]["AssetbundleURL"],
+            "https://example.test/base"
+        );
+        // État 2 = silhouette du profil ; état 3 = corps de la forme de transmute.
+        assert_eq!(
+            object["States"]["3"]["CustomAssetbundle"]["AssetbundleURL"],
+            "https://example.test/form"
+        );
     }
 
     #[test]
