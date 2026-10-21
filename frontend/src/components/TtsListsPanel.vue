@@ -505,7 +505,10 @@ async function launch() {
     picks.value = next
     if (expanded.entries.some((entry) => entry.holomask)) {
       await ensureCatalog()
-      sectorProfiles.value = await fetchTtsProfiles({ armyId: expanded.army_id })
+      sectorProfiles.value = await fetchTtsProfiles({
+        armyId: expanded.army_id,
+        includeFaction: false,
+      })
     }
     if (expanded.entries.length === 0) {
       toast.message('Liste vide')
