@@ -1777,6 +1777,10 @@
     @apply right-2 md:right-6;
   }
 
+  .image-viewer-actions {
+    @apply absolute bottom-4 left-1/2 z-10 flex -translate-x-1/2 items-center gap-2 rounded-md bg-card/90 p-2 shadow-md;
+  }
+
   .md-content {
     @apply space-y-2 text-sm leading-relaxed text-foreground/90;
   }

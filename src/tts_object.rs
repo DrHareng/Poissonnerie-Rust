@@ -31,11 +31,8 @@ struct CamouflageDiffuse {
 
 #[derive(Debug, Clone, Deserialize)]
 struct ImpSilhouette {
-    nickname: String,
-    mesh_url: String,
-    collider_url: String,
-    #[serde(default)]
-    diffuse_url: String,
+    /// Objet TTS complet (mesh + décalcomanie) issu du sac de silhouettes.
+    object: Value,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -74,18 +71,20 @@ pub fn marker_label(name: Option<&str>, kind: Option<&str>, size: Option<&str>) 
         "camo-0" => format!("Camouflage (0) S{size}"),
         "camo-3" => format!("Camouflage (-3) S{size}"),
         "camo-6" => format!("Camouflage (-6) S{size}"),
-        "imp-1" => silhouette_config()
-            .imp
-            .get("imp-1")
-            .map(|entry| entry.nickname.clone())
-            .unwrap_or_else(|| "IMP-1".to_string()),
-        "imp-2" => silhouette_config()
-            .imp
-            .get("imp-2")
-            .map(|entry| entry.nickname.clone())
-            .unwrap_or_else(|| "IMP-2".to_string()),
+        "imp-1" => imp_nickname("imp-1"),
+        "imp-2" => imp_nickname("imp-2"),
         _ => format!("Silhouette {size}"),
     }
+}
+
+fn imp_nickname(kind: &str) -> String {
+    silhouette_config()
+        .imp
+        .get(kind)
+        .and_then(|entry| entry.object.get("Nickname"))
+        .and_then(|value| value.as_str())
+        .map(str::to_string)
+        .unwrap_or_else(|| kind.to_ascii_uppercase())
 }
 
 fn silhouette_config() -> &'static SilhouetteConfig {
@@ -225,7 +224,7 @@ pub fn saved_model(
     );
     let mut states = Map::new();
     let mut index = 2_i64;
-    push(&mut states, &mut index, silhouette(profile, color));
+    push_profile_silhouettes(&mut states, &mut index, profile, color);
     let mut forms: Vec<&ModelForm> = profile
         .forms
         .iter()
@@ -243,7 +242,7 @@ pub fn saved_model(
             ),
         };
         push(&mut states, &mut index, body);
-        push(&mut states, &mut index, silhouette(form, color));
+        push_form_silhouettes(&mut states, &mut index, form, color);
     }
     object
         .as_object_mut()
@@ -264,6 +263,7 @@ pub fn save_file(model: Value) -> Value {
 }
 
 /// Sac TTS contenant plusieurs figurines (états / silhouettes déjà sur chaque modèle).
+/// Gabarit : `config/empty-bag.json` (sac TTS « Empty Bag »).
 pub fn save_bag(bag_name: &str, models: Vec<Value>) -> Value {
     let nickname = bag_name.trim();
     let nickname = if nickname.is_empty() {
@@ -271,52 +271,21 @@ pub fn save_bag(bag_name: &str, models: Vec<Value>) -> Value {
     } else {
         nickname.to_string()
     };
-    let bag = json!({
-        "Name": "Custom_Model_Bag",
-        "Transform": {
-            "posX": 0.0,
-            "posY": 1.0,
-            "posZ": 0.0,
-            "rotX": 0.0,
-            "rotY": 90.0,
-            "rotZ": 0.0,
-            "scaleX": 4.0,
-            "scaleY": 4.0,
-            "scaleZ": 4.0
-        },
-        "Nickname": nickname,
-        "Description": format!("{} figurine{}", models.len(), if models.len() > 1 { "s" } else { "" }),
-        "GMNotes": "",
-        "ColorDiffuse": { "r": 0.7, "g": 0.7, "b": 0.7 },
-        "Locked": false,
-        "Grid": true,
-        "Snap": true,
-        "IgnoreFoW": false,
-        "MeasureMovement": false,
-        "DragSelectable": true,
-        "Autoraise": true,
-        "Sticky": true,
-        "Tooltip": true,
-        "GridProjection": false,
-        "HideWhenFaceDown": false,
-        "Hands": false,
-        "MaterialIndex": -1,
-        "MeshIndex": -1,
-        "CustomMesh": {
-            "MeshURL": "http://cloud-3.steamusercontent.com/ugc/502526366065245451/F664D7049EE36B94AE02C97FB705AD4872DC04E1/",
-            "DiffuseURL": "http://cloud-3.steamusercontent.com/ugc/502526366065246579/FC165962015416BA8F5D7B9B849CC819CB818785/",
-            "NormalURL": "http://cloud-3.steamusercontent.com/ugc/502526366065246920/A5B7D90D38B8837254CF2DAABD1ED58DF79BEBF3/",
-            "ColliderURL": "http://cloud-3.steamusercontent.com/ugc/502526366065245451/F664D7049EE36B94AE02C97FB705AD4872DC04E1/",
-            "Convex": true,
-            "MaterialIndex": 0,
-            "TypeIndex": 6,
-            "CastShadows": true
-        },
-        "LuaScript": "",
-        "LuaScriptState": "",
-        "XmlUI": "",
-        "ContainedObjects": models
-    });
+    let mut bag: Value = serde_json::from_str(include_str!("../config/empty-bag.json"))
+        .expect("config/empty-bag.json");
+    {
+        let object = bag.as_object_mut().expect("sac TTS");
+        object.insert("Nickname".to_string(), Value::String(nickname.clone()));
+        object.insert(
+            "Description".to_string(),
+            Value::String(format!(
+                "{} figurine{}",
+                models.len(),
+                if models.len() > 1 { "s" } else { "" }
+            )),
+        );
+        object.insert("ContainedObjects".to_string(), Value::Array(models));
+    }
     save_objects(&nickname, vec![bag])
 }
 
@@ -372,6 +341,81 @@ impl SilhouetteSource for ModelForm {
     }
 }
 
+/// Imp-1 : états fig → IMP-2 → IMP-1. Imp-2 : fig → IMP-2. Sinon silhouette taille/camo.
+fn push_profile_silhouettes(
+    states: &mut Map<String, Value>,
+    index: &mut i64,
+    profile: &ModelProfile,
+    color: DiffuseColor,
+) {
+    let kind = profile.silhouette_type.as_deref().unwrap_or("normale");
+    match kind {
+        "imp-1" => {
+            push(states, index, clone_imp_object("imp-2", color));
+            push(states, index, clone_imp_object("imp-1", color));
+        }
+        "imp-2" => {
+            push(states, index, clone_imp_object("imp-2", color));
+        }
+        _ => push(states, index, silhouette(profile, color)),
+    }
+}
+
+fn push_form_silhouettes(
+    states: &mut Map<String, Value>,
+    index: &mut i64,
+    form: &ModelForm,
+    color: DiffuseColor,
+) {
+    let kind = form.silhouette_type.as_deref().unwrap_or("normale");
+    match kind {
+        "imp-1" => {
+            push(states, index, clone_imp_object("imp-2", color));
+            push(states, index, clone_imp_object("imp-1", color));
+        }
+        "imp-2" => {
+            push(states, index, clone_imp_object("imp-2", color));
+        }
+        _ => push(states, index, silhouette(form, color)),
+    }
+}
+
+fn clone_imp_object(kind: &str, color: DiffuseColor) -> Value {
+    let mut object = silhouette_config()
+        .imp
+        .get(kind)
+        .map(|entry| entry.object.clone())
+        .unwrap_or_else(|| {
+            json!({
+                "Name": "Custom_Model",
+                "Nickname": kind.to_ascii_uppercase(),
+                "Description": "",
+                "CustomMesh": {
+                    "MeshURL": "",
+                    "DiffuseURL": "",
+                    "NormalURL": "",
+                    "ColliderURL": "",
+                    "Convex": true,
+                    "MaterialIndex": 3,
+                    "TypeIndex": 1,
+                    "CastShadows": true
+                }
+            })
+        });
+    if let Some(map) = object.as_object_mut() {
+        map.insert(
+            "ColorDiffuse".to_string(),
+            json!({ "r": color.r, "g": color.g, "b": color.b }),
+        );
+        map.entry("Transform".to_string()).or_insert(json!({
+            "posX": 0.0, "posY": 0.0, "posZ": 0.0,
+            "rotX": 0.0, "rotY": 0.0, "rotZ": 0.0,
+            "scaleX": 1.0, "scaleY": 1.0, "scaleZ": 1.0
+        }));
+    }
+    object
+}
+
 fn silhouette(source: &impl SilhouetteSource, color: DiffuseColor) -> Value {
     let kind = source.silhouette_type().unwrap_or("normale");
     let size = source
@@ -379,28 +423,10 @@ fn silhouette(source: &impl SilhouetteSource, color: DiffuseColor) -> Value {
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .unwrap_or("2");
-    // Nom dérivé du type/taille (pas du libellé stocké) pour coller aux templates TTS.
     let name = marker_label(None, Some(kind), Some(size));
     let config = silhouette_config();
 
-    if kind == "imp-1" || kind == "imp-2" {
-        let template = config.imp.get(kind);
-        let mesh = template
-            .map(|entry| entry.mesh_url.as_str())
-            .unwrap_or_default();
-        let collider = template
-            .map(|entry| entry.collider_url.as_str())
-            .unwrap_or(mesh);
-        let diffuse = template
-            .map(|entry| entry.diffuse_url.as_str())
-            .unwrap_or("");
-        return silhouette_mesh(mesh, collider, diffuse, &name, color);
-    }
-
-    let mesh_entry = config
-        .sizes
-        .get(size)
-        .or_else(|| config.sizes.get("2"));
+    let mesh_entry = config.sizes.get(size).or_else(|| config.sizes.get("2"));
     let mesh = mesh_entry
         .map(|entry| entry.mesh_url.as_str())
         .or_else(|| blank(source.marker_mesh_url()))
@@ -717,18 +743,44 @@ mod tests {
     }
 
     #[test]
-    fn impersonation_uses_the_imp_templates() {
+    fn impersonation_level_one_has_fig_then_imp2_then_imp1() {
         let mut profile = profile();
         profile.silhouette_type = Some("imp-1".to_string());
         profile.forms.clear();
         let object = saved_model("https://example.test/bundle", &profile, tint());
-        let imp = &silhouette_config().imp["imp-1"];
-        assert_eq!(object["States"]["2"]["Nickname"], imp.nickname);
-        assert_eq!(object["States"]["2"]["CustomMesh"]["MeshURL"], imp.mesh_url);
+        let imp1 = &silhouette_config().imp["imp-1"].object;
+        let imp2 = &silhouette_config().imp["imp-2"].object;
+        assert_eq!(object["Name"], "Custom_Assetbundle");
+        assert_eq!(object["States"]["2"]["Nickname"], imp2["Nickname"]);
         assert_eq!(
-            object["States"]["2"]["CustomMesh"]["ColliderURL"],
-            imp.collider_url
+            object["States"]["2"]["CustomMesh"]["MeshURL"],
+            imp2["CustomMesh"]["MeshURL"]
         );
+        assert!(object["States"]["2"]["AttachedDecals"].is_array());
+        assert_eq!(object["States"]["3"]["Nickname"], imp1["Nickname"]);
+        assert!(object["States"]["3"]["AttachedDecals"].is_array());
+        assert!(object["States"].get("4").is_none());
+    }
+
+    #[test]
+    fn impersonation_level_two_has_fig_then_imp2() {
+        let mut profile = profile();
+        profile.silhouette_type = Some("imp-2".to_string());
+        profile.forms.clear();
+        let object = saved_model("https://example.test/bundle", &profile, tint());
+        let imp2 = &silhouette_config().imp["imp-2"].object;
+        assert_eq!(object["States"]["2"]["Nickname"], imp2["Nickname"]);
+        assert!(object["States"].get("3").is_none());
+    }
+
+    #[test]
+    fn save_bag_uses_the_empty_bag_template() {
+        let save = save_bag("Ma liste", vec![json!({"Name": "Custom_Assetbundle"})]);
+        assert_eq!(save["ObjectStates"][0]["Name"], "Bag");
+        assert_eq!(save["ObjectStates"][0]["Nickname"], "Ma liste");
+        assert_eq!(save["ObjectStates"][0]["ContainedObjects"].as_array().unwrap().len(), 1);
+        assert!(save["ObjectStates"][0].get("CustomMesh").is_none());
+        assert_eq!(save["ObjectStates"][0]["Bag"]["Order"], 0);
     }
 
     #[test]
@@ -740,5 +792,6 @@ mod tests {
         assert!(config.camouflage.contains_key("camo-6"));
         assert!(config.imp.contains_key("imp-1"));
         assert!(config.imp.contains_key("imp-2"));
+        assert!(config.imp["imp-1"].object["AttachedDecals"].is_array());
     }
 }

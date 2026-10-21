@@ -13,8 +13,18 @@ export interface ImageViewerItem {
 const open = defineModel<boolean>('open', { default: false })
 const index = defineModel<number>('index', { default: 0 })
 
-const props = defineProps<{
-  items: ImageViewerItem[]
+const props = withDefaults(
+  defineProps<{
+    items: ImageViewerItem[]
+    /** Affiche Valider / Annuler (sélection de figurine, etc.). */
+    confirmable?: boolean
+  }>(),
+  { confirmable: false },
+)
+
+const emit = defineEmits<{
+  confirm: [index: number]
+  cancel: []
 }>()
 
 const current = computed(() => {
@@ -52,6 +62,12 @@ watch(
 )
 
 function close() {
+  if (props.confirmable) emit('cancel')
+  open.value = false
+}
+
+function confirm() {
+  emit('confirm', index.value)
   open.value = false
 }
 
@@ -150,6 +166,19 @@ onKeyStroke('ArrowRight', (event) => {
       >
         <ChevronRight class="size-12" />
       </Button>
+
+      <div
+        v-if="confirmable"
+        class="image-viewer-actions"
+        @click.stop
+      >
+        <Button type="button" variant="secondary" @click="close">
+          Annuler
+        </Button>
+        <Button type="button" @click="confirm">
+          Valider
+        </Button>
+      </div>
     </div>
   </Teleport>
 </template>

@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, ref, watch } from 'vue'
-import { Plus, X } from '@lucide/vue'
+import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
+import { ChevronLeft, ChevronRight, Plus, X, ZoomIn } from '@lucide/vue'
 import { toast } from 'vue-sonner'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
@@ -8,6 +8,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import ColorPicker from '@/components/ColorPicker.vue'
+import ImageViewer, { type ImageViewerItem } from '@/components/ImageViewer.vue'
 import PlayerPicker from '@/components/PlayerPicker.vue'
 import SectorialPicker from '@/components/SectorialPicker.vue'
 import { useAppSidePanel } from '@/composables/useAppSidePanel'
@@ -65,6 +66,12 @@ const pickerSearch = ref('')
 const pickerLabels = ref<TtsFigurineLabel[]>([])
 const pickerLoading = ref(false)
 const pickerError = ref('')
+
+/** Défilement horizontal des suggestions par entrée. */
+const choiceRails = ref<Record<number, HTMLElement | null>>({})
+const zoomOpen = ref(false)
+const zoomEntryIndex = ref<number | null>(null)
+const zoomIndex = ref(0)
 
 const unresolvedCount = computed(
   () => result.value?.entries.filter((entry) => !entry.profile).length ?? 0,
@@ -179,6 +186,11 @@ function photoSrc(figurine: Pick<TtsFigurine, 'photo_url' | 'updated_at' | 'isc'
   return withBase(`${figurine.photo_url}?thumb=1&v=${figurine.updated_at}`)
 }
 
+function fullPhotoSrc(figurine: Pick<TtsFigurine, 'photo_url' | 'updated_at'>) {
+  if (!figurine.photo_url) return ''
+  return withBase(`${figurine.photo_url}?v=${figurine.updated_at}`)
+}
+
 function pickFor(entry: TtsListExpandEntry) {
   return picks.value[entry.index] ?? null
 }
@@ -200,6 +212,73 @@ function choiceFigurines(entry: TtsListExpandEntry) {
 function selectFigurine(entryIndex: number, figurine: TtsFigurine | TtsListRankedFigurine) {
   picks.value = { ...picks.value, [entryIndex]: figurine }
 }
+
+function setChoiceRail(entryIndex: number, el: unknown) {
+  choiceRails.value[entryIndex] = el instanceof HTMLElement ? el : null
+}
+
+function scrollChoices(entryIndex: number, direction: -1 | 1) {
+  const rail = choiceRails.value[entryIndex]
+  if (!rail) return
+  const step = Math.max(rail.clientWidth * 0.75, 140)
+  rail.scrollBy({ left: direction * step, behavior: 'smooth' })
+}
+
+const zoomEntry = computed(() => {
+  const index = zoomEntryIndex.value
+  if (index == null || !result.value) return null
+  return result.value.entries.find((entry) => entry.index === index) ?? null
+})
+
+const zoomItems = computed((): ImageViewerItem[] => {
+  const entry = zoomEntry.value
+  if (!entry) return []
+  return choiceFigurines(entry).flatMap((figurine) => {
+    const src = fullPhotoSrc(figurine)
+    if (!src) return []
+    return [
+      {
+        src,
+        alt: figurine.isc,
+        caption: `${figurine.painter || 'Sans peintre'} · ${figurine.loadout || '—'}`,
+      },
+    ]
+  })
+})
+
+const zoomFigurines = computed(() => {
+  const entry = zoomEntry.value
+  if (!entry) return [] as Array<TtsFigurine | TtsListRankedFigurine>
+  return choiceFigurines(entry).filter((figurine) => Boolean(fullPhotoSrc(figurine)))
+})
+
+function openZoom(entry: TtsListExpandEntry, figurineId: number) {
+  const withPhotos = choiceFigurines(entry).filter((figurine) => Boolean(fullPhotoSrc(figurine)))
+  const index = withPhotos.findIndex((figurine) => figurine.id === figurineId)
+  if (index < 0) return
+  zoomEntryIndex.value = entry.index
+  zoomIndex.value = index
+  zoomOpen.value = true
+}
+
+function onZoomConfirm(index: number) {
+  const entryIndex = zoomEntryIndex.value
+  const figurine = zoomFigurines.value[index]
+  if (entryIndex == null || !figurine) return
+  selectFigurine(entryIndex, figurine)
+  zoomOpen.value = false
+  zoomEntryIndex.value = null
+}
+
+function onZoomCancel() {
+  zoomOpen.value = false
+  zoomEntryIndex.value = null
+}
+
+watch(result, async () => {
+  await nextTick()
+  choiceRails.value = {}
+})
 
 function bagFilename(name: string) {
   const safe = name.replace(/[\\/:*?"<>|]/g, ' ').replace(/\s+/g, ' ').trim()
@@ -431,44 +510,82 @@ async function launch() {
             </p>
           </div>
 
-          <div class="mt-3 flex flex-wrap gap-2">
-            <button
-              v-for="figurine in choiceFigurines(entry)"
-              :key="figurine.id"
+          <div class="mt-3 flex items-stretch gap-1">
+            <Button
               type="button"
-              class="border-border hover:border-foreground/40 focus-visible:ring-ring flex w-28 flex-col overflow-hidden rounded-md border text-left transition focus-visible:outline-none focus-visible:ring-2"
-              :class="pickFor(entry)?.id === figurine.id ? 'border-foreground ring-1 ring-foreground' : ''"
-              @click="selectFigurine(entry.index, figurine)"
+              variant="outline"
+              size="icon"
+              class="h-auto min-h-28 shrink-0 self-stretch"
+              aria-label="Figurines précédentes"
+              @click="scrollChoices(entry.index, -1)"
             >
-              <div class="bg-muted aspect-square w-full overflow-hidden">
-                <img
-                  v-if="photoSrc(figurine)"
-                  :src="photoSrc(figurine)"
-                  :alt="figurine.isc"
-                  class="size-full object-cover"
-                >
-                <div
-                  v-else
-                  class="text-muted-foreground flex size-full items-center justify-center text-xs"
-                >
-                  Pas de photo
-                </div>
-              </div>
-              <div class="space-y-0.5 p-1.5">
-                <p class="truncate text-xs font-medium">{{ figurine.painter || '—' }}</p>
-                <p class="text-muted-foreground truncate text-[11px]">{{ figurine.loadout || '—' }}</p>
-              </div>
-            </button>
+              <ChevronLeft class="size-5" />
+            </Button>
 
-            <button
-              v-if="entry.profile"
-              type="button"
-              class="border-border hover:border-foreground/40 focus-visible:ring-ring text-muted-foreground hover:text-foreground flex w-28 flex-col items-center justify-center gap-1 rounded-md border border-dashed px-2 py-3 text-center transition focus-visible:outline-none focus-visible:ring-2"
-              @click="openPicker(entry)"
+            <div
+              :ref="(el) => setChoiceRail(entry.index, el)"
+              class="flex min-w-0 flex-1 gap-2 overflow-x-auto scroll-smooth [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
             >
-              <Plus class="size-5 shrink-0" />
-              <span class="text-[11px] leading-tight">Choisir une autre figurine</span>
-            </button>
+              <button
+                v-for="figurine in choiceFigurines(entry)"
+                :key="figurine.id"
+                type="button"
+                class="border-border hover:border-foreground/40 focus-visible:ring-ring flex w-28 shrink-0 flex-col overflow-hidden rounded-md border text-left transition focus-visible:outline-none focus-visible:ring-2"
+                :class="pickFor(entry)?.id === figurine.id ? 'border-foreground ring-1 ring-foreground' : ''"
+                @click="selectFigurine(entry.index, figurine)"
+              >
+                <div class="bg-muted relative aspect-square w-full overflow-hidden">
+                  <img
+                    v-if="photoSrc(figurine)"
+                    :src="photoSrc(figurine)"
+                    :alt="figurine.isc"
+                    class="size-full object-cover"
+                  >
+                  <div
+                    v-else
+                    class="text-muted-foreground flex size-full items-center justify-center text-xs"
+                  >
+                    Pas de photo
+                  </div>
+                  <Button
+                    v-if="fullPhotoSrc(figurine)"
+                    type="button"
+                    variant="secondary"
+                    size="icon-sm"
+                    class="absolute top-1 right-1 size-7 opacity-90"
+                    aria-label="Agrandir la photo"
+                    @click.stop="openZoom(entry, figurine.id)"
+                  >
+                    <ZoomIn class="size-3.5" />
+                  </Button>
+                </div>
+                <div class="space-y-0.5 p-1.5">
+                  <p class="truncate text-xs font-medium">{{ figurine.painter || '—' }}</p>
+                  <p class="text-muted-foreground truncate text-[11px]">{{ figurine.loadout || '—' }}</p>
+                </div>
+              </button>
+
+              <button
+                v-if="entry.profile"
+                type="button"
+                class="border-border hover:border-foreground/40 focus-visible:ring-ring text-muted-foreground hover:text-foreground flex w-28 shrink-0 flex-col items-center justify-center gap-1 rounded-md border border-dashed px-2 py-3 text-center transition focus-visible:outline-none focus-visible:ring-2"
+                @click="openPicker(entry)"
+              >
+                <Plus class="size-5 shrink-0" />
+                <span class="text-[11px] leading-tight">Choisir une autre figurine</span>
+              </button>
+            </div>
+
+            <Button
+              type="button"
+              variant="outline"
+              size="icon"
+              class="h-auto min-h-28 shrink-0 self-stretch"
+              aria-label="Figurines suivantes"
+              @click="scrollChoices(entry.index, 1)"
+            >
+              <ChevronRight class="size-5" />
+            </Button>
           </div>
 
           <p
@@ -522,6 +639,15 @@ async function launch() {
         </CardContent>
       </Card>
     </Teleport>
+
+    <ImageViewer
+      v-model:open="zoomOpen"
+      v-model:index="zoomIndex"
+      :items="zoomItems"
+      confirmable
+      @confirm="onZoomConfirm"
+      @cancel="onZoomCancel"
+    />
 
     <Teleport to="body">
       <div
