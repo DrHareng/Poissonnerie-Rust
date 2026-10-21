@@ -27,10 +27,15 @@ const emit = defineEmits<{
   cancel: []
 }>()
 
+const safeIndex = computed(() => {
+  const length = props.items.length
+  if (length <= 0) return 0
+  return ((index.value % length) + length) % length
+})
+
 const current = computed(() => {
   if (!props.items.length) return null
-  const i = ((index.value % props.items.length) + props.items.length) % props.items.length
-  return props.items[i] ?? null
+  return props.items[safeIndex.value] ?? null
 })
 
 const canNavigate = computed(() => props.items.length > 1)
@@ -67,14 +72,16 @@ function close() {
 }
 
 function confirm() {
-  emit('confirm', index.value)
+  emit('confirm', safeIndex.value)
   open.value = false
 }
 
-function go(delta: number) {
+function go(delta: number, event?: Event) {
+  event?.preventDefault()
+  event?.stopPropagation()
   if (!canNavigate.value) return
   const length = props.items.length
-  index.value = (index.value + delta + length) % length
+  index.value = (safeIndex.value + delta + length) % length
 }
 
 function onBackdropClick(event: MouseEvent) {
@@ -118,29 +125,27 @@ onKeyStroke('ArrowRight', (event) => {
         size="icon"
         class="image-viewer-close"
         aria-label="Fermer"
-        @click="close"
+        @click.stop="close"
       >
         <X class="size-5" />
       </Button>
 
-      <Button
+      <button
         v-if="canNavigate"
         type="button"
-        variant="ghost"
-        size="icon"
         class="image-viewer-nav image-viewer-nav--prev"
         aria-label="Image précédente"
-        @click="go(-1)"
+        @click="go(-1, $event)"
       >
-        <ChevronLeft class="size-12" />
-      </Button>
+        <ChevronLeft class="pointer-events-none size-12" />
+      </button>
 
-      <figure class="image-viewer-figure">
+      <figure class="image-viewer-figure pointer-events-none">
         <img
           :src="current.src"
           :alt="current.alt || current.caption || ''"
-          class="image-viewer-image"
-        />
+          class="image-viewer-image pointer-events-none"
+        >
         <figcaption
           v-if="current.caption"
           class="image-viewer-caption"
@@ -150,22 +155,20 @@ onKeyStroke('ArrowRight', (event) => {
             v-if="canNavigate"
             class="image-viewer-counter"
           >
-            {{ index + 1 }} / {{ items.length }}
+            {{ safeIndex + 1 }} / {{ items.length }}
           </span>
         </figcaption>
       </figure>
 
-      <Button
+      <button
         v-if="canNavigate"
         type="button"
-        variant="ghost"
-        size="icon"
         class="image-viewer-nav image-viewer-nav--next"
         aria-label="Image suivante"
-        @click="go(1)"
+        @click="go(1, $event)"
       >
-        <ChevronRight class="size-12" />
-      </Button>
+        <ChevronRight class="pointer-events-none size-12" />
+      </button>
 
       <div
         v-if="confirmable"

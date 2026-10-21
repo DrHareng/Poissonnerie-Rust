@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { ChevronLeft, ChevronRight, Plus, X, ZoomIn } from '@lucide/vue'
 import { toast } from 'vue-sonner'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
@@ -67,8 +67,6 @@ const pickerLabels = ref<TtsFigurineLabel[]>([])
 const pickerLoading = ref(false)
 const pickerError = ref('')
 
-/** Défilement horizontal des suggestions par entrée. */
-const choiceRails = ref<Record<number, HTMLElement | null>>({})
 const zoomOpen = ref(false)
 const zoomEntryIndex = ref<number | null>(null)
 const zoomIndex = ref(0)
@@ -213,15 +211,12 @@ function selectFigurine(entryIndex: number, figurine: TtsFigurine | TtsListRanke
   picks.value = { ...picks.value, [entryIndex]: figurine }
 }
 
-function setChoiceRail(entryIndex: number, el: unknown) {
-  choiceRails.value[entryIndex] = el instanceof HTMLElement ? el : null
-}
-
 function scrollChoices(entryIndex: number, direction: -1 | 1) {
-  const rail = choiceRails.value[entryIndex]
+  const rail = document.querySelector<HTMLElement>(`[data-choice-rail="${entryIndex}"]`)
   if (!rail) return
-  const step = Math.max(rail.clientWidth * 0.75, 140)
-  rail.scrollBy({ left: direction * step, behavior: 'smooth' })
+  const card = rail.querySelector<HTMLElement>(':scope > *')
+  const step = (card?.offsetWidth ?? 112) + 8
+  rail.scrollBy({ left: direction * step * 2, behavior: 'smooth' })
 }
 
 const zoomEntry = computed(() => {
@@ -274,11 +269,6 @@ function onZoomCancel() {
   zoomOpen.value = false
   zoomEntryIndex.value = null
 }
-
-watch(result, async () => {
-  await nextTick()
-  choiceRails.value = {}
-})
 
 function bagFilename(name: string) {
   const safe = name.replace(/[\\/:*?"<>|]/g, ' ').replace(/\s+/g, ' ').trim()
@@ -523,8 +513,8 @@ async function launch() {
             </Button>
 
             <div
-              :ref="(el) => setChoiceRail(entry.index, el)"
-              class="flex min-w-0 flex-1 gap-2 overflow-x-auto scroll-smooth [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+              :data-choice-rail="entry.index"
+              class="flex min-w-0 flex-1 gap-2 overflow-x-auto overscroll-x-contain scroll-smooth [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
             >
               <button
                 v-for="figurine in choiceFigurines(entry)"
@@ -539,7 +529,7 @@ async function launch() {
                     v-if="photoSrc(figurine)"
                     :src="photoSrc(figurine)"
                     :alt="figurine.isc"
-                    class="size-full object-cover"
+                    class="size-full object-contain"
                   >
                   <div
                     v-else
