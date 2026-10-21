@@ -1085,7 +1085,7 @@ fn silhouette_kind_from_parts(
 fn marker_name(kind: &str, size: Option<&str>) -> String {
     let size = size.unwrap_or("2");
     match kind {
-        "camo-0" => format!("Camouflage S{size}"),
+        "camo-0" => format!("Camouflage (0) S{size}"),
         "camo-3" => format!("Camouflage (-3) S{size}"),
         "camo-6" => format!("Camouflage (-6) S{size}"),
         "imp-1" => "IMP-1".to_string(),

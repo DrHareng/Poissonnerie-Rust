@@ -3,10 +3,40 @@
 use std::collections::{BTreeMap, HashMap};
 use std::sync::OnceLock;
 
+use serde::Deserialize;
 use serde_json::{json, Map, Value};
 
 /// Les périphériques importés à cet index sont des figurines séparées, pas un état.
 const ANCILLARY_STATE_INDEX: i64 = 900;
+
+#[derive(Debug, Deserialize)]
+struct SilhouetteConfig {
+    sizes: HashMap<String, SilhouetteMesh>,
+    camouflage: HashMap<String, CamouflageDiffuse>,
+    imp: HashMap<String, ImpSilhouette>,
+    material_index: i64,
+    type_index: i64,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct SilhouetteMesh {
+    mesh_url: String,
+    collider_url: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct CamouflageDiffuse {
+    diffuse_url: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct ImpSilhouette {
+    nickname: String,
+    mesh_url: String,
+    collider_url: String,
+    #[serde(default)]
+    diffuse_url: String,
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ModelForm {
@@ -41,13 +71,29 @@ pub fn marker_label(name: Option<&str>, kind: Option<&str>, size: Option<&str>) 
         .filter(|size| !size.is_empty())
         .unwrap_or("2");
     match kind.unwrap_or("normale") {
-        "camo-0" => format!("Camouflage S{size}"),
+        "camo-0" => format!("Camouflage (0) S{size}"),
         "camo-3" => format!("Camouflage (-3) S{size}"),
         "camo-6" => format!("Camouflage (-6) S{size}"),
-        "imp-1" => "IMP-1".to_string(),
-        "imp-2" => "IMP-2".to_string(),
+        "imp-1" => silhouette_config()
+            .imp
+            .get("imp-1")
+            .map(|entry| entry.nickname.clone())
+            .unwrap_or_else(|| "IMP-1".to_string()),
+        "imp-2" => silhouette_config()
+            .imp
+            .get("imp-2")
+            .map(|entry| entry.nickname.clone())
+            .unwrap_or_else(|| "IMP-2".to_string()),
         _ => format!("Silhouette {size}"),
     }
+}
+
+fn silhouette_config() -> &'static SilhouetteConfig {
+    static CONFIG: OnceLock<SilhouetteConfig> = OnceLock::new();
+    CONFIG.get_or_init(|| {
+        serde_json::from_str(include_str!("../config/silhouettes.json"))
+            .expect("config/silhouettes.json")
+    })
 }
 
 /// Mesh le plus fréquent pour chaque nom de silhouette.
@@ -169,7 +215,6 @@ fn paint_nickname(nickname: &str, hex: &str) -> String {
 pub fn saved_model(
     asset_bundle_url: &str,
     profile: &ModelProfile,
-    meshes: &BTreeMap<String, String>,
     color: DiffuseColor,
 ) -> Value {
     let mut object = asset_bundle(
@@ -180,7 +225,7 @@ pub fn saved_model(
     );
     let mut states = Map::new();
     let mut index = 2_i64;
-    push(&mut states, &mut index, silhouette(profile, meshes, color));
+    push(&mut states, &mut index, silhouette(profile, color));
     let mut forms: Vec<&ModelForm> = profile
         .forms
         .iter()
@@ -198,7 +243,7 @@ pub fn saved_model(
             ),
         };
         push(&mut states, &mut index, body);
-        push(&mut states, &mut index, silhouette(form, meshes, color));
+        push(&mut states, &mut index, silhouette(form, color));
     }
     object
         .as_object_mut()
@@ -298,16 +343,12 @@ fn save_objects(save_name: &str, objects: Vec<Value>) -> Value {
 }
 
 trait SilhouetteSource {
-    fn marker_name(&self) -> Option<&str>;
     fn silhouette_type(&self) -> Option<&str>;
     fn silhouette_size(&self) -> Option<&str>;
     fn marker_mesh_url(&self) -> Option<&str>;
 }
 
 impl SilhouetteSource for ModelProfile {
-    fn marker_name(&self) -> Option<&str> {
-        self.marker_name.as_deref()
-    }
     fn silhouette_type(&self) -> Option<&str> {
         self.silhouette_type.as_deref()
     }
@@ -320,9 +361,6 @@ impl SilhouetteSource for ModelProfile {
 }
 
 impl SilhouetteSource for ModelForm {
-    fn marker_name(&self) -> Option<&str> {
-        self.marker_name.as_deref()
-    }
     fn silhouette_type(&self) -> Option<&str> {
         self.silhouette_type.as_deref()
     }
@@ -334,22 +372,77 @@ impl SilhouetteSource for ModelForm {
     }
 }
 
-fn silhouette(
-    source: &impl SilhouetteSource,
-    meshes: &BTreeMap<String, String>,
+fn silhouette(source: &impl SilhouetteSource, color: DiffuseColor) -> Value {
+    let kind = source.silhouette_type().unwrap_or("normale");
+    let size = source
+        .silhouette_size()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or("2");
+    // Nom dérivé du type/taille (pas du libellé stocké) pour coller aux templates TTS.
+    let name = marker_label(None, Some(kind), Some(size));
+    let config = silhouette_config();
+
+    if kind == "imp-1" || kind == "imp-2" {
+        let template = config.imp.get(kind);
+        let mesh = template
+            .map(|entry| entry.mesh_url.as_str())
+            .unwrap_or_default();
+        let collider = template
+            .map(|entry| entry.collider_url.as_str())
+            .unwrap_or(mesh);
+        let diffuse = template
+            .map(|entry| entry.diffuse_url.as_str())
+            .unwrap_or("");
+        return silhouette_mesh(mesh, collider, diffuse, &name, color);
+    }
+
+    let mesh_entry = config
+        .sizes
+        .get(size)
+        .or_else(|| config.sizes.get("2"));
+    let mesh = mesh_entry
+        .map(|entry| entry.mesh_url.as_str())
+        .or_else(|| blank(source.marker_mesh_url()))
+        .unwrap_or_default();
+    let collider = mesh_entry
+        .map(|entry| entry.collider_url.as_str())
+        .unwrap_or(mesh);
+    let diffuse = match kind {
+        "camo-0" | "camo-3" | "camo-6" => config
+            .camouflage
+            .get(kind)
+            .map(|entry| entry.diffuse_url.as_str())
+            .unwrap_or(""),
+        _ => "",
+    };
+    silhouette_mesh(mesh, collider, diffuse, &name, color)
+}
+
+fn silhouette_mesh(
+    mesh_url: &str,
+    collider_url: &str,
+    diffuse_url: &str,
+    nickname: &str,
     color: DiffuseColor,
 ) -> Value {
-    let name = marker_label(
-        source.marker_name(),
-        source.silhouette_type(),
-        source.silhouette_size(),
+    let config = silhouette_config();
+    let nickname = paint_nickname(nickname, &color.hex());
+    let mut object = shell("Custom_Model", &nickname, "", color);
+    object.as_object_mut().expect("objet TTS").insert(
+        "CustomMesh".to_string(),
+        json!({
+            "MeshURL": mesh_url,
+            "DiffuseURL": diffuse_url,
+            "NormalURL": "",
+            "ColliderURL": collider_url,
+            "Convex": true,
+            "MaterialIndex": config.material_index,
+            "TypeIndex": config.type_index,
+            "CastShadows": true
+        }),
     );
-    let mesh = meshes
-        .get(&name)
-        .cloned()
-        .or_else(|| blank(source.marker_mesh_url()).map(str::to_string))
-        .unwrap_or_default();
-    custom_mesh(&mesh, &name, "", color)
+    object
 }
 
 fn push(states: &mut Map<String, Value>, index: &mut i64, object: Value) {
@@ -505,7 +598,6 @@ mod tests {
         let save = save_file(saved_model(
             "https://example.test/bundle",
             &profile(),
-            &BTreeMap::new(),
             tint(),
         ));
         assert!(save["Grid"].is_object());
@@ -518,12 +610,7 @@ mod tests {
     #[test]
     fn a_chosen_color_tints_the_model_and_its_name() {
         let color = parse_color("#00b0f2").expect("couleur");
-        let object = saved_model(
-            "https://example.test/bundle",
-            &profile(),
-            &BTreeMap::new(),
-            color,
-        );
+        let object = saved_model("https://example.test/bundle", &profile(), color);
         assert_eq!(object["Nickname"], "[00B0F2]YUAN YUAN[-] Chain Rifle");
         assert_eq!(object["ColorDiffuse"]["r"], color.r);
         assert_eq!(object["ColorDiffuse"]["g"], color.g);
@@ -538,26 +625,11 @@ mod tests {
     }
 
     #[test]
-    fn state_two_is_the_catalog_silhouette_and_forms_follow() {
-        let meshes = majority_meshes([
-            (
-                "Silhouette 2".to_string(),
-                "https://example.test/s2.obj".to_string(),
-            ),
-            (
-                "Silhouette 2".to_string(),
-                "https://example.test/s2.obj".to_string(),
-            ),
-            (
-                "Silhouette 2".to_string(),
-                "https://example.test/other.obj".to_string(),
-            ),
-            (
-                "Silhouette 6".to_string(),
-                "https://example.test/s6.obj".to_string(),
-            ),
-        ]);
-        let object = saved_model("https://example.test/bundle", &profile(), &meshes, tint());
+    fn state_two_uses_configured_silhouette_meshes_and_forms_follow() {
+        let object = saved_model("https://example.test/bundle", &profile(), tint());
+        let config = silhouette_config();
+        let s2 = &config.sizes["2"];
+        let s6 = &config.sizes["6"];
 
         assert_eq!(object["Name"], "Custom_Assetbundle");
         assert_eq!(object["Nickname"], "[E6DA9B]YUAN YUAN[-] Chain Rifle");
@@ -569,9 +641,18 @@ mod tests {
         assert_eq!(object["States"]["2"]["Name"], "Custom_Model");
         assert_eq!(object["States"]["2"]["Nickname"], "Silhouette 2");
         assert_eq!(object["States"]["2"]["Description"], "");
+        assert_eq!(object["States"]["2"]["CustomMesh"]["MeshURL"], s2.mesh_url);
         assert_eq!(
-            object["States"]["2"]["CustomMesh"]["MeshURL"],
-            "https://example.test/s2.obj"
+            object["States"]["2"]["CustomMesh"]["ColliderURL"],
+            s2.collider_url
+        );
+        assert_eq!(
+            object["States"]["2"]["CustomMesh"]["MaterialIndex"],
+            config.material_index
+        );
+        assert_eq!(
+            object["States"]["2"]["CustomMesh"]["TypeIndex"],
+            config.type_index
         );
         assert_eq!(
             object["States"]["3"]["Nickname"],
@@ -582,10 +663,7 @@ mod tests {
             "https://example.test/dog.obj"
         );
         assert_eq!(object["States"]["4"]["Nickname"], "Silhouette 6");
-        assert_eq!(
-            object["States"]["4"]["CustomMesh"]["MeshURL"],
-            "https://example.test/s6.obj"
-        );
+        assert_eq!(object["States"]["4"]["CustomMesh"]["MeshURL"], s6.mesh_url);
         assert!(object["States"].get("5").is_none());
         assert!(object["States"]
             .as_object()
@@ -598,41 +676,69 @@ mod tests {
     fn a_form_without_mesh_keeps_the_painted_bundle() {
         let mut profile = profile();
         profile.forms[1].mesh_url = None;
-        let object = saved_model(
-            "https://example.test/bundle",
-            &profile,
-            &BTreeMap::new(),
-            tint(),
-        );
+        let object = saved_model("https://example.test/bundle", &profile, tint());
         assert_eq!(object["States"]["3"]["Name"], "Custom_Assetbundle");
         assert_eq!(
             object["States"]["3"]["CustomAssetbundle"]["AssetbundleURL"],
             "https://example.test/bundle"
         );
-        assert_eq!(object["States"]["4"]["CustomMesh"]["MeshURL"], "");
+        assert_eq!(
+            object["States"]["4"]["CustomMesh"]["MeshURL"],
+            silhouette_config().sizes["6"].mesh_url
+        );
     }
 
     #[test]
-    fn derives_a_camouflage_marker_when_the_name_is_missing() {
+    fn camouflage_applies_diffuse_on_the_unit_silhouette() {
         assert_eq!(
-            marker_label(None, Some("camo-3"), Some("2")),
-            "Camouflage (-3) S2"
+            marker_label(None, Some("camo-3"), Some("4")),
+            "Camouflage (-3) S4"
+        );
+        assert_eq!(
+            marker_label(None, Some("camo-0"), Some("2")),
+            "Camouflage (0) S2"
         );
         let mut profile = profile();
         profile.marker_name = None;
+        profile.silhouette_size = Some("4".to_string());
         profile.silhouette_type = Some("camo-3".to_string());
-        profile.marker_mesh_url = Some("https://example.test/camo.obj".to_string());
         profile.forms.clear();
-        let object = saved_model(
-            "https://example.test/bundle",
-            &profile,
-            &BTreeMap::new(),
-            tint(),
-        );
-        assert_eq!(object["States"]["2"]["Nickname"], "Camouflage (-3) S2");
+        let object = saved_model("https://example.test/bundle", &profile, tint());
+        let config = silhouette_config();
+        assert_eq!(object["States"]["2"]["Nickname"], "Camouflage (-3) S4");
         assert_eq!(
             object["States"]["2"]["CustomMesh"]["MeshURL"],
-            "https://example.test/camo.obj"
+            config.sizes["4"].mesh_url
         );
+        assert_eq!(
+            object["States"]["2"]["CustomMesh"]["DiffuseURL"],
+            config.camouflage["camo-3"].diffuse_url
+        );
+    }
+
+    #[test]
+    fn impersonation_uses_the_imp_templates() {
+        let mut profile = profile();
+        profile.silhouette_type = Some("imp-1".to_string());
+        profile.forms.clear();
+        let object = saved_model("https://example.test/bundle", &profile, tint());
+        let imp = &silhouette_config().imp["imp-1"];
+        assert_eq!(object["States"]["2"]["Nickname"], imp.nickname);
+        assert_eq!(object["States"]["2"]["CustomMesh"]["MeshURL"], imp.mesh_url);
+        assert_eq!(
+            object["States"]["2"]["CustomMesh"]["ColliderURL"],
+            imp.collider_url
+        );
+    }
+
+    #[test]
+    fn silhouette_config_covers_sizes_camo_and_imp() {
+        let config = silhouette_config();
+        assert_eq!(config.sizes.len(), 7);
+        assert!(config.camouflage.contains_key("camo-0"));
+        assert!(config.camouflage.contains_key("camo-3"));
+        assert!(config.camouflage.contains_key("camo-6"));
+        assert!(config.imp.contains_key("imp-1"));
+        assert!(config.imp.contains_key("imp-2"));
     }
 }

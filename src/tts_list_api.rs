@@ -158,11 +158,6 @@ async fn build_bag(
         &tts_object::sectorial_color_hex(&army.slug).unwrap_or_else(|| "FFFFFF".to_string()),
     )?;
     let color_g2 = parse_pick_color(body.color_g2.as_deref(), "FFFFFF")?;
-    let meshes = state
-        .tts_profiles
-        .marker_mesh_catalog()
-        .map_err(|error| ApiError::bad_request(error.to_string()))?;
-
     let mut models = Vec::with_capacity(body.picks.len());
     for pick in &body.picks {
         let figurine = state
@@ -199,7 +194,6 @@ async fn build_bag(
         models.push(tts_object::saved_model(
             &figurine.asset_bundle_url,
             &model_from_detail(&profile),
-            &meshes,
             color,
         ));
     }

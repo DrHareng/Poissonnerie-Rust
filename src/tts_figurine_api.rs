@@ -217,14 +217,9 @@ async fn figurine_object(
         }
         model_profile(&profile)
     };
-    let meshes = state
-        .tts_profiles
-        .marker_mesh_catalog()
-        .map_err(|error| ApiError::bad_request(error.to_string()))?;
     Ok(Json(tts_object::save_file(tts_object::saved_model(
         &figurine.asset_bundle_url,
         &model,
-        &meshes,
         color,
     ))))
 }

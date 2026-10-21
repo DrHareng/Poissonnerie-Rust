@@ -1,0 +1,59 @@
+{
+  "sizes": {
+    "1": {
+      "mesh_url": "https://steamusercontent-a.akamaihd.net/ugc/1762566040434517729/16AB5E3A7C708780DD20C78B550CFEB920C689AD/",
+      "collider_url": "https://steamusercontent-a.akamaihd.net/ugc/1762566040434517729/16AB5E3A7C708780DD20C78B550CFEB920C689AD/"
+    },
+    "2": {
+      "mesh_url": "https://steamusercontent-a.akamaihd.net/ugc/1762566040434517424/7BD92CCD59122AA034293F6D291C3B4227CF46CC/",
+      "collider_url": "https://steamusercontent-a.akamaihd.net/ugc/1762566040434517424/7BD92CCD59122AA034293F6D291C3B4227CF46CC/"
+    },
+    "3": {
+      "mesh_url": "https://steamusercontent-a.akamaihd.net/ugc/1762566040434516925/35B6115843155E46391551B0AC37D029EF9F3C63/",
+      "collider_url": "https://steamusercontent-a.akamaihd.net/ugc/1762566040434516925/35B6115843155E46391551B0AC37D029EF9F3C63/"
+    },
+    "4": {
+      "mesh_url": "https://steamusercontent-a.akamaihd.net/ugc/1762566040434514906/E2874F5BC3CFDCCCF8A6B6D6D71B12437809FC48/",
+      "collider_url": "https://steamusercontent-a.akamaihd.net/ugc/1762566040434514906/E2874F5BC3CFDCCCF8A6B6D6D71B12437809FC48/"
+    },
+    "5": {
+      "mesh_url": "https://steamusercontent-a.akamaihd.net/ugc/1762566040434514388/5CAEBDC5BA9DE7ECA334765737E1D10E2F922326/",
+      "collider_url": "https://steamusercontent-a.akamaihd.net/ugc/1762566040434514388/5CAEBDC5BA9DE7ECA334765737E1D10E2F922326/"
+    },
+    "6": {
+      "mesh_url": "https://steamusercontent-a.akamaihd.net/ugc/1762566040434513921/CCA4B3F4285094CCD598A2F50B6947786900EBB3/",
+      "collider_url": "https://steamusercontent-a.akamaihd.net/ugc/1762566040434513921/CCA4B3F4285094CCD598A2F50B6947786900EBB3/"
+    },
+    "7": {
+      "mesh_url": "https://steamusercontent-a.akamaihd.net/ugc/1762566040434513546/34EE1AF3873E76E19912EDE95F2059647D9AB1D9/",
+      "collider_url": "https://steamusercontent-a.akamaihd.net/ugc/1762566040434513546/34EE1AF3873E76E19912EDE95F2059647D9AB1D9/"
+    }
+  },
+  "camouflage": {
+    "camo-0": {
+      "diffuse_url": "https://steamusercontent-a.akamaihd.net/ugc/1548633241857020838/CDE48FB1F62CB3A31810F9077CAC176EFB735038/"
+    },
+    "camo-3": {
+      "diffuse_url": "https://steamusercontent-a.akamaihd.net/ugc/1548633241857039726/50A33C60C9951B10DF741450AC64AB37F5C90E02/"
+    },
+    "camo-6": {
+      "diffuse_url": "https://steamusercontent-a.akamaihd.net/ugc/1764818232299713869/2973E82C5ACAA5E3BF53545F1FB47C14695BADB8/"
+    }
+  },
+  "imp": {
+    "imp-1": {
+      "nickname": "IMP-1 (discover -3)",
+      "mesh_url": "https://steamusercontent-a.akamaihd.net/ugc/1762566040434517424/7BD92CCD59122AA034293F6D291C3B4227CF46CC/",
+      "collider_url": "https://steamusercontent-a.akamaihd.net/ugc/1744573743622198051/6E77F14FEBB2339E041E526394205FF61110D508/",
+      "diffuse_url": ""
+    },
+    "imp-2": {
+      "nickname": "IMP-2",
+      "mesh_url": "https://steamusercontent-a.akamaihd.net/ugc/1762566040434517424/7BD92CCD59122AA034293F6D291C3B4227CF46CC/",
+      "collider_url": "https://steamusercontent-a.akamaihd.net/ugc/1744573743622198051/6E77F14FEBB2339E041E526394205FF61110D508/",
+      "diffuse_url": ""
+    }
+  },
+  "material_index": 3,
+  "type_index": 1
+}
