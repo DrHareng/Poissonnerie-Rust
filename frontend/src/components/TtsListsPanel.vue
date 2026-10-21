@@ -347,6 +347,7 @@ async function downloadBag() {
       {
         figurine_id: figurine.id,
         profile_id: profile.id,
+        form_id: entry.form_id ?? undefined,
         combat_group: entry.combat_group,
       },
     ]
@@ -487,6 +488,7 @@ async function launch() {
               </p>
               <p class="text-muted-foreground text-xs">
                 CG {{ entry.combat_group }}
+                <span v-if="entry.form_id"> · périphérique</span>
                 <span v-if="entry.reinforcements"> · renforts</span>
                 <span v-if="entry.customization_json"> · custom</span>
                 <span v-if="entry.profile && silhouetteOf(entry.profile)">

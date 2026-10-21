@@ -125,7 +125,12 @@ export function buildTtsListBag(payload: {
   color_g1?: string
   color_g2?: string
   army_id: number
-  picks: Array<{ figurine_id: number; profile_id: number; combat_group: number }>
+  picks: Array<{
+    figurine_id: number
+    profile_id: number
+    form_id?: number | null
+    combat_group: number
+  }>
 }): Promise<unknown> {
   return request<unknown>('/api/tts-lists/bag', {
     method: 'POST',

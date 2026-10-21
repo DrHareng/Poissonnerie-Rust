@@ -11,8 +11,11 @@ use crate::{
     army_list::{self, parse_army_list, ArmyListMember},
     tts_figurine::TtsFigurine,
     tts_object::{self, ModelForm, ModelProfile},
-    tts_profile::{TtsProfileDetail, TtsProfileSummary},
+    tts_profile::{TtsProfileDetail, TtsProfileForm, TtsProfileSummary},
 };
+
+/// Formes périphériques (Auxbot, Crabbot, pilote…) stockées à cet index.
+const PERIPHERAL_STATE_INDEX: i64 = 900;
 
 pub fn tts_list_routes() -> Router<AppState> {
     Router::new()
@@ -49,6 +52,9 @@ struct ExpandEntry {
     reinforcements: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     customization_json: Option<String>,
+    /// Présent pour un périphérique (Auxbot, Crabbot…) : id de la forme state 900.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    form_id: Option<i64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     profile: Option<TtsProfileSummary>,
     figurines: Vec<RankedFigurine>,
@@ -77,6 +83,8 @@ struct BagBody {
 struct BagPick {
     figurine_id: i64,
     profile_id: i64,
+    #[serde(default)]
+    form_id: Option<i64>,
     combat_group: u32,
 }
 
@@ -118,16 +126,21 @@ async fn expand_list(
         .collect();
 
     let mut entries = Vec::with_capacity(decoded.members.len());
-    for (index, member) in decoded.members.into_iter().enumerate() {
-        entries.push(expand_member(
+    let mut index = 0usize;
+    for member in decoded.members {
+        let expanded = expand_member(
             &state,
-            index,
             &member,
             decoded.sectoral_id,
             &all_figurines,
             &sectorial_iscs,
             preferred_painter.as_deref(),
-        )?);
+        )?;
+        for mut entry in expanded {
+            entry.index = index;
+            index += 1;
+            entries.push(entry);
+        }
     }
 
     let default_color = tts_object::sectorial_color_hex(&army.slug)
@@ -171,35 +184,57 @@ async fn build_bag(
                 figurine.isc
             )));
         }
-        let profile = state
-            .tts_profiles
-            .get(pick.profile_id)
-            .map_err(|error| ApiError::bad_request(error.to_string()))?
-            .ok_or_else(|| ApiError::bad_request("profil introuvable"))?;
         let in_army = state
             .tts_profiles
             .profile_in_army(pick.profile_id, body.army_id)
             .map_err(|error| ApiError::bad_request(error.to_string()))?;
         if !in_army {
-            return Err(ApiError::bad_request(format!(
-                "le profil « {} » n'est pas dans cette sectorielle",
-                profile.isc
-            )));
+            return Err(ApiError::bad_request(
+                "ce profil n'est pas dans cette sectorielle",
+            ));
         }
         let color = if pick.combat_group <= 1 {
             color_g1
         } else {
             color_g2
         };
-        let model = tts_object::saved_model(
-            &figurine.asset_bundle_url,
-            &model_from_detail(&profile),
-            color,
-        );
-        models.extend(tts_object::expand_echo_models(
-            model,
-            &profile.description_tts,
-        ));
+        let (model, description) = if let Some(form_id) = pick.form_id {
+            let (form, parent_id) = state
+                .tts_profiles
+                .get_peripheral_form(form_id)
+                .map_err(|error| ApiError::bad_request(error.to_string()))?
+                .ok_or_else(|| ApiError::bad_request("périphérique introuvable"))?;
+            if parent_id != pick.profile_id {
+                return Err(ApiError::bad_request(
+                    "périphérique incohérent avec le profil parent",
+                ));
+            }
+            let description = form.description_tts.clone();
+            (
+                tts_object::saved_model(
+                    &figurine.asset_bundle_url,
+                    &model_from_form(&form),
+                    color,
+                ),
+                description,
+            )
+        } else {
+            let profile = state
+                .tts_profiles
+                .get(pick.profile_id)
+                .map_err(|error| ApiError::bad_request(error.to_string()))?
+                .ok_or_else(|| ApiError::bad_request("profil introuvable"))?;
+            let description = profile.description_tts.clone();
+            (
+                tts_object::saved_model(
+                    &figurine.asset_bundle_url,
+                    &model_from_detail(&profile),
+                    color,
+                ),
+                description,
+            )
+        };
+        models.extend(tts_object::expand_echo_models(model, &description));
     }
 
     Ok(Json(tts_object::save_bag(&body.bag_name, models)))
@@ -207,13 +242,12 @@ async fn build_bag(
 
 fn expand_member(
     state: &AppState,
-    index: usize,
     member: &ArmyListMember,
     army_id: u32,
     all_figurines: &[TtsFigurine],
     sectorial_iscs: &HashSet<String>,
     preferred_painter: Option<&str>,
-) -> Result<ExpandEntry, ApiError> {
+) -> Result<Vec<ExpandEntry>, ApiError> {
     let profile = state
         .tts_profiles
         .find_by_army_source(
@@ -235,17 +269,75 @@ fn expand_member(
         None => Vec::new(),
     };
 
-    Ok(ExpandEntry {
-        index,
+    let mut entries = vec![ExpandEntry {
+        index: 0,
         unit_id: member.unit_id,
         group_id: member.group_id,
         option_id: member.option_id,
         combat_group: member.combat_group,
         reinforcements: member.reinforcements,
         customization_json: member.customization_json.clone(),
-        profile,
+        form_id: None,
+        profile: profile.clone(),
         figurines,
-    })
+    }];
+
+    if let Some(summary) = profile.as_ref() {
+        let detail = state
+            .tts_profiles
+            .get(summary.id)
+            .map_err(|error| ApiError::bad_request(error.to_string()))?;
+        if let Some(detail) = detail {
+            for form in detail
+                .forms
+                .iter()
+                .filter(|form| form.state_index == PERIPHERAL_STATE_INDEX)
+            {
+                let peri_summary = summary_from_peripheral(summary, form);
+                let peri_figurines = rank_figurines(
+                    all_figurines,
+                    &form.isc,
+                    &form.loadout,
+                    sectorial_iscs,
+                    preferred_painter,
+                );
+                entries.push(ExpandEntry {
+                    index: 0,
+                    unit_id: member.unit_id,
+                    group_id: member.group_id,
+                    option_id: member.option_id,
+                    combat_group: member.combat_group,
+                    reinforcements: member.reinforcements,
+                    customization_json: None,
+                    form_id: Some(form.id),
+                    profile: Some(peri_summary),
+                    figurines: peri_figurines,
+                });
+            }
+        }
+    }
+
+    Ok(entries)
+}
+
+fn summary_from_peripheral(
+    parent: &TtsProfileSummary,
+    form: &TtsProfileForm,
+) -> TtsProfileSummary {
+    TtsProfileSummary {
+        id: parent.id,
+        army_id: parent.army_id,
+        faction_label: parent.faction_label.clone(),
+        isc: form.isc.clone(),
+        loadout: form.loadout.clone(),
+        nom_tts: form.nom_tts.clone(),
+        silhouette_size: form.silhouette_size.clone(),
+        silhouette_type: form.silhouette_type.clone(),
+        marker_name: form.marker_name.clone(),
+        form_count: 0,
+        linked: parent.linked,
+        differences: String::new(),
+    }
 }
 
 fn rank_figurines(
@@ -314,6 +406,8 @@ fn model_from_detail(profile: &TtsProfileDetail) -> ModelProfile {
         forms: profile
             .forms
             .iter()
+            // Les périphériques sont exportés comme figurines séparées du sac.
+            .filter(|form| form.state_index != PERIPHERAL_STATE_INDEX)
             .map(|form| ModelForm {
                 id: form.id,
                 state_index: form.state_index,
@@ -326,6 +420,18 @@ fn model_from_detail(profile: &TtsProfileDetail) -> ModelProfile {
                 marker_mesh_url: form.marker_mesh_url.clone(),
             })
             .collect(),
+    }
+}
+
+fn model_from_form(form: &TtsProfileForm) -> ModelProfile {
+    ModelProfile {
+        nom_tts: form.nom_tts.clone(),
+        description_tts: form.description_tts.clone(),
+        marker_name: form.marker_name.clone(),
+        silhouette_size: form.silhouette_size.clone(),
+        silhouette_type: form.silhouette_type.clone(),
+        marker_mesh_url: form.marker_mesh_url.clone(),
+        forms: Vec::new(),
     }
 }
 

@@ -702,6 +702,8 @@ export interface TtsListExpandEntry {
   combat_group: number
   reinforcements: boolean
   customization_json?: string | null
+  /** Périphérique (Auxbot, Crabbot…) : id de la forme state 900. */
+  form_id?: number | null
   profile: TtsProfileSummary | null
   figurines: TtsListRankedFigurine[]
 }
@@ -720,6 +722,7 @@ export interface TtsListExpandResult {
 export interface TtsListBagPick {
   figurine_id: number
   profile_id: number
+  form_id?: number | null
   combat_group: number
 }
 
