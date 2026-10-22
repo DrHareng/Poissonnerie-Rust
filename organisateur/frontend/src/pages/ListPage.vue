@@ -3,7 +3,7 @@ import { onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { forgetClock } from '@/clock'
 import { deleteTournament, listTournaments, saveTournament, type TournamentListItem } from '@/db'
-import { dispatch } from '@/engine'
+import { dispatch, randomUuid } from '@/engine'
 import { statusLabel } from '@/types'
 
 const router = useRouter()
@@ -24,7 +24,7 @@ async function create() {
   try {
     const created = await dispatch(null, {
       type: 'create',
-      id: crypto.randomUUID(),
+      id: randomUuid(),
       name: form.name,
       rounds: form.rounds,
       tables: form.tables,
