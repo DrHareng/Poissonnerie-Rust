@@ -1,39 +1,14 @@
 //! Objet TTS d'une figurine peinte : asset bundle, profil choisi, silhouette en état 2.
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::OnceLock;
 
-use serde::Deserialize;
 use serde_json::{json, Map, Value};
+
+use crate::tts_props::{tts_props, SilhouetteConfig};
 
 /// Les périphériques importés à cet index sont des figurines séparées, pas un état.
 const ANCILLARY_STATE_INDEX: i64 = 900;
-
-#[derive(Debug, Deserialize)]
-struct SilhouetteConfig {
-    sizes: HashMap<String, SilhouetteMesh>,
-    camouflage: HashMap<String, CamouflageDiffuse>,
-    imp: HashMap<String, ImpSilhouette>,
-    material_index: i64,
-    type_index: i64,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-struct SilhouetteMesh {
-    mesh_url: String,
-    collider_url: String,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-struct CamouflageDiffuse {
-    diffuse_url: String,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-struct ImpSilhouette {
-    /// Objet TTS complet (mesh + décalcomanie) issu du sac de silhouettes.
-    object: Value,
-}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ModelForm {
@@ -88,11 +63,7 @@ fn imp_nickname(kind: &str) -> String {
 }
 
 fn silhouette_config() -> &'static SilhouetteConfig {
-    static CONFIG: OnceLock<SilhouetteConfig> = OnceLock::new();
-    CONFIG.get_or_init(|| {
-        serde_json::from_str(include_str!("../config/silhouettes.json"))
-            .expect("config/silhouettes.json")
-    })
+    &tts_props().silhouettes
 }
 
 /// Mesh le plus fréquent pour chaque nom de silhouette.
@@ -397,10 +368,16 @@ pub fn save_bag(bag_name: &str, models: Vec<Value>) -> Value {
         );
         object.insert("ContainedObjects".to_string(), Value::Array(models));
     }
+    // save_objects attribue des GUID uniques (TTS indexe ContainedObjects par GUID :
+    // sans ça, deux figs identiques ou deux déployables clonés restent coincés).
     save_objects(&nickname, vec![bag])
 }
 
 fn save_objects(save_name: &str, objects: Vec<Value>) -> Value {
+    let mut objects = objects;
+    for object in &mut objects {
+        assign_unique_guids(object);
+    }
     json!({
         "SaveName": save_name,
         "GameMode": "",
@@ -420,6 +397,52 @@ fn save_objects(save_name: &str, objects: Vec<Value>) -> Value {
         },
         "ObjectStates": objects
     })
+}
+
+/// Attribue un GUID TTS (6 hex) unique à chaque nœud objet (récursif).
+pub fn assign_unique_guids(root: &mut Value) {
+    let mut used = HashSet::new();
+    assign_unique_guids_into(root, &mut used);
+}
+
+fn assign_unique_guids_into(value: &mut Value, used: &mut HashSet<String>) {
+    match value {
+        Value::Object(map) => {
+            let looks_like_object = map.contains_key("Name")
+                || map.contains_key("GUID")
+                || map.contains_key("ContainedObjects")
+                || map.contains_key("States")
+                || map.contains_key("CustomMesh")
+                || map.contains_key("CustomAssetbundle");
+            if looks_like_object {
+                let guid = fresh_guid(used);
+                map.insert("GUID".to_string(), Value::String(guid));
+            }
+            for (key, child) in map.iter_mut() {
+                if key == "GUID" {
+                    continue;
+                }
+                assign_unique_guids_into(child, used);
+            }
+        }
+        Value::Array(items) => {
+            for item in items {
+                assign_unique_guids_into(item, used);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn fresh_guid(used: &mut HashSet<String>) -> String {
+    loop {
+        // TTS attend 6 hex ; on tire 24 bits.
+        let n: u32 = rand::random::<u32>() & 0x00FF_FFFF;
+        let guid = format!("{n:06x}");
+        if used.insert(guid.clone()) {
+            return guid;
+        }
+    }
 }
 
 trait SilhouetteSource {
@@ -891,6 +914,30 @@ mod tests {
         assert_eq!(save["ObjectStates"][0]["ContainedObjects"].as_array().unwrap().len(), 1);
         assert!(save["ObjectStates"][0].get("CustomMesh").is_none());
         assert_eq!(save["ObjectStates"][0]["Bag"]["Order"], 0);
+    }
+
+    #[test]
+    fn save_bag_gives_unique_guids_to_identical_models() {
+        let twin = json!({
+            "Name": "Custom_Assetbundle",
+            "Nickname": "FUSILIER",
+            "States": {
+                "2": { "Name": "Custom_Model", "Nickname": "Silhouette 2" }
+            }
+        });
+        let save = save_bag("Doublons", vec![twin.clone(), twin]);
+        let bag = &save["ObjectStates"][0];
+        let contained = bag["ContainedObjects"].as_array().unwrap();
+        assert_eq!(contained.len(), 2);
+        let guid_a = contained[0]["GUID"].as_str().unwrap();
+        let guid_b = contained[1]["GUID"].as_str().unwrap();
+        assert_ne!(guid_a, guid_b);
+        assert_eq!(guid_a.len(), 6);
+        assert_ne!(
+            contained[0]["States"]["2"]["GUID"].as_str().unwrap(),
+            contained[1]["States"]["2"]["GUID"].as_str().unwrap()
+        );
+        assert_ne!(bag["GUID"].as_str().unwrap(), guid_a);
     }
 
     #[test]

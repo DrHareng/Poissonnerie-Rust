@@ -1,67 +1,23 @@
-//! Déployables TTS clonés depuis `config/deployables.json`, teints à la couleur du groupe.
+//! Déployables TTS clonés depuis `config/tts-props.json`, teints à la couleur du groupe.
 
-use std::collections::{BTreeMap, BTreeSet};
-use std::sync::OnceLock;
+use std::collections::BTreeSet;
 
 use serde_json::{json, Value};
 
 use crate::tts_object::DiffuseColor;
 use crate::tts_profile::TtsProfileTrait;
-
-/// Gabarits indexés par surnom canonique (sans balise de couleur TTS).
-fn deployable_templates() -> &'static BTreeMap<String, Value> {
-    static TEMPLATES: OnceLock<BTreeMap<String, Value>> = OnceLock::new();
-    TEMPLATES.get_or_init(|| {
-        let root: Value = serde_json::from_str(include_str!("../config/deployables.json"))
-            .expect("config/deployables.json");
-        let mut map = BTreeMap::new();
-        let Some(objects) = root
-            .pointer("/ObjectStates/0/ContainedObjects")
-            .and_then(Value::as_array)
-        else {
-            return map;
-        };
-        for object in objects {
-            let Some(nickname) = object.get("Nickname").and_then(Value::as_str) else {
-                continue;
-            };
-            let key = canonical_nickname(nickname);
-            if key.is_empty() || is_excluded_template(&key) {
-                continue;
-            }
-            // Une seule Disco Ball (le JSON en contient deux).
-            map.entry(key).or_insert_with(|| object.clone());
-        }
-        map
-    })
-}
-
-fn is_excluded_template(key: &str) -> bool {
-    key.eq_ignore_ascii_case("Speedball A") || key.eq_ignore_ascii_case("Speedball B")
-}
-
-fn canonical_nickname(raw: &str) -> String {
-    let mut text = raw.trim();
-    if let Some(rest) = text.strip_prefix('[') {
-        if let Some((_, after)) = rest.split_once(']') {
-            text = after;
-        }
-    }
-    text.trim()
-        .trim_end_matches("[-]")
-        .trim()
-        .to_string()
-}
+use crate::tts_props::tts_props;
 
 /// Clés de déployables déduites des traits (max 1 occurrence par clé).
 pub fn deployable_keys_from_traits(traits: &[TtsProfileTrait]) -> BTreeSet<String> {
+    let templates = &tts_props().deployables;
     let mut keys = BTreeSet::new();
     for trait_ in traits {
         if trait_.kind.eq_ignore_ascii_case("skill") {
             continue;
         }
         for key in keys_for_trait(trait_) {
-            if deployable_templates().contains_key(key) {
+            if templates.contains_key(key) {
                 keys.insert(key.to_string());
             }
         }
@@ -77,10 +33,8 @@ fn keys_for_trait(trait_: &TtsProfileTrait) -> Vec<&'static str> {
         .map(normalize_label)
         .unwrap_or_default();
 
-    if name == "pitcher" {
-        return vec!["Repeater"];
-    }
-    if name == "repeater" || name == "deployablerepeater" {
+    // Uniquement Pitcher ou Deployable Repeater (pas Repeater / KISS! / Tinbot…).
+    if name == "pitcher" || name == "deployablerepeater" {
         return vec!["Repeater"];
     }
     if name == "deployablecover" {
@@ -174,7 +128,7 @@ pub fn tinted_deployables_for_traits(
     traits: &[TtsProfileTrait],
     color: DiffuseColor,
 ) -> Vec<Value> {
-    let templates = deployable_templates();
+    let templates = &tts_props().deployables;
     deployable_keys_from_traits(traits)
         .into_iter()
         .filter_map(|key| {
@@ -226,7 +180,7 @@ mod tests {
 
     #[test]
     fn loads_deployable_catalog_without_speedballs() {
-        let templates = deployable_templates();
+        let templates = &tts_props().deployables;
         assert!(templates.contains_key("Repeater"));
         assert!(templates.contains_key("AP Mine"));
         assert!(templates.contains_key("CrazyKoala"));
@@ -235,6 +189,8 @@ mod tests {
         assert!(templates.contains_key("Deployable Cover: Cutting Foam"));
         assert!(!templates.contains_key("Speedball A"));
         assert!(!templates.contains_key("Speedball B"));
+        // Nouveau Repeater (avec état silhouette), pas l'ancien du sac Deployables.
+        assert!(templates["Repeater"].get("States").and_then(Value::as_object).is_some());
     }
 
     #[test]
@@ -246,6 +202,10 @@ mod tests {
             trait_("skill", "Minelayer", Some("2")),
             trait_("weapon", "Crazykoala", None),
             trait_("equipment", "FastPanda", None),
+            trait_("equipment", "Deployable Repeater", None),
+            trait_("equipment", "KISS! (Repeater)", None),
+            trait_("equipment", "Tinbot (Repeater)", None),
+            trait_("equipment", "Repeater", None),
         ]);
         assert!(keys.contains("Repeater"));
         assert!(keys.contains("Deployable Cover: Vitroferro"));
@@ -254,8 +214,34 @@ mod tests {
         assert!(keys.contains("CrazyKoala"));
         assert!(keys.contains("FastPanda"));
         assert!(!keys.iter().any(|key| key.contains("Speedball")));
-        // Max 1 clé Repeater même avec Pitcher.
+        // Max 1 clé Repeater même avec Pitcher + Deployable Repeater.
         assert_eq!(keys.iter().filter(|key| *key == "Repeater").count(), 1);
+    }
+
+    #[test]
+    fn only_pitcher_or_deployable_repeater_add_a_repeater() {
+        assert!(deployable_keys_from_traits(&[trait_("weapon", "Pitcher", None)])
+            .contains("Repeater"));
+        assert!(deployable_keys_from_traits(&[trait_(
+            "equipment",
+            "Deployable Repeater",
+            None
+        )])
+        .contains("Repeater"));
+        assert!(!deployable_keys_from_traits(&[trait_("equipment", "Repeater", None)])
+            .contains("Repeater"));
+        assert!(!deployable_keys_from_traits(&[trait_(
+            "equipment",
+            "KISS! (Repeater)",
+            None
+        )])
+        .contains("Repeater"));
+        assert!(!deployable_keys_from_traits(&[trait_(
+            "equipment",
+            "Tinbot (Repeater)",
+            None
+        )])
+        .contains("Repeater"));
     }
 
     #[test]

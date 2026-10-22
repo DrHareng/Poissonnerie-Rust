@@ -415,9 +415,9 @@ watch(canEditContent, (canEdit) => {
 })
 
 watch(
-  () => draft.value.isc,
-  (isc) => {
-    const key = isc.trim().toLowerCase()
+  [() => draft.value.isc, labels],
+  () => {
+    const key = draft.value.isc.trim().toLowerCase()
     if (!key) {
       draft.value.loadout = ''
       return
@@ -425,6 +425,12 @@ watch(
     // Ne pas effacer le loadout tant que les libellés ne sont pas chargés
     // (ex. bascule sans sectorielle → catalogue global).
     if (labels.value.length === 0) return
+    const options = loadoutPickerOptions.value
+    if (options.length === 1) {
+      const only = options[0].value
+      if (draft.value.loadout !== only) draft.value.loadout = only
+      return
+    }
     const allowed = new Set(
       labels.value
         .filter((label) => label.isc.trim().toLowerCase() === key)
