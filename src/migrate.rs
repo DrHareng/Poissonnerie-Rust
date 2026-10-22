@@ -1232,6 +1232,18 @@ fn migrate_tts_figurines(conn: &Connection) -> Result<()> {
         );
         CREATE INDEX IF NOT EXISTS idx_tts_figurines_isc
             ON tts_figurines(isc, loadout);
+
+        -- Choix de figurine mémorisé par utilisateur pour une paire ISC + loadout (profil).
+        CREATE TABLE IF NOT EXISTS tts_figurine_pick_prefs (
+            user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            isc_key TEXT NOT NULL,
+            loadout_key TEXT NOT NULL,
+            figurine_id INTEGER NOT NULL REFERENCES tts_figurines(id) ON DELETE CASCADE,
+            updated_at INTEGER NOT NULL,
+            PRIMARY KEY (user_id, isc_key, loadout_key)
+        );
+        CREATE INDEX IF NOT EXISTS idx_tts_figurine_pick_prefs_figurine
+            ON tts_figurine_pick_prefs(figurine_id);
         ",
     )?;
     Ok(())

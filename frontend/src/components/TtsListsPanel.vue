@@ -13,12 +13,15 @@ import PlayerPicker from '@/components/PlayerPicker.vue'
 import SectorialPicker from '@/components/SectorialPicker.vue'
 import { useAppSidePanel } from '@/composables/useAppSidePanel'
 import { useArmies } from '@/composables/useArmies'
+import { useAuth } from '@/composables/useAuth'
 import {
   buildTtsListBag,
   expandTtsList,
+  fetchMyTtsFigurinePicks,
   fetchTtsFigurineLabels,
   fetchTtsFigurines,
   fetchTtsProfiles,
+  upsertMyTtsFigurinePick,
 } from '@/lib/api'
 import { isListableArmy } from '@/lib/army'
 import { normalizeArmyListCode } from '@/lib/armyList'
@@ -27,6 +30,7 @@ import { downloadBlob } from '@/lib/scenarioDocument'
 import type {
   TtsFigurine,
   TtsFigurineLabel,
+  TtsFigurinePickPref,
   TtsListExpandEntry,
   TtsListExpandResult,
   TtsListRankedFigurine,
@@ -43,6 +47,7 @@ const emit = defineEmits<{
 
 const { setCustomSide } = useAppSidePanel()
 const { armies, ensureLoaded: ensureArmies } = useArmies()
+const { isAuthenticated } = useAuth()
 
 const code = ref('')
 const preferredPainter = ref('')
@@ -55,6 +60,9 @@ const picks = ref<Record<number, TtsFigurine | TtsListRankedFigurine>>({})
 const holomaskProfiles = ref<Record<number, TtsProfileSummary>>({})
 /** Profils de la sectorielle (pour le choix Holomask). */
 const sectorProfiles = ref<TtsProfileSummary[]>([])
+/** Préférences utilisateur : clé `isc\\0loadout` → figurine_id */
+const pickPrefs = ref<Record<string, number>>({})
+const pickPrefsLoaded = ref(false)
 
 const bagName = ref('')
 const colorG1 = ref('FFFFFF')
@@ -246,14 +254,45 @@ function rankCatalogFigurines(isc: string, loadout: string): TtsListRankedFiguri
   return ranked
 }
 
+function prefKey(isc: string, loadout: string) {
+  return `${isc.trim().toLowerCase()}\0${loadout.trim().toLowerCase()}`
+}
+
+function rememberedFigurine(
+  isc: string,
+  loadout: string,
+): TtsFigurine | TtsListRankedFigurine | null {
+  const id = pickPrefs.value[prefKey(isc, loadout)]
+  if (id == null) return null
+  const fromCatalog = catalog.value.find((figurine) => figurine.id === id)
+  if (fromCatalog) return fromCatalog
+  return null
+}
+
 function choiceFigurines(entry: TtsListExpandEntry) {
   const selected = picks.value[entry.index]
+  const profile = effectiveProfile(entry)
   const rows = entry.holomask
     ? (() => {
-        const profile = holomaskProfiles.value[entry.index]
         return profile ? rankCatalogFigurines(profile.isc, profile.loadout) : []
       })()
     : [...entry.figurines]
+  if (profile) {
+    const remembered = rememberedFigurine(profile.isc, profile.loadout)
+    if (remembered && !rows.some((figurine) => figurine.id === remembered.id)) {
+      rows.unshift({
+        ...remembered,
+        score: 10_000,
+        exact_loadout: false,
+      })
+    } else if (remembered) {
+      const index = rows.findIndex((figurine) => figurine.id === remembered.id)
+      if (index > 0) {
+        const [row] = rows.splice(index, 1)
+        rows.unshift(row)
+      }
+    }
+  }
   if (selected && !rows.some((figurine) => figurine.id === selected.id)) {
     rows.unshift(selected as TtsListRankedFigurine)
   }
@@ -262,6 +301,73 @@ function choiceFigurines(entry: TtsListExpandEntry) {
 
 function selectFigurine(entryIndex: number, figurine: TtsFigurine | TtsListRankedFigurine) {
   picks.value = { ...picks.value, [entryIndex]: figurine }
+  void persistFigurinePick(entryIndex, figurine)
+}
+
+async function persistFigurinePick(
+  entryIndex: number,
+  figurine: TtsFigurine | TtsListRankedFigurine,
+) {
+  if (!isAuthenticated.value || !result.value) return
+  const entry = result.value.entries.find((row) => row.index === entryIndex)
+  if (!entry) return
+  const profile = effectiveProfile(entry)
+  if (!profile) return
+  try {
+    const saved = await upsertMyTtsFigurinePick({
+      isc: profile.isc,
+      loadout: profile.loadout,
+      figurine_id: figurine.id,
+    })
+    pickPrefs.value = {
+      ...pickPrefs.value,
+      [prefKey(saved.isc, saved.loadout)]: saved.figurine_id,
+    }
+  } catch {
+    // Préférence best-effort : ne bloque pas le choix local.
+  }
+}
+
+async function ensurePickPrefs() {
+  if (!isAuthenticated.value) {
+    pickPrefs.value = {}
+    pickPrefsLoaded.value = true
+    return
+  }
+  if (pickPrefsLoaded.value) return
+  try {
+    const rows: TtsFigurinePickPref[] = await fetchMyTtsFigurinePicks()
+    const next: Record<string, number> = {}
+    for (const row of rows) {
+      next[prefKey(row.isc, row.loadout)] = row.figurine_id
+    }
+    pickPrefs.value = next
+  } catch {
+    pickPrefs.value = {}
+  } finally {
+    pickPrefsLoaded.value = true
+  }
+}
+
+watch(isAuthenticated, () => {
+  pickPrefsLoaded.value = false
+  pickPrefs.value = {}
+})
+
+function resolveInitialPick(
+  entry: TtsListExpandEntry,
+): TtsFigurine | TtsListRankedFigurine | undefined {
+  const profile = entry.profile
+  if (profile) {
+    const remembered = rememberedFigurine(profile.isc, profile.loadout)
+    if (remembered) return remembered
+    const prefId = pickPrefs.value[prefKey(profile.isc, profile.loadout)]
+    if (prefId != null) {
+      const fromEntry = entry.figurines.find((figurine) => figurine.id === prefId)
+      if (fromEntry) return fromEntry
+    }
+  }
+  return entry.figurines[0]
 }
 
 function holomaskProfileOptions(entry: TtsListExpandEntry) {
@@ -497,14 +603,14 @@ async function launch() {
     colorG1.value = (expanded.default_color || 'FFFFFF').toUpperCase()
     colorG2.value = 'FFFFFF'
     emit('update:armyId', String(expanded.army_id))
+    await Promise.all([ensurePickPrefs(), ensureCatalog()])
     const next: Record<number, TtsFigurine | TtsListRankedFigurine> = {}
     for (const entry of expanded.entries) {
-      const first = entry.figurines[0]
+      const first = resolveInitialPick(entry)
       if (first) next[entry.index] = first
     }
     picks.value = next
     if (expanded.entries.some((entry) => entry.holomask)) {
-      await ensureCatalog()
       sectorProfiles.value = await fetchTtsProfiles({
         armyId: expanded.army_id,
         includeFaction: false,
@@ -835,12 +941,24 @@ async function launch() {
                   @update:model-value="pickerPainter = $event ?? ''"
                 />
               </div>
-              <Input
-                v-model="pickerSearch"
-                class="w-full max-w-xs"
-                placeholder="ISC, loadout, peintre…"
-                autocomplete="off"
-              />
+              <div class="relative w-full max-w-xs">
+                <Input
+                  v-model="pickerSearch"
+                  class="w-full pr-9"
+                  placeholder="ISC, loadout, peintre…"
+                  autocomplete="off"
+                />
+                <button
+                  v-if="pickerSearch"
+                  type="button"
+                  class="text-muted-foreground hover:text-foreground absolute top-1/2 right-2 -translate-y-1/2 rounded-sm p-0.5"
+                  title="Effacer la recherche"
+                  aria-label="Effacer la recherche"
+                  @click="pickerSearch = ''"
+                >
+                  <X class="size-4 opacity-60" />
+                </button>
+              </div>
             </div>
 
             <Alert v-if="pickerError" variant="destructive" class="shrink-0">

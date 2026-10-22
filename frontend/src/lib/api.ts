@@ -35,6 +35,7 @@ import type {
   TtsFigurine,
   TtsFigurineLabel,
   TtsFigurineLoadout,
+  TtsFigurinePickPref,
   TtsListExpandResult,
   TtsFigurineWrite,
   ContentUpdate,
@@ -117,6 +118,21 @@ export function expandTtsList(code: string, painter?: string): Promise<TtsListEx
       code,
       painter: painter?.trim() || undefined,
     }),
+  })
+}
+
+export function fetchMyTtsFigurinePicks(): Promise<TtsFigurinePickPref[]> {
+  return request<TtsFigurinePickPref[]>('/api/me/tts-figurine-picks')
+}
+
+export function upsertMyTtsFigurinePick(payload: {
+  isc: string
+  loadout?: string
+  figurine_id: number
+}): Promise<TtsFigurinePickPref> {
+  return request<TtsFigurinePickPref>('/api/me/tts-figurine-picks', {
+    method: 'PUT',
+    body: JSON.stringify(payload),
   })
 }
 

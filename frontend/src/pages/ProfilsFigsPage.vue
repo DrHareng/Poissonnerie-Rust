@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, onBeforeUnmount, ref, watch } from 'vue'
 import { useRoute, useRouter, type LocationQuery, type LocationQueryRaw } from 'vue-router'
+import { X } from '@lucide/vue'
 import PageTitleTabs from '@/components/PageTitleTabs.vue'
 import PlayerPicker from '@/components/PlayerPicker.vue'
 import SectorialPicker from '@/components/SectorialPicker.vue'
@@ -311,6 +312,8 @@ onBeforeUnmount(() => {
             :model-value="painterFilter || undefined"
             :options="painterOptions"
             allow-custom
+            allow-empty
+            empty-label="Tous"
             placeholder="Filtrer par peintre"
             empty-message="Aucun peintre connu."
             @update:model-value="painterFilter = $event ?? ''"
@@ -329,13 +332,24 @@ onBeforeUnmount(() => {
             </SelectContent>
           </Select>
         </div>
-        <Input
-          v-if="showSearch"
-          v-model="searchDraft"
-          class="w-full max-w-xs"
-          :placeholder="isFigsTab ? 'ISC, loadout, peintre…' : 'ISC, loadout, nom…'"
-          autocomplete="off"
-        />
+        <div v-if="showSearch" class="relative w-full max-w-xs">
+          <Input
+            v-model="searchDraft"
+            class="w-full pr-9"
+            :placeholder="isFigsTab ? 'ISC, loadout, peintre…' : 'ISC, loadout, nom…'"
+            autocomplete="off"
+          />
+          <button
+            v-if="searchDraft"
+            type="button"
+            class="text-muted-foreground hover:text-foreground absolute top-1/2 right-2 -translate-y-1/2 rounded-sm p-0.5"
+            title="Effacer la recherche"
+            aria-label="Effacer la recherche"
+            @click="searchDraft = ''"
+          >
+            <X class="size-4 opacity-60" />
+          </button>
+        </div>
         <Button
           v-if="isFigsTab && canEditContent"
           type="button"

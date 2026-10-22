@@ -12,7 +12,7 @@ use tower_sessions::Session;
 use crate::{
     api::{ApiError, AppState},
     auth,
-    tts_figurine::{FigurineWrite, TtsFigurine},
+    tts_figurine::{FigurineWrite, TtsFigurine, TtsFigurinePickPref},
     tts_map::{self, MAX_PICTURE_BYTES},
     tts_object::{self, ModelForm, ModelProfile},
     tts_profile::{TtsFigurineLabel, TtsProfileForm, TtsProfileLoadout},
@@ -30,6 +30,10 @@ pub fn tts_figurine_routes() -> Router<AppState> {
         .layer(DefaultBodyLimit::max(UPLOAD_BODY_LIMIT));
 
     Router::new()
+        .route(
+            "/api/me/tts-figurine-picks",
+            get(list_my_figurine_picks).put(upsert_my_figurine_pick),
+        )
         .route(
             "/api/tts-figurines",
             get(list_figurines).post(create_figurine),
@@ -107,15 +111,52 @@ impl PhotoQuery {
     }
 }
 
-async fn require_admin(state: &AppState, session: &Session) -> Result<User, ApiError> {
-    let user = auth::current_user(state.users.as_ref(), session)
+async fn require_user(state: &AppState, session: &Session) -> Result<User, ApiError> {
+    auth::current_user(state.users.as_ref(), session)
         .await
         .map_err(|error| ApiError::bad_request(error.to_string()))?
-        .ok_or_else(|| ApiError::unauthorized("non authentifié"))?;
+        .ok_or_else(|| ApiError::unauthorized("non authentifié"))
+}
+
+async fn require_admin(state: &AppState, session: &Session) -> Result<User, ApiError> {
+    let user = require_user(state, session).await?;
     if !user.is_admin {
         return Err(ApiError::unauthorized("droits administrateur requis"));
     }
     Ok(user)
+}
+
+#[derive(Debug, Deserialize)]
+struct FigurinePickBody {
+    isc: String,
+    #[serde(default)]
+    loadout: String,
+    figurine_id: i64,
+}
+
+async fn list_my_figurine_picks(
+    State(state): State<AppState>,
+    session: Session,
+) -> Result<Json<Vec<TtsFigurinePickPref>>, ApiError> {
+    let user = require_user(&state, &session).await?;
+    state
+        .tts_figurines
+        .list_pick_prefs(user.id)
+        .map(Json)
+        .map_err(|error| ApiError::bad_request(error.to_string()))
+}
+
+async fn upsert_my_figurine_pick(
+    State(state): State<AppState>,
+    session: Session,
+    Json(body): Json<FigurinePickBody>,
+) -> Result<Json<TtsFigurinePickPref>, ApiError> {
+    let user = require_user(&state, &session).await?;
+    state
+        .tts_figurines
+        .upsert_pick_pref(user.id, &body.isc, &body.loadout, body.figurine_id)
+        .map(Json)
+        .map_err(|error| ApiError::bad_request(error.to_string()))
 }
 
 async fn list_figurine_labels(

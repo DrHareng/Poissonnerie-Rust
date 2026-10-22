@@ -39,6 +39,15 @@ pub struct TtsFigurine {
     pub sectorial_ids: Vec<i64>,
 }
 
+/// Figurine mémorisée pour une paire ISC + loadout de profil.
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct TtsFigurinePickPref {
+    pub isc: String,
+    pub loadout: String,
+    pub figurine_id: i64,
+    pub updated_at: u64,
+}
+
 /// Meilleur asset bundle pour un ISC/loadout (peintre préféré, loadout exact, URL non vide).
 pub fn best_asset_bundle(
     figurines: &[TtsFigurine],
@@ -179,6 +188,67 @@ impl TtsFigurineStore {
         Ok(())
     }
 
+    pub fn list_pick_prefs(&self, user_id: i64) -> Result<Vec<TtsFigurinePickPref>> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "
+            SELECT isc_key, loadout_key, figurine_id, updated_at
+            FROM tts_figurine_pick_prefs
+            WHERE user_id = ?1
+            ORDER BY updated_at DESC, isc_key, loadout_key
+            ",
+        )?;
+        let rows = stmt
+            .query_map(params![user_id], |row| {
+                Ok(TtsFigurinePickPref {
+                    isc: row.get(0)?,
+                    loadout: row.get(1)?,
+                    figurine_id: row.get(2)?,
+                    updated_at: row.get::<_, i64>(3)? as u64,
+                })
+            })?
+            .collect::<std::result::Result<Vec<_>, _>>()
+            .context("lecture des préférences de figurines")?;
+        Ok(rows)
+    }
+
+    pub fn upsert_pick_pref(
+        &self,
+        user_id: i64,
+        isc: &str,
+        loadout: &str,
+        figurine_id: i64,
+    ) -> Result<TtsFigurinePickPref> {
+        let isc_key = normalize_pref_key(isc, "l'ISC")?;
+        let loadout_key = normalize_pref_key(loadout, "le loadout")?;
+        let now = now_unix();
+        let conn = self.conn.lock().unwrap();
+        let exists: bool = conn.query_row(
+            "SELECT EXISTS(SELECT 1 FROM tts_figurines WHERE id = ?1)",
+            params![figurine_id],
+            |row| row.get(0),
+        )?;
+        if !exists {
+            bail!("figurine introuvable");
+        }
+        conn.execute(
+            "
+            INSERT INTO tts_figurine_pick_prefs (user_id, isc_key, loadout_key, figurine_id, updated_at)
+            VALUES (?1, ?2, ?3, ?4, ?5)
+            ON CONFLICT(user_id, isc_key, loadout_key) DO UPDATE SET
+                figurine_id = excluded.figurine_id,
+                updated_at = excluded.updated_at
+            ",
+            params![user_id, isc_key, loadout_key, figurine_id, now],
+        )?;
+        Ok(TtsFigurinePickPref {
+            isc: isc_key,
+            loadout: loadout_key,
+            figurine_id,
+            updated_at: now as u64,
+        })
+    }
+
     pub fn set_photo(&self, id: i64, bytes: &[u8]) -> Result<TtsFigurine> {
         if bytes.is_empty() {
             bail!("image vide");
@@ -307,6 +377,16 @@ fn normalize_write(input: &FigurineWrite) -> Result<FigurineWrite> {
         painter,
         asset_bundle_url: normalize_bundle_url(&input.asset_bundle_url)?,
     })
+}
+
+fn normalize_pref_key(raw: &str, label: &str) -> Result<String> {
+    let min = if label.contains("ISC") { 1 } else { 0 };
+    let max = if label.contains("ISC") {
+        MAX_ISC_CHARS
+    } else {
+        MAX_LOADOUT_CHARS
+    };
+    Ok(bounded(label, raw, min, max)?.to_ascii_lowercase())
 }
 
 fn bounded(label: &str, raw: &str, min_chars: usize, max_chars: usize) -> Result<String> {
@@ -458,6 +538,41 @@ mod tests {
         assert!(store.photo_file_path(created.id).unwrap().is_none());
         store.delete(created.id).unwrap();
         assert!(store.list().unwrap().is_empty());
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn remembers_pick_pref_per_isc_loadout() {
+        let (store, dir) = temp_store();
+        let fig = store.create(&sample()).unwrap();
+        {
+            let conn = rusqlite::Connection::open(dir.join("test.db")).unwrap();
+            conn.execute(
+                "INSERT INTO users (discord_id, username, display_name, avatar_url, created_at, last_login_at)
+                 VALUES ('u1', 'tester', 'Tester', '', 0, 0)",
+                [],
+            )
+            .unwrap();
+        }
+        let saved = store
+            .upsert_pick_pref(1, "Fusilier", "Combi Rifle", fig.id)
+            .unwrap();
+        assert_eq!(saved.isc, "fusilier");
+        assert_eq!(saved.loadout, "combi rifle");
+        let other = store
+            .create(&FigurineWrite {
+                isc: "OTHER".into(),
+                loadout: "HMG".into(),
+                painter: "Alex".into(),
+                asset_bundle_url: "https://example.test/b".into(),
+            })
+            .unwrap();
+        store
+            .upsert_pick_pref(1, "Fusilier", "Combi Rifle", other.id)
+            .unwrap();
+        let prefs = store.list_pick_prefs(1).unwrap();
+        assert_eq!(prefs.len(), 1);
+        assert_eq!(prefs[0].figurine_id, other.id);
         let _ = fs::remove_dir_all(&dir);
     }
 

@@ -657,6 +657,14 @@ export interface TtsFigurineWrite {
   asset_bundle_url: string
 }
 
+/** Figurine mémorisée pour une paire ISC + loadout (utilisateur connecté). */
+export interface TtsFigurinePickPref {
+  isc: string
+  loadout: string
+  figurine_id: number
+  updated_at: number
+}
+
 export interface TtsFigurineLoadout {
   profile_id: number
   form_id?: number | null
