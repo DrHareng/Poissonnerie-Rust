@@ -5219,7 +5219,10 @@ fn player_has_started_final_phase_match_in_conn(
                 WHERE tournament_id = ?1
                   AND phase != 'pool'
                   AND elo_match_id IS NOT NULL
-                  AND (player1_name_key = ?2 OR player2_name_key = ?2)
+                  AND (
+                    LOWER(TRIM(COALESCE(player1, ''))) = ?2
+                    OR LOWER(TRIM(COALESCE(player2, ''))) = ?2
+                  )
                 LIMIT 1
                 ",
                 params![tournament_id, player_key],
@@ -5261,7 +5264,10 @@ fn player_has_started_pool_ids_match_in_conn(
           AND phase = 'pool'
           AND elo_match_id IS NOT NULL
           AND pool_id IN ({placeholders})
-          AND (player1_name_key = ? OR player2_name_key = ?)
+          AND (
+            LOWER(TRIM(COALESCE(player1, ''))) = ?
+            OR LOWER(TRIM(COALESCE(player2, ''))) = ?
+          )
         LIMIT 1
         "
     );
