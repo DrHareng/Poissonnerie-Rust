@@ -621,7 +621,7 @@ fn build_profile(
         mesh_url: None,
         marker_mesh_url: None,
         traits,
-        forms: extra_forms(names, unit, group, option),
+        forms: extra_forms(names, unit, group, option, isc),
         sectorials: BTreeSet::from([army.id]),
         peripherals: peripheral_names(names, option, base),
         escape_pilot,
@@ -810,12 +810,21 @@ fn base_figurine_name(value: &str) -> &str {
     value.split("||").next().unwrap_or(value).trim()
 }
 
-fn extra_forms(names: &Names, unit: &Value, group: &Value, option: &Value) -> Vec<FormDraft> {
+fn extra_forms(
+    names: &Names,
+    unit: &Value,
+    group: &Value,
+    option: &Value,
+    parent_isc: &str,
+) -> Vec<FormDraft> {
     let mut forms = Vec::new();
     let current_group = group.get("id").and_then(Value::as_i64);
     if let Some(profiles) = group.get("profiles").and_then(Value::as_array) {
         for (index, profile) in profiles.iter().enumerate().skip(1) {
-            if let Some(form) = form_from_profile(names, profile, option, index as i64) {
+            // Transmutation / 2ᵉ profil du groupe : ISC = « Unité COMBAT FORM ».
+            if let Some(form) =
+                form_from_profile(names, profile, option, index as i64, Some(parent_isc))
+            {
                 forms.push(form);
             }
         }
@@ -856,11 +865,32 @@ fn extra_forms(names: &Names, unit: &Value, group: &Value, option: &Value) -> Ve
         else {
             continue;
         };
-        if let Some(form) = form_from_profile(names, profile, target_option, 900) {
+        // Périphérique / coéquipier : garder l'ISC propre (Auxbot, Operator…).
+        if let Some(form) = form_from_profile(names, profile, target_option, 900, None) {
             forms.push(form);
         }
     }
     forms
+}
+
+/// Préfixe l'ISC parent pour les formes de transmute (« Chernobog… BATTLE RAVAGED »).
+pub(crate) fn qualify_form_isc(parent_isc: &str, form_name: &str) -> String {
+    let parent = parent_isc.trim();
+    let form = form_name.trim();
+    if form.is_empty() {
+        return parent.to_string();
+    }
+    if parent.is_empty() || form.eq_ignore_ascii_case(parent) {
+        return form.to_string();
+    }
+    let parent_lower = parent.to_ascii_lowercase();
+    let form_lower = form.to_ascii_lowercase();
+    if form_lower.starts_with(&parent_lower)
+        || form_lower.starts_with(&format!("{parent_lower} "))
+    {
+        return form.to_string();
+    }
+    format!("{parent} {form}")
 }
 
 fn form_from_profile(
@@ -868,13 +898,18 @@ fn form_from_profile(
     profile: &Value,
     option: &Value,
     state_index: i64,
+    parent_isc: Option<&str>,
 ) -> Option<FormDraft> {
-    let isc = profile
+    let form_name = profile
         .get("name")
         .and_then(Value::as_str)
         .unwrap_or("Profil")
         .trim()
         .to_string();
+    let isc = match parent_isc {
+        Some(parent) => qualify_form_isc(parent, &form_name),
+        None => form_name,
+    };
     let weapons = merged_refs(option.get("weapons"), profile.get("weapons"));
     let skills = merged_refs(profile.get("skills"), option.get("skills"));
     let equips = merged_refs(profile.get("equip"), option.get("equip"));
@@ -2255,6 +2290,104 @@ mod tests {
                 .map(|row| (row.group_id, row.option_id))
                 .collect::<Vec<_>>()),
             Some(vec![(1, 1), (2, 2)])
+        );
+    }
+
+    #[test]
+    fn qualifies_transmute_form_isc_with_parent_unit() {
+        assert_eq!(
+            qualify_form_isc("Chernobog Armored Detachment", "BATTLE RAVAGED"),
+            "Chernobog Armored Detachment BATTLE RAVAGED"
+        );
+        assert_eq!(
+            qualify_form_isc("Sù-Jiàn Immediate Action Unit", "COMBAT FORM"),
+            "Sù-Jiàn Immediate Action Unit COMBAT FORM"
+        );
+        assert_eq!(
+            qualify_form_isc("Dog-Warriors", "DOG-WARRIOR FORM"),
+            "Dog-Warriors DOG-WARRIOR FORM"
+        );
+        // Déjà qualifié / même nom : inchangé.
+        assert_eq!(
+            qualify_form_isc(
+                "Chernobog Armored Detachment",
+                "Chernobog Armored Detachment BATTLE RAVAGED"
+            ),
+            "Chernobog Armored Detachment BATTLE RAVAGED"
+        );
+        assert_eq!(
+            qualify_form_isc("Candy Cloud", "Candy Cloud"),
+            "Candy Cloud"
+        );
+    }
+
+    #[test]
+    fn transmute_forms_use_qualified_isc_on_import() {
+        let metadata = serde_json::json!({
+            "skills": [],
+            "weapons": [{"id": 2, "name": "Heavy Machine Gun"}],
+            "equips": []
+        });
+        let army = ArmyRow {
+            id: 501,
+            parent_id: 501,
+            name: "Combined Army".into(),
+            slug: "combined-army".into(),
+        };
+        let document = serde_json::json!({
+            "filters": {
+                "extras": [], "chars": [], "type": [], "peripheral": []
+            },
+            "units": [{
+                "id": 9001,
+                "name": "CHERNOBOG ARMORED DETACHMENT",
+                "factions": [501],
+                "profileGroups": [{
+                    "id": 1,
+                    "isc": "Chernobog Armored Detachment",
+                    "profiles": [
+                        {
+                            "name": "CHERNOBOG",
+                            "type": 1, "chars": [], "move": [4,4],
+                            "cc": 10, "bs": 12, "ph": 14, "wip": 13, "arm": 6, "bts": 3, "w": 3,
+                            "str": true, "s": 7,
+                            "skills": [], "equip": [], "weapons": []
+                        },
+                        {
+                            "name": "BATTLE RAVAGED",
+                            "type": 1, "chars": [], "move": [4,4],
+                            "cc": 10, "bs": 12, "ph": 14, "wip": 13, "arm": 4, "bts": 0, "w": 2,
+                            "str": true, "s": 6,
+                            "skills": [], "equip": [], "weapons": []
+                        }
+                    ],
+                    "options": [{
+                        "id": 1,
+                        "name": "CHERNOBOG",
+                        "disabled": false,
+                        "weapons": [{"id": 2}],
+                        "skills": [], "equip": [], "includes": []
+                    }]
+                }]
+            }]
+        });
+        let names = names_from_metadata(&metadata);
+        let armies = vec![army.clone()];
+        let mut drafts = BTreeMap::new();
+        absorb_units(&mut drafts, &names, &army, &armies, &document);
+        let profile = drafts.values().next().expect("profil");
+        assert_eq!(profile.isc, "Chernobog Armored Detachment");
+        assert!(
+            profile.forms.iter().any(|form| {
+                form.state_index == 1
+                    && form.isc == "Chernobog Armored Detachment BATTLE RAVAGED"
+            }),
+            "forms = {:?}",
+            profile
+                .forms
+                .iter()
+                .map(|form| (form.state_index, form.isc.as_str()))
+                .collect::<Vec<_>>()
         );
     }
 

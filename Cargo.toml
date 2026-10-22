@@ -58,3 +58,7 @@ path = "src/bin/fix-tournament-armies.rs"
 [[bin]]
 name = "poissonnerie-import-tts-profiles"
 path = "src/bin/import-tts-profiles.rs"
+
+[[bin]]
+name = "poissonnerie-fix-tts-figurine-iscs"
+path = "src/bin/fix-tts-figurine-iscs.rs"

@@ -1179,6 +1179,41 @@ fn migrate_tts_profiles(conn: &Connection) -> Result<()> {
             ON tts_army_unit_includes(unit_id, unit_option_id);
         ",
     )?;
+    qualify_existing_transmute_form_iscs(conn)?;
+    Ok(())
+}
+
+/// « COMBAT FORM » → « Sù-Jiàn… COMBAT FORM » (idempotent).
+fn qualify_existing_transmute_form_iscs(conn: &Connection) -> Result<()> {
+    if !column_exists(conn, "tts_profile_forms", "isc")? {
+        return Ok(());
+    }
+    let mut stmt = conn.prepare(
+        "
+        SELECT f.id, f.isc, p.isc
+        FROM tts_profile_forms f
+        JOIN tts_profiles p ON p.id = f.profile_id
+        WHERE f.state_index != 900 AND f.state_index != 1000
+        ",
+    )?;
+    let rows = stmt
+        .query_map([], |row| {
+            Ok((
+                row.get::<_, i64>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+            ))
+        })?
+        .collect::<std::result::Result<Vec<_>, _>>()?;
+    for (id, form_isc, parent_isc) in rows {
+        let qualified = crate::tts_profile_army::qualify_form_isc(&parent_isc, &form_isc);
+        if qualified != form_isc {
+            conn.execute(
+                "UPDATE tts_profile_forms SET isc = ?1 WHERE id = ?2",
+                rusqlite::params![qualified, id],
+            )?;
+        }
+    }
     Ok(())
 }
 
