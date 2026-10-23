@@ -4,6 +4,7 @@ import { onClickOutside, useElementBounding, useEventListener } from '@vueuse/co
 import { ChevronsUpDown, X } from '@lucide/vue'
 import { Input } from '@/components/ui/input'
 import { useSearchablePickerKeyboard } from '@/composables/useSearchablePickerKeyboard'
+import { foldSearchText } from '@/lib/utils'
 
 export interface PlayerPickerOption {
   value: string
@@ -58,24 +59,30 @@ const selectedOption = computed(() =>
   props.options.find((option) => option.value === props.modelValue),
 )
 
+const sortedOptions = computed(() =>
+  [...props.options].sort((left, right) =>
+    left.label.localeCompare(right.label, 'fr', { sensitivity: 'base' }),
+  ),
+)
+
 const filteredOptions = computed(() => {
-  const needle = query.value.trim().toLowerCase()
+  const needle = foldSearchText(query.value.trim())
   if (!needle) {
-    return props.options
+    return sortedOptions.value
   }
 
-  return props.options.filter(
+  return sortedOptions.value.filter(
     (option) =>
-      option.label.toLowerCase().includes(needle)
-      || option.value.toLowerCase().includes(needle),
+      foldSearchText(option.label).includes(needle)
+      || foldSearchText(option.value).includes(needle),
   )
 })
 
 const pickerItems = computed<PickerItem[]>(() => {
   const items: PickerItem[] = []
   if (props.allowEmpty) {
-    const needle = query.value.trim().toLowerCase()
-    if (!needle || props.emptyLabel.toLowerCase().includes(needle)) {
+    const needle = foldSearchText(query.value.trim())
+    if (!needle || foldSearchText(props.emptyLabel).includes(needle)) {
       items.push({ kind: 'empty' })
     }
   }

@@ -39,6 +39,29 @@ pub struct TtsFigurine {
     pub sectorial_ids: Vec<i64>,
 }
 
+#[derive(Debug, Clone, Default)]
+pub struct FigurineListFilter {
+    pub limit: u32,
+    pub offset: u32,
+    pub q: Option<String>,
+    pub painter: Option<String>,
+    pub army_id: Option<i64>,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct FigurineListPage {
+    pub items: Vec<TtsFigurine>,
+    pub total: u64,
+    pub limit: u32,
+    pub offset: u32,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct FigurineListMeta {
+    pub painters: Vec<String>,
+    pub iscs: Vec<String>,
+}
+
 /// Figurine mémorisée pour une paire ISC + loadout de profil.
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub struct TtsFigurinePickPref {
@@ -110,19 +133,192 @@ impl TtsFigurineStore {
     }
 
     pub fn list(&self) -> Result<Vec<TtsFigurine>> {
+        let page = self.list_page(&FigurineListFilter {
+            limit: u32::MAX,
+            offset: 0,
+            q: None,
+            painter: None,
+            army_id: None,
+        })?;
+        Ok(page.items)
+    }
+
+    /// Page de figurines (filtres optionnels peintre / recherche / sectorielle).
+    pub fn list_page(&self, filter: &FigurineListFilter) -> Result<FigurineListPage> {
         let conn = self.conn.lock().unwrap();
-        let mut stmt = conn.prepare(
+        let q = filter
+            .q
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(fold_search_text);
+        let painter = filter
+            .painter
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(|value| value.to_ascii_lowercase());
+        let army_id = filter.army_id.filter(|id| *id > 0);
+
+        let mut where_parts = Vec::new();
+        let mut params_vec: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
+
+        if let Some(painter) = painter.as_ref() {
+            where_parts.push("lower(trim(f.painter)) = ?");
+            params_vec.push(Box::new(painter.clone()));
+        }
+        if let Some(army_id) = army_id {
+            where_parts.push(
+                "lower(trim(f.isc)) IN (
+                    SELECT lower(trim(p.isc))
+                    FROM tts_profiles p
+                    WHERE p.army_id = ?
+                       OR EXISTS (
+                            SELECT 1 FROM tts_profile_sectorials s
+                            WHERE s.profile_id = p.id AND s.army_id = ?
+                       )
+                    UNION
+                    SELECT lower(trim(ff.isc))
+                    FROM tts_profile_forms ff
+                    JOIN tts_profiles p ON p.id = ff.profile_id
+                    WHERE p.army_id = ?
+                       OR EXISTS (
+                            SELECT 1 FROM tts_profile_sectorials s
+                            WHERE s.profile_id = p.id AND s.army_id = ?
+                       )
+                )",
+            );
+            params_vec.push(Box::new(army_id));
+            params_vec.push(Box::new(army_id));
+            params_vec.push(Box::new(army_id));
+            params_vec.push(Box::new(army_id));
+        }
+
+        let where_sql = if where_parts.is_empty() {
+            String::new()
+        } else {
+            format!("WHERE {}", where_parts.join(" AND "))
+        };
+
+        // Recherche texte : filtre en Rust pour ignorer les accents (í→i…).
+        if let Some(needle) = q.as_ref() {
+            let list_sql = format!(
+                "
+                SELECT f.id, f.isc, f.loadout, f.painter, f.asset_bundle_url,
+                       f.photo_filename, f.created_at, f.updated_at
+                FROM tts_figurines f
+                {where_sql}
+                ORDER BY f.isc COLLATE NOCASE, f.loadout COLLATE NOCASE, f.id
+                "
+            );
+            let params_ref: Vec<&dyn rusqlite::types::ToSql> =
+                params_vec.iter().map(|p| p.as_ref()).collect();
+            let mut stmt = conn.prepare(&list_sql)?;
+            let rows = stmt
+                .query_map(params_ref.as_slice(), map_row)?
+                .collect::<std::result::Result<Vec<_>, _>>()
+                .context("lecture des figurines")?;
+            let matched: Vec<TtsFigurine> = rows
+                .into_iter()
+                .filter(|figurine| {
+                    let haystack = fold_search_text(&format!(
+                        "{} {} {} {}",
+                        figurine.isc,
+                        figurine.loadout,
+                        figurine.painter,
+                        figurine.asset_bundle_url
+                    ));
+                    haystack.contains(needle)
+                })
+                .collect();
+            let total = matched.len() as u64;
+            let start = filter.offset as usize;
+            let items = matched
+                .into_iter()
+                .skip(start)
+                .take(filter.limit as usize)
+                .collect();
+            return Ok(FigurineListPage {
+                items,
+                total,
+                limit: filter.limit,
+                offset: filter.offset,
+            });
+        }
+
+        let count_sql = format!("SELECT COUNT(*) FROM tts_figurines f {where_sql}");
+        let params_ref: Vec<&dyn rusqlite::types::ToSql> =
+            params_vec.iter().map(|p| p.as_ref()).collect();
+        let total: u64 = conn
+            .query_row(&count_sql, params_ref.as_slice(), |row| row.get(0))
+            .context("comptage des figurines")?;
+
+        let list_sql = format!(
             "
-            SELECT id, isc, loadout, painter, asset_bundle_url, photo_filename, created_at, updated_at
-            FROM tts_figurines
-            ORDER BY isc COLLATE NOCASE, loadout COLLATE NOCASE, id
-            ",
-        )?;
+            SELECT f.id, f.isc, f.loadout, f.painter, f.asset_bundle_url,
+                   f.photo_filename, f.created_at, f.updated_at
+            FROM tts_figurines f
+            {where_sql}
+            ORDER BY f.isc COLLATE NOCASE, f.loadout COLLATE NOCASE, f.id
+            LIMIT ? OFFSET ?
+            "
+        );
+        let mut list_params = params_vec;
+        list_params.push(Box::new(filter.limit as i64));
+        list_params.push(Box::new(filter.offset as i64));
+        let list_ref: Vec<&dyn rusqlite::types::ToSql> =
+            list_params.iter().map(|p| p.as_ref()).collect();
+        let mut stmt = conn.prepare(&list_sql)?;
         let rows = stmt
-            .query_map([], map_row)?
+            .query_map(list_ref.as_slice(), map_row)?
             .collect::<std::result::Result<Vec<_>, _>>()
             .context("lecture des figurines")?;
-        Ok(rows)
+        Ok(FigurineListPage {
+            items: rows,
+            total,
+            limit: filter.limit,
+            offset: filter.offset,
+        })
+    }
+
+    /// Peintres et ISC distincts (filtres / onglet profils).
+    pub fn list_meta(&self) -> Result<FigurineListMeta> {
+        let conn = self.conn.lock().unwrap();
+        let mut painters = Vec::new();
+        let mut stmt = conn.prepare(
+            "
+            SELECT DISTINCT trim(painter)
+            FROM tts_figurines
+            WHERE trim(painter) != ''
+            ORDER BY trim(painter) COLLATE NOCASE
+            ",
+        )?;
+        let painter_rows = stmt.query_map([], |row| row.get::<_, String>(0))?;
+        for row in painter_rows {
+            let name = row?;
+            if painters
+                .last()
+                .is_some_and(|prev: &String| prev.eq_ignore_ascii_case(&name))
+            {
+                continue;
+            }
+            painters.push(name);
+        }
+
+        let mut iscs = Vec::new();
+        let mut stmt = conn.prepare(
+            "
+            SELECT DISTINCT lower(trim(isc))
+            FROM tts_figurines
+            WHERE trim(isc) != ''
+            ORDER BY lower(trim(isc))
+            ",
+        )?;
+        let isc_rows = stmt.query_map([], |row| row.get::<_, String>(0))?;
+        for row in isc_rows {
+            iscs.push(row?);
+        }
+        Ok(FigurineListMeta { painters, iscs })
     }
 
     pub fn get(&self, id: i64) -> Result<Option<TtsFigurine>> {
@@ -461,6 +657,38 @@ fn uploads_root(db_path: &Path) -> PathBuf {
         .join("uploads")
 }
 
+/// Minuscules sans accents (í→i, á→a, ö→o…) pour les recherches ISC / texte.
+pub fn fold_search_text(raw: &str) -> String {
+    let mut out = String::with_capacity(raw.len());
+    for ch in raw.chars() {
+        for c in ch.to_lowercase() {
+            match c {
+                'à' | 'á' | 'â' | 'ã' | 'ä' | 'å' | 'ā' | 'ă' | 'ą' => out.push('a'),
+                'ç' | 'ć' | 'č' => out.push('c'),
+                'ď' | 'đ' => out.push('d'),
+                'è' | 'é' | 'ê' | 'ë' | 'ē' | 'ė' | 'ę' => out.push('e'),
+                'ì' | 'í' | 'î' | 'ï' | 'ī' | 'į' => out.push('i'),
+                'ł' => out.push('l'),
+                'ñ' | 'ń' => out.push('n'),
+                'ò' | 'ó' | 'ô' | 'õ' | 'ö' | 'ø' | 'ō' | 'ő' => out.push('o'),
+                'ř' => out.push('r'),
+                'ś' | 'š' | 'ş' | 'ș' => out.push('s'),
+                'ť' | 'ț' => out.push('t'),
+                'ù' | 'ú' | 'û' | 'ü' | 'ū' | 'ů' | 'ű' => out.push('u'),
+                'ý' | 'ÿ' => out.push('y'),
+                'ź' | 'ż' | 'ž' => out.push('z'),
+                'ß' => out.push_str("ss"),
+                'æ' => out.push_str("ae"),
+                'œ' => out.push_str("oe"),
+                // Marques combinantes éventuelles (texte déjà en NFD).
+                '\u{0300}'..='\u{036F}' => {}
+                other => out.push(other),
+            }
+        }
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -497,6 +725,90 @@ mod tests {
             .write_image(&[9, 8, 7, 6, 5, 4], 2, 1, image::ExtendedColorType::Rgb8)
             .unwrap();
         bytes
+    }
+
+    #[test]
+    fn list_page_filters_and_paginates() {
+        let (store, dir) = temp_store();
+        for (isc, painter) in [
+            ("Alpha", "Alex"),
+            ("Bravo", "Alex"),
+            ("Charlie", "Léa"),
+            ("Delta", "Alex"),
+        ] {
+            store
+                .create(&FigurineWrite {
+                    isc: isc.into(),
+                    loadout: "Combi".into(),
+                    painter: painter.into(),
+                    asset_bundle_url: "https://example.com/x".into(),
+                })
+                .unwrap();
+        }
+        let page = store
+            .list_page(&FigurineListFilter {
+                limit: 2,
+                offset: 0,
+                q: None,
+                painter: Some("Alex".into()),
+                army_id: None,
+            })
+            .unwrap();
+        assert_eq!(page.total, 3);
+        assert_eq!(page.items.len(), 2);
+        assert_eq!(page.items[0].isc, "Alpha");
+        let page2 = store
+            .list_page(&FigurineListFilter {
+                limit: 2,
+                offset: 2,
+                q: None,
+                painter: Some("Alex".into()),
+                army_id: None,
+            })
+            .unwrap();
+        assert_eq!(page2.items.len(), 1);
+        assert_eq!(page2.items[0].isc, "Delta");
+        let search = store
+            .list_page(&FigurineListFilter {
+                limit: 20,
+                offset: 0,
+                q: Some("char".into()),
+                painter: None,
+                army_id: None,
+            })
+            .unwrap();
+        assert_eq!(search.total, 1);
+        assert_eq!(search.items[0].isc, "Charlie");
+        store
+            .create(&FigurineWrite {
+                isc: "Síomón".into(),
+                loadout: "Combi".into(),
+                painter: "Alex".into(),
+                asset_bundle_url: "https://example.com/x".into(),
+            })
+            .unwrap();
+        let accent = store
+            .list_page(&FigurineListFilter {
+                limit: 20,
+                offset: 0,
+                q: Some("siomon".into()),
+                painter: None,
+                army_id: None,
+            })
+            .unwrap();
+        assert_eq!(accent.total, 1);
+        assert_eq!(accent.items[0].isc, "Síomón");
+        let meta = store.list_meta().unwrap();
+        assert!(meta.painters.iter().any(|p| p == "Alex"));
+        assert!(meta.iscs.iter().any(|i| i == "alpha"));
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn fold_search_text_strips_accents() {
+        assert_eq!(fold_search_text("Síomón Águila"), "siomon aguila");
+        assert_eq!(fold_search_text("Ötzi"), "otzi");
+        assert_eq!(fold_search_text("Ægir"), "aegir");
     }
 
     #[test]

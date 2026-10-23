@@ -21,7 +21,7 @@ import {
 import { useAdminEditMode } from '@/composables/useAdminEditMode'
 import { useArmies } from '@/composables/useArmies'
 import { useTtsSectorial } from '@/composables/useTtsSectorial'
-import { fetchTtsFigurines, fetchTtsProfileArmies } from '@/lib/api'
+import { fetchTtsFigurineMeta, fetchTtsProfileArmies } from '@/lib/api'
 import { isListableArmy } from '@/lib/army'
 import { profilsFigsTabs, type PageTitleTab } from '@/lib/pageTitleTabs'
 import type { Army } from '@/types/elo'
@@ -202,23 +202,12 @@ function onSectorialChange(value: string | undefined) {
 
 async function refreshPainterOptions() {
   try {
-    const rows = await fetchTtsFigurines()
-    const seenPainters = new Set<string>()
-    const seenIscs = new Set<string>()
-    const options: { value: string; label: string }[] = []
-    for (const row of rows) {
-      const isc = row.isc.trim().toLowerCase()
-      if (isc) seenIscs.add(isc)
-      const painter = row.painter.trim()
-      if (!painter) continue
-      const key = painter.toLowerCase()
-      if (seenPainters.has(key)) continue
-      seenPainters.add(key)
-      options.push({ value: painter, label: painter })
-    }
-    options.sort((left, right) => left.label.localeCompare(right.label, 'fr', { sensitivity: 'base' }))
-    painterOptions.value = options
-    figurineIscs.value = [...seenIscs]
+    const meta = await fetchTtsFigurineMeta()
+    painterOptions.value = meta.painters.map((painter) => ({
+      value: painter,
+      label: painter,
+    }))
+    figurineIscs.value = meta.iscs
   } catch {
     painterOptions.value = []
     figurineIscs.value = []

@@ -23,6 +23,7 @@ import { useAdminEditMode } from '@/composables/useAdminEditMode'
 import { useArmies } from '@/composables/useArmies'
 import { useAppSidePanel } from '@/composables/useAppSidePanel'
 import { silhouetteKind } from '@/lib/silhouetteKind'
+import { foldSearchText } from '@/lib/utils'
 import {
   fetchTtsProfile,
   fetchTtsProfileArmies,
@@ -89,16 +90,15 @@ function figurinesLink(profile: { isc: string }) {
 }
 
 const filteredProfiles = computed(() => {
-  const needle = search.value.trim().toLowerCase()
+  const needle = foldSearchText(search.value.trim())
   return profiles.value.filter((profile) => {
     if (!showSpecialOps.value && isSpecialOps(profile)) return false
     if (props.figFilter === 'avec' && !hasFigurine(profile)) return false
     if (props.figFilter === 'sans' && hasFigurine(profile)) return false
     if (!needle) return true
-    return [profile.isc, profile.loadout, profile.nom_tts, profile.marker_name ?? '', profile.differences]
-      .join(' ')
-      .toLowerCase()
-      .includes(needle)
+    return foldSearchText(
+      [profile.isc, profile.loadout, profile.nom_tts, profile.marker_name ?? '', profile.differences].join(' '),
+    ).includes(needle)
   })
 })
 

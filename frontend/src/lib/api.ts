@@ -11,6 +11,8 @@ import type {
   MatchRecord,
   PaginatedMatches,
   PaginatedReports,
+  PaginatedTtsFigurines,
+  TtsFigurineMeta,
   Player,
   PlayerArmyStats,
   PlayerProfile,
@@ -107,8 +109,37 @@ export function fetchTtsProfileLabels(): Promise<TtsProfileLabel[]> {
   return request<TtsProfileLabel[]>('/api/tts-profiles/labels')
 }
 
-export function fetchTtsFigurines(): Promise<TtsFigurine[]> {
-  return request<TtsFigurine[]>('/api/tts-figurines')
+export type FetchTtsFigurinesOptions = {
+  limit?: number
+  offset?: number
+  q?: string
+  painter?: string
+  armyId?: number | string
+  /** Catalogue complet (listes TTS). */
+  all?: boolean
+}
+
+export function fetchTtsFigurines(
+  options: FetchTtsFigurinesOptions = {},
+): Promise<PaginatedTtsFigurines> {
+  const params = new URLSearchParams()
+  if (options.all) {
+    params.set('all', '1')
+  } else {
+    params.set('limit', String(options.limit ?? 20))
+    params.set('offset', String(options.offset ?? 0))
+  }
+  const q = options.q?.trim()
+  if (q) params.set('q', q)
+  const painter = options.painter?.trim()
+  if (painter) params.set('painter', painter)
+  const armyId = Number(options.armyId)
+  if (armyId > 0) params.set('army_id', String(armyId))
+  return request<PaginatedTtsFigurines>(`/api/tts-figurines?${params}`)
+}
+
+export function fetchTtsFigurineMeta(): Promise<TtsFigurineMeta> {
+  return request<TtsFigurineMeta>('/api/tts-figurines/meta')
 }
 
 export function expandTtsList(code: string, painter?: string): Promise<TtsListExpandResult> {

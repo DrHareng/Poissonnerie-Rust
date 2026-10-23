@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { Download } from '@lucide/vue'
 import { toast } from 'vue-sonner'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
@@ -29,6 +29,9 @@ import {
 import { withBase } from '@/lib/basePath'
 import type { TtsFigurine, TtsFigurineLabel, TtsFigurineLoadout, TtsFigurineWrite } from '@/types/elo'
 
+const PAGE_SIZE = 20
+const SEARCH_DEBOUNCE_MS = 200
+
 type FigurineLabel = {
   isc: string
   loadout: string
@@ -53,8 +56,15 @@ const labels = ref<FigurineLabel[]>([])
 const search = defineModel<string>('search', { default: '' })
 const painterFilter = defineModel<string>('painter', { default: '' })
 const loading = ref(true)
+const loadingMore = ref(false)
 const loadError = ref('')
+const total = ref(0)
 const saving = ref(false)
+const scrollEl = ref<HTMLElement | null>(null)
+const loadMoreSentinel = ref<HTMLElement | null>(null)
+let searchDebounce: ReturnType<typeof setTimeout> | null = null
+let loadGeneration = 0
+let loadMoreObserver: IntersectionObserver | null = null
 const panel = ref<'edit' | 'download' | null>(null)
 const editingId = ref<number | null>(null)
 const downloadTarget = ref<TtsFigurine | null>(null)
@@ -72,33 +82,7 @@ const existingPhoto = ref('')
 const removeExistingPhoto = ref(false)
 const fileInput = ref<HTMLInputElement | null>(null)
 
-const painterOptions = computed(() =>
-  uniqueSorted(figurines.value.map((figurine) => figurine.painter)),
-)
-
-const inScope = computed(() => {
-  const painter = painterFilter.value.trim().toLowerCase()
-  let rows = figurines.value
-  if (props.armyId) {
-    const known = new Set(labels.value.map((label) => label.isc.trim().toLowerCase()))
-    rows = rows.filter((figurine) => known.has(figurine.isc.trim().toLowerCase()))
-  }
-  if (painter) {
-    rows = rows.filter((figurine) => figurine.painter.trim().toLowerCase() === painter)
-  }
-  return rows
-})
-
-const filtered = computed(() => {
-  const needle = search.value.trim().toLowerCase()
-  if (!needle) return inScope.value
-  return inScope.value.filter((figurine) =>
-    [figurine.isc, figurine.loadout, figurine.painter, figurine.asset_bundle_url]
-      .join(' ')
-      .toLowerCase()
-      .includes(needle),
-  )
-})
+const hasMore = computed(() => figurines.value.length < total.value)
 
 const iscPickerOptions = computed(() => uniqueSorted(labels.value.map((label) => label.isc)))
 
@@ -329,16 +313,63 @@ function forgetPhoto() {
   if (existingPhoto.value) removeExistingPhoto.value = true
 }
 
-async function loadFigurines() {
-  loading.value = true
-  loadError.value = ''
-  try {
-    figurines.value = await fetchTtsFigurines()
-  } catch (error) {
-    loadError.value = error instanceof Error ? error.message : 'Impossible de charger les figurines'
-  } finally {
-    loading.value = false
+async function loadFigurines(reset = true) {
+  const generation = reset ? ++loadGeneration : loadGeneration
+  if (reset) {
+    loading.value = true
+    loadError.value = ''
+    figurines.value = []
+    total.value = 0
+  } else {
+    if (loadingMore.value || loading.value || !hasMore.value) return
+    loadingMore.value = true
   }
+  try {
+    const page = await fetchTtsFigurines({
+      limit: PAGE_SIZE,
+      offset: reset ? 0 : figurines.value.length,
+      q: search.value,
+      painter: painterFilter.value,
+      armyId: props.armyId,
+    })
+    if (generation !== loadGeneration) return
+    total.value = page.total
+    figurines.value = reset ? page.items : [...figurines.value, ...page.items]
+  } catch (error) {
+    if (generation !== loadGeneration) return
+    loadError.value = error instanceof Error ? error.message : 'Impossible de charger les figurines'
+    if (reset) figurines.value = []
+  } finally {
+    if (generation === loadGeneration) {
+      loading.value = false
+      loadingMore.value = false
+    }
+  }
+}
+
+function scheduleReload() {
+  if (searchDebounce != null) clearTimeout(searchDebounce)
+  searchDebounce = setTimeout(() => {
+    searchDebounce = null
+    void loadFigurines(true)
+  }, SEARCH_DEBOUNCE_MS)
+}
+
+function bindLoadMoreObserver() {
+  loadMoreObserver?.disconnect()
+  loadMoreObserver = null
+  const root = scrollEl.value
+  const target = loadMoreSentinel.value
+  if (!root || !target || typeof IntersectionObserver === 'undefined') return
+  loadMoreObserver = new IntersectionObserver(
+    (entries) => {
+      if (entries.some((entry) => entry.isIntersecting)) {
+        void loadFigurines(false)
+      }
+    },
+    { root, rootMargin: '200px 0px' },
+  )
+  loadMoreObserver.observe(target)
 }
 
 async function save() {
@@ -381,11 +412,11 @@ async function save() {
       photoFile.value = null
       revokePreview()
     }
-    await loadFigurines()
+    await loadFigurines(true)
     emit('saved')
   } catch (error) {
     toast.error(error instanceof Error ? error.message : 'Impossible d’enregistrer la figurine')
-    await loadFigurines()
+    await loadFigurines(true)
   } finally {
     saving.value = false
   }
@@ -401,7 +432,7 @@ async function removeCurrent() {
     await deleteTtsFigurine(id)
     closePanel()
     toast.success('Figurine supprimée')
-    await loadFigurines()
+    await loadFigurines(true)
     emit('saved')
   } catch (error) {
     toast.error(error instanceof Error ? error.message : 'Impossible de supprimer la figurine')
@@ -446,10 +477,23 @@ watch(
 watch(() => props.armyId, () => {
   void loadLabels()
   void loadFactionColor()
+  void loadFigurines(true)
   if (panel.value === 'download' && downloadTarget.value) {
     void openDownload(downloadTarget.value)
   }
 }, { immediate: true })
+
+watch([search, painterFilter], () => {
+  scheduleReload()
+})
+
+watch(
+  [scrollEl, loadMoreSentinel, hasMore],
+  async () => {
+    await nextTick()
+    bindLoadMoreObserver()
+  },
+)
 
 async function loadFactionColor() {
   const armyId = Number(props.armyId)
@@ -496,13 +540,12 @@ async function loadLabels() {
   }
 }
 
-onMounted(async () => {
-  await loadFigurines()
-})
-
 defineExpose({ openCreate })
 
 onBeforeUnmount(() => {
+  if (searchDebounce != null) clearTimeout(searchDebounce)
+  loadMoreObserver?.disconnect()
+  loadMoreObserver = null
   setCustomSide(false)
   revokePreview()
 })
@@ -723,22 +766,20 @@ onBeforeUnmount(() => {
 
     <p v-else-if="loading" class="shrink-0 text-sm text-muted-foreground">Chargement...</p>
 
-    <p v-else-if="!filtered.length" class="shrink-0 text-sm text-muted-foreground">
+    <p v-else-if="!figurines.length" class="shrink-0 text-sm text-muted-foreground">
       {{
-        inScope.length
+        search.trim() || painterFilter.trim()
           ? 'Aucune figurine ne correspond.'
           : armyId
             ? 'Aucune figurine pour cette sectorielle.'
-            : painterFilter.trim()
-              ? 'Aucune figurine pour ce peintre.'
-              : 'Aucune figurine.'
+            : 'Aucune figurine.'
       }}
     </p>
 
-    <div v-else class="min-h-0 flex-1 overflow-y-auto">
+    <div v-else ref="scrollEl" class="min-h-0 flex-1 overflow-y-auto">
       <div class="grid grid-cols-2 items-start gap-3 lg:grid-cols-4">
       <article
-        v-for="figurine in filtered"
+        v-for="figurine in figurines"
         :key="figurine.id"
         class="neon-panel min-w-0 overflow-hidden"
       >
@@ -811,6 +852,12 @@ onBeforeUnmount(() => {
           </div>
         </button>
       </article>
+      </div>
+      <div ref="loadMoreSentinel" class="flex h-10 items-center justify-center">
+        <p v-if="loadingMore" class="text-sm text-muted-foreground">Chargement…</p>
+        <p v-else-if="!hasMore && total > PAGE_SIZE" class="text-sm text-muted-foreground">
+          {{ total }} figurine{{ total > 1 ? 's' : '' }}
+        </p>
       </div>
     </div>
   </div>

@@ -650,6 +650,18 @@ export interface TtsFigurine {
   sectorial_ids: number[]
 }
 
+export interface PaginatedTtsFigurines {
+  items: TtsFigurine[]
+  total: number
+  limit: number
+  offset: number
+}
+
+export interface TtsFigurineMeta {
+  painters: string[]
+  iscs: string[]
+}
+
 export interface TtsFigurineWrite {
   isc: string
   loadout: string

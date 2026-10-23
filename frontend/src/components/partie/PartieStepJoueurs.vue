@@ -6,6 +6,7 @@ import SectorialPicker from '@/components/SectorialPicker.vue'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import { Label } from '@/components/ui/label'
+import { foldSearchText } from '@/lib/utils'
 
 export type MatchEloMode = 'friendly' | 'ranked'
 export type SecondaryDrawMode = 'draw' | 'manual'
@@ -65,12 +66,12 @@ const player2Options = computed(() =>
 )
 
 function findRegisteredPlayer(raw: string) {
-  const needle = raw.trim().toLowerCase()
+  const needle = foldSearchText(raw.trim())
   if (!needle) return undefined
   return props.players.find(
     (player) =>
-      player.name.toLowerCase() === needle
-      || player.display_name.toLowerCase() === needle,
+      foldSearchText(player.name) === needle
+      || foldSearchText(player.display_name) === needle,
   )
 }
 

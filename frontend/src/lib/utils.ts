@@ -47,3 +47,11 @@ export function externalHref(url: string): string {
   if (/^[a-z][a-z0-9+.-]*:/i.test(trimmed)) return trimmed
   return `https://${trimmed}`
 }
+
+/** Minuscules sans accents (í→i, á→a, ö→o…) pour les recherches. */
+export function foldSearchText(value: string): string {
+  return value
+    .normalize('NFD')
+    .replace(/\p{M}/gu, '')
+    .toLowerCase()
+}

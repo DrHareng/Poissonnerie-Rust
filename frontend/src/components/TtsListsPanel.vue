@@ -470,7 +470,7 @@ function bagFilename(name: string) {
 
 async function ensureCatalog() {
   if (catalogLoaded.value) return
-  catalog.value = await fetchTtsFigurines()
+  catalog.value = (await fetchTtsFigurines({ all: true })).items
   catalogLoaded.value = true
 }
 

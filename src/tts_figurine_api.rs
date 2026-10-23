@@ -12,12 +12,18 @@ use tower_sessions::Session;
 use crate::{
     api::{ApiError, AppState},
     auth,
-    tts_figurine::{FigurineWrite, TtsFigurine, TtsFigurinePickPref},
+    tts_figurine::{
+        FigurineListFilter, FigurineListMeta, FigurineListPage, FigurineWrite, TtsFigurine,
+        TtsFigurinePickPref,
+    },
     tts_map::{self, MAX_PICTURE_BYTES},
     tts_object::{self, ModelForm, ModelProfile},
     tts_profile::{TtsFigurineLabel, TtsProfileForm, TtsProfileLoadout},
     User,
 };
+
+const FIGURINE_PAGE_DEFAULT: u32 = 20;
+const FIGURINE_PAGE_MAX: u32 = 100;
 
 const UPLOAD_BODY_LIMIT: usize = 12 * 1024 * 1024;
 
@@ -38,6 +44,7 @@ pub fn tts_figurine_routes() -> Router<AppState> {
             "/api/tts-figurines",
             get(list_figurines).post(create_figurine),
         )
+        .route("/api/tts-figurines/meta", get(list_figurine_meta))
         .route("/api/tts-figurines/labels", get(list_figurine_labels))
         .route(
             "/api/tts-figurines/{id}",
@@ -81,6 +88,17 @@ impl FigurineBody {
 #[derive(Debug, Deserialize)]
 struct ArmyQuery {
     army_id: i64,
+}
+
+#[derive(Debug, Deserialize)]
+struct FigurineListQuery {
+    limit: Option<u32>,
+    offset: Option<u32>,
+    q: Option<String>,
+    painter: Option<String>,
+    army_id: Option<i64>,
+    /// Catalogue complet (listes TTS) : ignore la pagination.
+    all: Option<bool>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -387,12 +405,47 @@ fn model_from_form(form: &TtsProfileForm) -> ModelProfile {
     }
 }
 
-async fn list_figurines(State(state): State<AppState>) -> Result<Json<Vec<TtsFigurine>>, ApiError> {
-    let figurines = state
+async fn list_figurine_meta(
+    State(state): State<AppState>,
+) -> Result<Json<FigurineListMeta>, ApiError> {
+    state
         .tts_figurines
-        .list()
+        .list_meta()
+        .map(Json)
+        .map_err(|error| ApiError::bad_request(error.to_string()))
+}
+
+async fn list_figurines(
+    State(state): State<AppState>,
+    Query(query): Query<FigurineListQuery>,
+) -> Result<Json<FigurineListPage>, ApiError> {
+    if let Some(army_id) = query.army_id {
+        if army_id > 0 {
+            require_army(&state, army_id)?;
+        }
+    }
+    let all = query.all.unwrap_or(false);
+    let limit = if all {
+        u32::MAX
+    } else {
+        query
+            .limit
+            .unwrap_or(FIGURINE_PAGE_DEFAULT)
+            .clamp(1, FIGURINE_PAGE_MAX)
+    };
+    let offset = if all { 0 } else { query.offset.unwrap_or(0) };
+    let mut page = state
+        .tts_figurines
+        .list_page(&FigurineListFilter {
+            limit,
+            offset,
+            q: query.q,
+            painter: query.painter,
+            army_id: query.army_id,
+        })
         .map_err(|error| ApiError::bad_request(error.to_string()))?;
-    Ok(Json(attach_sectorials(&state, figurines)?))
+    page.items = attach_sectorials(&state, page.items)?;
+    Ok(Json(page))
 }
 
 async fn create_figurine(
