@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import { Download } from '@lucide/vue'
 import { toast } from 'vue-sonner'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
@@ -18,6 +18,7 @@ import {
   createTtsFigurine,
   deleteTtsFigurine,
   fetchTtsFigurineLabels,
+  fetchTtsFigurineMeta,
   fetchTtsProfileLabels,
   fetchTtsSectorialColor,
   fetchTtsFigurineLoadouts,
@@ -53,6 +54,7 @@ const { canEditContent } = useAdminEditMode()
 
 const figurines = ref<TtsFigurine[]>([])
 const labels = ref<FigurineLabel[]>([])
+const knownPainters = ref<string[]>([])
 const search = defineModel<string>('search', { default: '' })
 const painterFilter = defineModel<string>('painter', { default: '' })
 const loading = ref(true)
@@ -83,6 +85,8 @@ const removeExistingPhoto = ref(false)
 const fileInput = ref<HTMLInputElement | null>(null)
 
 const hasMore = computed(() => figurines.value.length < total.value)
+
+const painterOptions = computed(() => uniqueSorted(knownPainters.value))
 
 const iscPickerOptions = computed(() => uniqueSorted(labels.value.map((label) => label.isc)))
 
@@ -313,6 +317,14 @@ function forgetPhoto() {
   if (existingPhoto.value) removeExistingPhoto.value = true
 }
 
+async function loadPainterOptions() {
+  try {
+    knownPainters.value = (await fetchTtsFigurineMeta()).painters
+  } catch {
+    knownPainters.value = []
+  }
+}
+
 async function loadFigurines(reset = true) {
   const generation = reset ? ++loadGeneration : loadGeneration
   if (reset) {
@@ -412,11 +424,11 @@ async function save() {
       photoFile.value = null
       revokePreview()
     }
-    await loadFigurines(true)
+    await Promise.all([loadFigurines(true), loadPainterOptions()])
     emit('saved')
   } catch (error) {
     toast.error(error instanceof Error ? error.message : 'Impossible d’enregistrer la figurine')
-    await loadFigurines(true)
+    await Promise.all([loadFigurines(true), loadPainterOptions()])
   } finally {
     saving.value = false
   }
@@ -432,7 +444,7 @@ async function removeCurrent() {
     await deleteTtsFigurine(id)
     closePanel()
     toast.success('Figurine supprimée')
-    await loadFigurines(true)
+    await Promise.all([loadFigurines(true), loadPainterOptions()])
     emit('saved')
   } catch (error) {
     toast.error(error instanceof Error ? error.message : 'Impossible de supprimer la figurine')
@@ -478,6 +490,7 @@ watch(() => props.armyId, () => {
   void loadLabels()
   void loadFactionColor()
   void loadFigurines(true)
+  void loadPainterOptions()
   if (panel.value === 'download' && downloadTarget.value) {
     void openDownload(downloadTarget.value)
   }
