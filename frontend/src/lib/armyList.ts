@@ -25,7 +25,8 @@ export function normalizeArmyListCode(raw: string): string {
 
 export function armyListUrl(code: string): string {
   const normalized = normalizeArmyListCode(code)
-  return `${INFINITY_ARMY_LIST_BASE}${normalized}`
+  // Ré-encoder + / = : sinon le `/` base64 coupe le path Army en deux segments.
+  return `${INFINITY_ARMY_LIST_BASE}${encodeURIComponent(normalized)}`
 }
 
 /**
