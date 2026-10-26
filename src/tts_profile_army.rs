@@ -518,12 +518,19 @@ fn absorb_units(
     }
 }
 
-/// Retire un suffixe « FTO » pour rattacher l'option fireteam au même nom d'unité.
+/// Retire un suffixe « FTO » / « FTO-2 » pour rattacher l'option fireteam au même nom d'unité.
 fn normalize_unit_name(name: &str) -> String {
     let trimmed = name.trim();
     let lower = trimmed.to_ascii_lowercase();
-    if let Some(stripped) = lower.strip_suffix(" fto") {
-        return trimmed[..stripped.len()].trim_end().to_string();
+    if let Some(pos) = lower.rfind(" fto") {
+        let after = &lower[pos + " fto".len()..];
+        let is_fto_suffix = after.is_empty()
+            || (after.starts_with('-')
+                && !after[1..].is_empty()
+                && after[1..].bytes().all(|b| b.is_ascii_digit()));
+        if is_fto_suffix {
+            return trimmed[..pos].trim_end().to_string();
+        }
     }
     trimmed.to_string()
 }
@@ -1877,29 +1884,63 @@ fn snapshot_colors(conn: &Connection) -> Result<HashMap<String, String>> {
     Ok(colors)
 }
 
-fn has_lieutenant(traits: &[TraitDraft]) -> bool {
-    traits.iter().any(|t| {
-        t.kind.eq_ignore_ascii_case("char") && t.name.trim().eq_ignore_ascii_case("Lieutenant")
-    })
+/// Compétences absentes des loadouts TTS (partage avec le profil « standard »).
+fn is_hidden_tts_skill_name(name: &str) -> bool {
+    let head = name
+        .trim()
+        .split_once('(')
+        .map(|(before, _)| before.trim())
+        .unwrap_or_else(|| name.trim());
+    matches!(
+        head.to_ascii_lowercase().as_str(),
+        "lieutenant" | "chain of command" | "counterintelligence"
+    )
 }
 
-fn traits_without_lieutenant(traits: &[TraitDraft]) -> Vec<TraitDraft> {
+fn traits_without_hidden_tts_skills(traits: &[TraitDraft]) -> Vec<TraitDraft> {
     traits
         .iter()
-        .filter(|t| {
-            !(t.kind.eq_ignore_ascii_case("char")
-                && t.name.trim().eq_ignore_ascii_case("Lieutenant"))
-        })
+        .filter(|trait_| !is_hidden_tts_skill_name(&trait_.name))
         .cloned()
         .collect()
 }
 
-/// Clé de partage loadout TTS : unité + groupe + loadout + silhouette, hors Lieutenant.
+/// Retire Lieutenant / Chain of Command / Counterintelligence d'un suffixe `(…)`.
+fn strip_hidden_skills_from_loadout(loadout: &str) -> String {
+    let loadout = loadout.trim();
+    let Some((head, rest)) = loadout.rsplit_once(" (") else {
+        return loadout.to_string();
+    };
+    let Some(inner) = rest.strip_suffix(')') else {
+        return loadout.to_string();
+    };
+    let kept: Vec<&str> = inner
+        .split(", ")
+        .map(str::trim)
+        .filter(|part| !part.is_empty() && !is_hidden_tts_skill_name(part))
+        .collect();
+    if kept.is_empty() {
+        head.trim_end().to_string()
+    } else {
+        format!("{head} ({})", kept.join(", "))
+    }
+}
+
+fn strip_hidden_skills_from_nom_tts(nom_tts: &str) -> String {
+    if let Some(idx) = nom_tts.find("[-] ") {
+        let (prefix, loadout) = nom_tts.split_at(idx + "[-] ".len());
+        format!("{prefix}{}", strip_hidden_skills_from_loadout(loadout))
+    } else {
+        strip_hidden_skills_from_loadout(nom_tts)
+    }
+}
+
+/// Clé de partage loadout TTS : unité + groupe + loadout (sans compétences cachées) + silhouette.
 fn tts_share_key(profile: &ProfileDraft) -> (i64, i64, String, String, String) {
     (
         profile.unit_id,
         profile.group_id,
-        profile.loadout.trim().to_ascii_lowercase(),
+        strip_hidden_skills_from_loadout(&profile.loadout).to_ascii_lowercase(),
         profile
             .silhouette_size
             .as_deref()
@@ -2015,16 +2056,7 @@ fn store_profiles(
         )?;
     }
 
-    // Pré-résoudre le partage Lt : sibling non-Lt fournit le loadout TTS.
-    let mut share_owner: HashMap<(i64, i64, String, String, String), usize> = HashMap::new();
-    for (index, profile) in profiles.iter().enumerate() {
-        if has_lieutenant(&profile.traits) {
-            continue;
-        }
-        share_owner
-            .entry(tts_share_key(profile))
-            .or_insert(index);
-    }
+    // Loadouts TTS partagés : Lt / CoC / Counterintelligence absents du texte TTS.
     let mut shared_loadout_ids: HashMap<(i64, i64, String, String, String), i64> = HashMap::new();
 
     let mut forms = 0usize;
@@ -2032,48 +2064,16 @@ fn store_profiles(
     for profile in profiles {
         let db_unit_id = ensure_unit(&tx, &profile.isc)?;
         let key = tts_share_key(profile);
-        let tts_loadout_id = if has_lieutenant(&profile.traits) {
-            if let Some(&owner_idx) = share_owner.get(&key) {
-                if let Some(&existing) = shared_loadout_ids.get(&key) {
-                    existing
-                } else {
-                    // Créer depuis le sibling non-Lt si pas encore inséré.
-                    let owner = &profiles[owner_idx];
-                    let desc = description_from_traits(&traits_without_lieutenant(&owner.traits));
-                    let id = insert_loadout(
-                        &tx,
-                        &owner.nom_tts,
-                        &desc,
-                        &owner.silhouette_size,
-                        &owner.silhouette_type,
-                        &owner.marker_name,
-                        &owner.mesh_url,
-                        &owner.marker_mesh_url,
-                    )?;
-                    shared_loadout_ids.insert(key.clone(), id);
-                    id
-                }
-            } else {
-                // Pas de sibling non-Lt : loadout propre sans Lt dans la description TTS.
-                let desc = description_from_traits(&traits_without_lieutenant(&profile.traits));
-                insert_loadout(
-                    &tx,
-                    &profile.nom_tts,
-                    &desc,
-                    &profile.silhouette_size,
-                    &profile.silhouette_type,
-                    &profile.marker_name,
-                    &profile.mesh_url,
-                    &profile.marker_mesh_url,
-                )?
-            }
-        } else if let Some(&existing) = shared_loadout_ids.get(&key) {
+        let tts_loadout_id = if let Some(&existing) = shared_loadout_ids.get(&key) {
             existing
         } else {
+            let nom_tts = strip_hidden_skills_from_nom_tts(&profile.nom_tts);
+            let description =
+                description_from_traits(&traits_without_hidden_tts_skills(&profile.traits));
             let id = insert_loadout(
                 &tx,
-                &profile.nom_tts,
-                &profile.description_tts,
+                &nom_tts,
+                &description,
                 &profile.silhouette_size,
                 &profile.silhouette_type,
                 &profile.marker_name,
@@ -2108,10 +2108,13 @@ fn store_profiles(
 
         for form in &profile.forms {
             let form_unit_id = ensure_unit(&tx, &form.isc)?;
+            let form_nom_tts = strip_hidden_skills_from_nom_tts(&form.nom_tts);
+            let form_description =
+                description_from_traits(&traits_without_hidden_tts_skills(&form.traits));
             let form_loadout_id = insert_loadout(
                 &tx,
-                &form.nom_tts,
-                &form.description_tts,
+                &form_nom_tts,
+                &form_description,
                 &form.silhouette_size,
                 &form.silhouette_type,
                 &form.marker_name,
@@ -3026,6 +3029,10 @@ mod tests {
         assert_eq!(normalize_unit_name("MAXIMUS AGENT FTO"), "MAXIMUS AGENT");
         assert_eq!(normalize_unit_name("NISSE"), "NISSE");
         assert_eq!(normalize_unit_name("  SPECTOR FTO  "), "SPECTOR");
+        assert_eq!(normalize_unit_name("AQUILA FTO-2"), "AQUILA");
+        assert_eq!(normalize_unit_name("aquila fto-2"), "aquila");
+        assert_eq!(normalize_unit_name("MAXIMUS AGENT FTO-2"), "MAXIMUS AGENT");
+        assert_eq!(normalize_unit_name("SPECTOR FTOX"), "SPECTOR FTOX");
     }
 
     #[test]
@@ -3070,6 +3077,11 @@ mod tests {
                             "id": 2, "name": "AQUILA FTO", "disabled": false,
                             "weapons": [{"id": 169}, {"id": 69}, {"id": 5}],
                             "skills": [], "equip": [], "includes": []
+                        },
+                        {
+                            "id": 3, "name": "AQUILA FTO-2", "disabled": false,
+                            "weapons": [{"id": 2}, {"id": 169}, {"id": 69}, {"id": 5}],
+                            "skills": [], "equip": [], "includes": []
                         }
                     ]
                 }]
@@ -3080,15 +3092,44 @@ mod tests {
         let mut drafts = BTreeMap::new();
         absorb_units(&mut drafts, &names, &army, &armies, &document);
         let profiles: Vec<_> = drafts.into_values().collect();
-        assert_eq!(profiles.len(), 2);
+        assert_eq!(profiles.len(), 3);
         assert!(profiles.iter().all(|profile| profile.isc == "AQUILA"));
         assert!(!profiles.iter().any(|profile| profile.isc.contains("FTO")));
     }
 
     #[test]
-    fn lieutenant_shares_tts_loadout_with_sibling() {
+    fn strips_hidden_tts_skills_from_loadout_and_nom() {
+        assert!(is_hidden_tts_skill_name("Lieutenant"));
+        assert!(is_hidden_tts_skill_name("Lieutenant(+1 Command Token)"));
+        assert!(is_hidden_tts_skill_name("Chain of Command"));
+        assert!(is_hidden_tts_skill_name("Chain of Command(Non Specialist)"));
+        assert!(is_hidden_tts_skill_name("Counterintelligence"));
+        assert!(!is_hidden_tts_skill_name("Hacker"));
+
+        assert_eq!(
+            strip_hidden_skills_from_loadout(
+                "Combi Rifle, Drop Bears (Chain of Command)"
+            ),
+            "Combi Rifle, Drop Bears"
+        );
+        assert_eq!(
+            strip_hidden_skills_from_loadout(
+                "MULTI Rifle (Lieutenant, X Visor)"
+            ),
+            "MULTI Rifle (X Visor)"
+        );
+        assert_eq!(
+            strip_hidden_skills_from_nom_tts(
+                "[00B0F2]BOLTS[-] Combi Rifle (Chain of Command, Forward Observer)"
+            ),
+            "[00B0F2]BOLTS[-] Combi Rifle (Forward Observer)"
+        );
+    }
+
+    #[test]
+    fn hidden_tts_skills_share_standard_loadout() {
         let dir = std::env::temp_dir().join(format!(
-            "poissonnerie-lt-share-{}-{}",
+            "poissonnerie-hidden-share-{}-{}",
             std::process::id(),
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
@@ -3131,14 +3172,36 @@ mod tests {
         let mut lt = base.clone();
         lt.option_id = 2;
         lt.traits.push(TraitDraft {
-            kind: "char",
+            kind: "skill",
             name: "Lieutenant".into(),
+            detail: Some("+1 Command Token".into()),
+        });
+        lt.description_tts = "Regular · Lieutenant(+1 Command Token)".into();
+
+        let mut coc = base.clone();
+        coc.option_id = 3;
+        coc.loadout = "Combi Rifle (Chain of Command)".into();
+        coc.nom_tts = "[FFFFFF]NISSE[-] Combi Rifle (Chain of Command)".into();
+        coc.traits.push(TraitDraft {
+            kind: "skill",
+            name: "Chain of Command".into(),
             detail: None,
         });
-        lt.description_tts = "Regular · Lieutenant".into();
+        coc.description_tts = "Regular · Chain of Command".into();
 
-        let report = store_profiles(&conn, &[base, lt], &[]).unwrap();
-        assert_eq!(report.profiles, 2);
+        let mut ci = base.clone();
+        ci.option_id = 4;
+        ci.loadout = "Combi Rifle (Counterintelligence)".into();
+        ci.nom_tts = "[FFFFFF]NISSE[-] Combi Rifle (Counterintelligence)".into();
+        ci.traits.push(TraitDraft {
+            kind: "skill",
+            name: "Counterintelligence".into(),
+            detail: None,
+        });
+        ci.description_tts = "Regular · Counterintelligence".into();
+
+        let report = store_profiles(&conn, &[base, lt, coc, ci], &[]).unwrap();
+        assert_eq!(report.profiles, 4);
 
         let loadout_ids: Vec<i64> = {
             let mut stmt = conn
@@ -3149,13 +3212,28 @@ mod tests {
                 .map(|row| row.unwrap())
                 .collect()
         };
-        assert_eq!(loadout_ids.len(), 2);
-        assert_eq!(loadout_ids[0], loadout_ids[1]);
+        assert_eq!(loadout_ids.len(), 4);
+        assert!(loadout_ids.iter().all(|id| *id == loadout_ids[0]));
 
         let loadout_count: i64 = conn
             .query_row("SELECT COUNT(*) FROM tts_loadouts", [], |row| row.get(0))
             .unwrap();
         assert_eq!(loadout_count, 1);
+
+        let (nom_tts, description): (String, String) = conn
+            .query_row(
+                "SELECT nom_tts, description_tts FROM tts_loadouts LIMIT 1",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(nom_tts, "[FFFFFF]NISSE[-] Combi Rifle");
+        let lower = description.to_ascii_lowercase();
+        assert!(!lower.contains("lieutenant"));
+        assert!(!lower.contains("chain of command"));
+        assert!(!lower.contains("counterintelligence"));
+        assert!(lower.contains("regular"));
+
         let _ = std::fs::remove_dir_all(&dir);
     }
 }
