@@ -75,7 +75,13 @@ const figurineIscSet = computed(() =>
 
 function isSpecialOps(profile: { nom: string }) {
   const name = profile.nom.toLowerCase()
-  return name.includes('team-ops') || name.includes('team ops') || name.includes('spec-ops') || name.includes('spec ops')
+  return (
+    name.includes('team-ops') ||
+    name.includes('team ops') ||
+    name.includes('spec-ops') ||
+    name.includes('spec ops') ||
+    name.includes('specbot')
+  )
 }
 
 function hasFigurine(profile: { nom: string }) {
