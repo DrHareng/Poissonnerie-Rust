@@ -43,6 +43,8 @@ type Draft = TtsFigurineWrite
 
 const props = defineProps<{
   armyId?: string
+  /** Admin : ne garder que les figs avec infos manquantes. */
+  incompleteOnly?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -343,6 +345,7 @@ async function loadFigurines(reset = true) {
       q: search.value,
       painter: painterFilter.value,
       armyId: props.armyId,
+      incomplete: props.incompleteOnly,
     })
     if (generation !== loadGeneration) return
     total.value = page.total
@@ -496,7 +499,7 @@ watch(() => props.armyId, () => {
   }
 }, { immediate: true })
 
-watch([search, painterFilter], () => {
+watch([search, painterFilter, () => props.incompleteOnly], () => {
   scheduleReload()
 })
 
@@ -781,11 +784,13 @@ onBeforeUnmount(() => {
 
     <p v-else-if="!figurines.length" class="shrink-0 text-sm text-muted-foreground">
       {{
-        search.trim() || painterFilter.trim()
-          ? 'Aucune figurine ne correspond.'
-          : armyId
-            ? 'Aucune figurine pour cette sectorielle.'
-            : 'Aucune figurine.'
+        incompleteOnly
+          ? 'Aucune figurine avec informations manquantes.'
+          : search.trim() || painterFilter.trim()
+            ? 'Aucune figurine ne correspond.'
+            : armyId
+              ? 'Aucune figurine pour cette sectorielle.'
+              : 'Aucune figurine.'
       }}
     </p>
 

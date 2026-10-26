@@ -117,6 +117,8 @@ export type FetchTtsFigurinesOptions = {
   armyId?: number | string
   /** Catalogue complet (listes TTS). */
   all?: boolean
+  /** ISC / loadout / peintre / asset bundle / photo manquant. */
+  incomplete?: boolean
 }
 
 export function fetchTtsFigurines(
@@ -135,6 +137,7 @@ export function fetchTtsFigurines(
   if (painter) params.set('painter', painter)
   const armyId = Number(options.armyId)
   if (armyId > 0) params.set('army_id', String(armyId))
+  if (options.incomplete) params.set('incomplete', 'true')
   return request<PaginatedTtsFigurines>(`/api/tts-figurines?${params}`)
 }
 

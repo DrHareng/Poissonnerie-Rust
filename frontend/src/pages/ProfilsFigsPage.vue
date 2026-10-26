@@ -32,6 +32,7 @@ const QUERY_SECTORIELLE = 'sectorielle'
 const QUERY_PEINTRE = 'peintre'
 const QUERY_RECHERCHE = 'recherche'
 const QUERY_FIGS = 'figs'
+const QUERY_MANQUANT = 'manquant'
 
 const route = useRoute()
 const router = useRouter()
@@ -79,7 +80,12 @@ function queryFromRoute(query: LocationQuery = route.query) {
     peintre: firstQueryValue(query[QUERY_PEINTRE]),
     recherche: firstQueryValue(query[QUERY_RECHERCHE]),
     figs: parseFigFilter(firstQueryValue(query[QUERY_FIGS])),
+    manquant: parseFlag(firstQueryValue(query[QUERY_MANQUANT])),
   }
+}
+
+function parseFlag(raw: string): boolean {
+  return raw === '1' || raw === 'true' || raw === 'yes'
 }
 
 function parseFigFilter(raw: string): FigFilter {
@@ -92,18 +98,21 @@ function buildFilterQuery(overrides: {
   peintre?: string
   recherche?: string
   figs?: FigFilter
+  manquant?: boolean
 } = {}): LocationQueryRaw {
   const current = queryFromRoute()
   const sectorielle = (overrides.sectorielle ?? armyId.value ?? current.sectorielle).trim()
   const peintre = (overrides.peintre ?? painterFilter.value ?? current.peintre).trim()
   const recherche = (overrides.recherche ?? searchDraft.value ?? current.recherche).trim()
   const figs = overrides.figs ?? figFilter.value ?? current.figs
+  const manquant = overrides.manquant ?? incompleteOnly.value ?? current.manquant
 
   const query: LocationQueryRaw = {}
   if (sectorielle) query[QUERY_SECTORIELLE] = sectorielle
   if (peintre) query[QUERY_PEINTRE] = peintre
   if (recherche) query[QUERY_RECHERCHE] = recherche
   if (figs !== 'tous') query[QUERY_FIGS] = figs
+  if (manquant && canEditContent.value) query[QUERY_MANQUANT] = '1'
   return query
 }
 
@@ -118,6 +127,13 @@ const figFilter = computed({
   get: () => queryFromRoute().figs,
   set: (value: FigFilter) => {
     void writeFilters({ figs: value }, 'push')
+  },
+})
+
+const incompleteOnly = computed({
+  get: () => canEditContent.value && queryFromRoute().manquant,
+  set: (value: boolean) => {
+    void writeFilters({ manquant: value }, 'push')
   },
 })
 
@@ -339,6 +355,13 @@ onBeforeUnmount(() => {
             <X class="size-4 opacity-60" />
           </button>
         </div>
+        <label
+          v-if="isFigsTab && canEditContent"
+          class="flex items-center gap-2 pb-2 text-sm text-muted-foreground"
+        >
+          <input v-model="incompleteOnly" type="checkbox" class="size-4" />
+          <span>Informations manquantes</span>
+        </label>
         <Button
           v-if="isFigsTab && canEditContent"
           type="button"
@@ -365,6 +388,7 @@ onBeforeUnmount(() => {
         v-model:search="searchDraft"
         v-model:painter="painterFilter"
         :army-id="armyId"
+        :incomplete-only="incompleteOnly"
         @saved="refreshPainterOptions"
       />
     </div>

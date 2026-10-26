@@ -46,6 +46,8 @@ pub struct FigurineListFilter {
     pub q: Option<String>,
     pub painter: Option<String>,
     pub army_id: Option<i64>,
+    /// ISC, loadout, peintre, asset bundle ou photo manquant.
+    pub incomplete: bool,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
@@ -139,6 +141,7 @@ impl TtsFigurineStore {
             q: None,
             painter: None,
             army_id: None,
+            incomplete: false,
         })?;
         Ok(page.items)
     }
@@ -166,6 +169,18 @@ impl TtsFigurineStore {
         if let Some(painter) = painter.as_ref() {
             where_parts.push("lower(trim(f.painter)) = ?");
             params_vec.push(Box::new(painter.clone()));
+        }
+        if filter.incomplete {
+            where_parts.push(
+                "(
+                    trim(f.isc) = ''
+                    OR trim(f.loadout) = ''
+                    OR trim(f.painter) = ''
+                    OR trim(f.asset_bundle_url) = ''
+                    OR f.photo_filename IS NULL
+                    OR trim(COALESCE(f.photo_filename, '')) = ''
+                )",
+            );
         }
         if let Some(army_id) = army_id {
             where_parts.push(
@@ -752,6 +767,7 @@ mod tests {
                 q: None,
                 painter: Some("Alex".into()),
                 army_id: None,
+                incomplete: false,
             })
             .unwrap();
         assert_eq!(page.total, 3);
@@ -764,6 +780,7 @@ mod tests {
                 q: None,
                 painter: Some("Alex".into()),
                 army_id: None,
+                incomplete: false,
             })
             .unwrap();
         assert_eq!(page2.items.len(), 1);
@@ -775,6 +792,7 @@ mod tests {
                 q: Some("char".into()),
                 painter: None,
                 army_id: None,
+                incomplete: false,
             })
             .unwrap();
         assert_eq!(search.total, 1);
@@ -794,10 +812,31 @@ mod tests {
                 q: Some("siomon".into()),
                 painter: None,
                 army_id: None,
+                incomplete: false,
             })
             .unwrap();
         assert_eq!(accent.total, 1);
         assert_eq!(accent.items[0].isc, "Síomón");
+        store
+            .create(&FigurineWrite {
+                isc: "Incomplete".into(),
+                loadout: "".into(),
+                painter: "Alex".into(),
+                asset_bundle_url: "https://example.com/x".into(),
+            })
+            .unwrap();
+        let incomplete = store
+            .list_page(&FigurineListFilter {
+                limit: 20,
+                offset: 0,
+                q: None,
+                painter: None,
+                army_id: None,
+                incomplete: true,
+            })
+            .unwrap();
+        assert!(incomplete.total >= 1);
+        assert!(incomplete.items.iter().any(|row| row.isc == "Incomplete"));
         let meta = store.list_meta().unwrap();
         assert!(meta.painters.iter().any(|p| p == "Alex"));
         assert!(meta.iscs.iter().any(|i| i == "alpha"));

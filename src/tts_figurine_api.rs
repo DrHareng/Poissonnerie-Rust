@@ -99,6 +99,8 @@ struct FigurineListQuery {
     army_id: Option<i64>,
     /// Catalogue complet (listes TTS) : ignore la pagination.
     all: Option<bool>,
+    /// Figurines avec ISC / loadout / peintre / asset bundle / photo manquant.
+    incomplete: Option<bool>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -442,6 +444,7 @@ async fn list_figurines(
             q: query.q,
             painter: query.painter,
             army_id: query.army_id,
+            incomplete: query.incomplete.unwrap_or(false),
         })
         .map_err(|error| ApiError::bad_request(error.to_string()))?;
     page.items = attach_sectorials(&state, page.items)?;
