@@ -128,7 +128,7 @@ export function fetchTtsFigurines(
 ): Promise<PaginatedTtsFigurines> {
   const params = new URLSearchParams()
   if (options.all) {
-    params.set('all', '1')
+    params.set('all', 'true')
   } else {
     params.set('limit', String(options.limit ?? 20))
     params.set('offset', String(options.offset ?? 0))
@@ -140,7 +140,7 @@ export function fetchTtsFigurines(
   const armyId = Number(options.armyId)
   if (armyId > 0) params.set('army_id', String(armyId))
   if (options.incomplete) params.set('incomplete', 'true')
-  if (options.unlinked) params.set('unlinked', '1')
+  if (options.unlinked) params.set('unlinked', 'true')
   return request<PaginatedTtsFigurines>(`/api/tts-figurines?${params}`)
 }
 
