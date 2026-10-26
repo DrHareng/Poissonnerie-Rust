@@ -160,7 +160,13 @@ const tabs = computed((): PageTitleTab[] =>
 )
 
 function sameFilterQuery(left: LocationQueryRaw, right: LocationQuery) {
-  const keys = [QUERY_SECTORIELLE, QUERY_PEINTRE, QUERY_RECHERCHE, QUERY_FIGS]
+  const keys = [
+    QUERY_SECTORIELLE,
+    QUERY_PEINTRE,
+    QUERY_RECHERCHE,
+    QUERY_FIGS,
+    QUERY_MANQUANT,
+  ]
   for (const key of keys) {
     const a = firstQueryValue(left[key])
     const b = firstQueryValue(right[key])
