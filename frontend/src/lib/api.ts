@@ -117,7 +117,7 @@ export type FetchTtsFigurinesOptions = {
   armyId?: number | string
   /** Catalogue complet (listes TTS). */
   all?: boolean
-  /** ISC / loadout / peintre / asset bundle / photo manquant. */
+  /** Nom / loadout / peintre / asset bundle / photo manquant. */
   incomplete?: boolean
 }
 
@@ -160,7 +160,7 @@ export function fetchMyTtsFigurinePicks(): Promise<TtsFigurinePickPref[]> {
 }
 
 export function upsertMyTtsFigurinePick(payload: {
-  isc: string
+  nom: string
   loadout?: string
   figurine_id: number
 }): Promise<TtsFigurinePickPref> {

@@ -63,6 +63,7 @@ struct ExpandEntry {
     holomask_silhouette_size: Option<String>,
     /// ISC du porteur (affichage UI).
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(rename = "holomask_source_nom")]
     holomask_source_isc: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     profile: Option<TtsProfileSummary>,

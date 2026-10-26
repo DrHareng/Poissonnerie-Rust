@@ -65,6 +65,7 @@ pub fn tts_figurine_routes() -> Router<AppState> {
 
 #[derive(Debug, Deserialize)]
 struct FigurineBody {
+    #[serde(rename = "nom")]
     isc: String,
     #[serde(default)]
     loadout: String,
@@ -148,6 +149,7 @@ async fn require_admin(state: &AppState, session: &Session) -> Result<User, ApiE
 
 #[derive(Debug, Deserialize)]
 struct FigurinePickBody {
+    #[serde(rename = "nom")]
     isc: String,
     #[serde(default)]
     loadout: String,
@@ -249,7 +251,7 @@ async fn figurine_object(
         }
         if !same_isc(&figurine.isc, &form.isc) {
             return Err(ApiError::bad_request(
-                "ce loadout ne correspond pas à cet ISC",
+                "ce loadout ne correspond pas à ce nom",
             ));
         }
         tts_object::saved_model(
@@ -277,7 +279,7 @@ async fn figurine_object(
             .ok_or_else(|| ApiError::bad_request("profil introuvable"))?;
         if !same_isc(&figurine.isc, &profile.isc) {
             return Err(ApiError::bad_request(
-                "ce loadout ne correspond pas à cet ISC",
+                "ce loadout ne correspond pas à ce nom",
             ));
         }
         let all_figurines = state

@@ -587,7 +587,7 @@ export interface TtsProfileSummary {
   id: number
   army_id: number | null
   faction_label: string
-  isc: string
+  nom: string
   loadout: string
   nom_tts: string
   silhouette_size: string | null
@@ -601,7 +601,7 @@ export interface TtsProfileSummary {
 export interface TtsProfileForm {
   id: number
   state_index: number
-  isc: string
+  nom: string
   loadout: string
   nom_tts: string
   description_tts: string
@@ -624,7 +624,7 @@ export interface TtsProfileDetail {
   army_id: number | null
   faction_slug: string | null
   faction_label: string
-  isc: string
+  nom: string
   loadout: string
   nom_tts: string
   description_tts: string
@@ -640,7 +640,7 @@ export interface TtsProfileDetail {
 
 export interface TtsFigurine {
   id: number
-  isc: string
+  nom: string
   loadout: string
   painter: string
   asset_bundle_url: string
@@ -659,19 +659,19 @@ export interface PaginatedTtsFigurines {
 
 export interface TtsFigurineMeta {
   painters: string[]
-  iscs: string[]
+  noms: string[]
 }
 
 export interface TtsFigurineWrite {
-  isc: string
+  nom: string
   loadout: string
   painter: string
   asset_bundle_url: string
 }
 
-/** Figurine mémorisée pour une paire ISC + loadout (utilisateur connecté). */
+/** Figurine mémorisée pour une paire nom + loadout (utilisateur connecté). */
 export interface TtsFigurinePickPref {
-  isc: string
+  nom: string
   loadout: string
   figurine_id: number
   updated_at: number
@@ -690,7 +690,7 @@ export interface TtsFigurineLoadout {
 }
 
 export interface TtsFigurineLabel {
-  isc: string
+  nom: string
   loadout: string
   marker_name: string | null
   silhouette_size: string | null
@@ -698,7 +698,7 @@ export interface TtsFigurineLabel {
 }
 
 export interface TtsProfileLabel {
-  isc: string
+  nom: string
   loadout: string
 }
 
@@ -727,7 +727,7 @@ export interface TtsListExpandEntry {
   /** Slot Holomask : profil de couverture à choisir (même sectorielle / silhouette). */
   holomask?: boolean
   holomask_silhouette_size?: string | null
-  holomask_source_isc?: string | null
+  holomask_source_nom?: string | null
   profile: TtsProfileSummary | null
   figurines: TtsListRankedFigurine[]
 }
@@ -760,7 +760,7 @@ export interface TtsListBagRequest {
 
 export interface TtsProfileUpdate {
   army_id: number | null
-  isc: string
+  nom: string
   loadout: string
   nom_tts: string
   description_tts: string
@@ -769,7 +769,7 @@ export interface TtsProfileUpdate {
   sectorial_ids: number[]
   forms: Array<{
     id: number
-    isc: string
+    nom: string
     loadout: string
     nom_tts: string
     description_tts: string

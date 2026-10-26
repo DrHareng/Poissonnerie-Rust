@@ -229,7 +229,7 @@ async function refreshPainterOptions() {
       value: painter,
       label: painter,
     }))
-    figurineIscs.value = meta.iscs
+    figurineIscs.value = meta.noms
   } catch {
     painterOptions.value = []
     figurineIscs.value = []
@@ -347,7 +347,7 @@ onBeforeUnmount(() => {
           <Input
             v-model="searchDraft"
             class="w-full pr-9"
-            :placeholder="isFigsTab ? 'ISC, loadout, peintre…' : 'ISC, loadout, nom…'"
+            :placeholder="isFigsTab ? 'Nom, loadout, peintre…' : 'Nom, loadout, nom TTS…'"
             autocomplete="off"
           />
           <button

@@ -939,6 +939,7 @@ pub struct TtsProfileSummary {
     pub id: i64,
     pub army_id: Option<i64>,
     pub faction_label: String,
+    #[serde(rename = "nom")]
     pub isc: String,
     pub loadout: String,
     pub nom_tts: String,
@@ -956,6 +957,7 @@ pub struct TtsProfileSummary {
 pub struct TtsProfileForm {
     pub id: i64,
     pub state_index: i64,
+    #[serde(rename = "nom")]
     pub isc: String,
     pub loadout: String,
     pub nom_tts: String,
@@ -974,6 +976,7 @@ pub struct TtsProfileDetail {
     pub army_id: Option<i64>,
     pub faction_slug: Option<String>,
     pub faction_label: String,
+    #[serde(rename = "nom")]
     pub isc: String,
     pub loadout: String,
     pub nom_tts: String,
@@ -997,6 +1000,7 @@ pub struct TtsProfileTrait {
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub struct TtsProfileLabel {
+    #[serde(rename = "nom")]
     pub isc: String,
     pub loadout: String,
 }
@@ -1020,6 +1024,7 @@ pub struct TtsProfileLoadout {
 /// y compris les périphériques (GO-BOT, STALDRON, …).
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub struct TtsFigurineLabel {
+    #[serde(rename = "nom")]
     pub isc: String,
     pub loadout: String,
     pub marker_name: Option<String>,
@@ -1981,7 +1986,7 @@ fn list_forms(conn: &Connection, profile_id: i64) -> Result<Vec<TtsProfileForm>>
 }
 
 fn update_profile(conn: &Connection, id: i64, update: &ProfileUpdate) -> Result<TtsProfileDetail> {
-    let isc = require_text(&update.isc, "ISC", 255)?;
+    let isc = require_text(&update.isc, "Nom", 255)?;
     let nom_tts = require_text(&update.nom_tts, "nom TTS", 500)?;
     let loadout = bounded_text(&update.loadout, "loadout", 500)?;
     let description = bounded_text(&update.description_tts, "description TTS", 20_000)?;
@@ -2026,7 +2031,7 @@ fn update_profile(conn: &Connection, id: i64, update: &ProfileUpdate) -> Result<
         bail!("profil introuvable");
     }
     for form in &update.forms {
-        let form_isc = require_text(&form.isc, "ISC de la forme", 255)?;
+        let form_isc = require_text(&form.isc, "Nom de la forme", 255)?;
         let form_nom = require_text(&form.nom_tts, "nom TTS de la forme", 500)?;
         let mut form_description =
             bounded_text(&form.description_tts, "description de la forme", 20_000)?;

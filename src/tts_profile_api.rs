@@ -44,6 +44,7 @@ fn default_true() -> bool {
 #[derive(Debug, Deserialize)]
 struct UpdateFormBody {
     id: i64,
+    #[serde(rename = "nom")]
     isc: String,
     #[serde(default)]
     loadout: String,
@@ -59,6 +60,7 @@ struct UpdateFormBody {
 #[derive(Debug, Deserialize)]
 struct UpdateProfileBody {
     army_id: Option<i64>,
+    #[serde(rename = "nom")]
     isc: String,
     #[serde(default)]
     loadout: String,

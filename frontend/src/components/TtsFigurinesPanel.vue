@@ -34,7 +34,7 @@ const PAGE_SIZE = 20
 const SEARCH_DEBOUNCE_MS = 200
 
 type FigurineLabel = {
-  isc: string
+  nom: string
   loadout: string
   silhouette: string
 }
@@ -90,14 +90,14 @@ const hasMore = computed(() => figurines.value.length < total.value)
 
 const painterOptions = computed(() => uniqueSorted(knownPainters.value))
 
-const iscPickerOptions = computed(() => uniqueSorted(labels.value.map((label) => label.isc)))
+const iscPickerOptions = computed(() => uniqueSorted(labels.value.map((label) => label.nom)))
 
 const loadoutPickerOptions = computed(() => {
-  const isc = draft.value.isc.trim().toLowerCase()
+  const isc = draft.value.nom.trim().toLowerCase()
   if (!isc) return []
   return uniqueSorted(
     labels.value
-      .filter((label) => label.isc.trim().toLowerCase() === isc)
+      .filter((label) => label.nom.trim().toLowerCase() === isc)
       .map((label) => label.loadout)
       .filter((loadout) => loadout.trim() !== ''),
   )
@@ -110,7 +110,7 @@ const selectedLoadout = computed(() =>
 )
 
 function emptyDraft(): Draft {
-  return { isc: '', loadout: '', painter: '', asset_bundle_url: '' }
+  return { nom: '', loadout: '', painter: '', asset_bundle_url: '' }
 }
 
 function uniqueSorted(values: string[]) {
@@ -203,9 +203,9 @@ function loadoutKey(option: TtsFigurineLoadout) {
 }
 
 function figurineSilhouette(figurine: TtsFigurine) {
-  const isc = figurine.isc.trim().toLowerCase()
+  const isc = figurine.nom.trim().toLowerCase()
   const loadout = figurine.loadout.trim().toLowerCase()
-  const sameIsc = labels.value.filter((label) => label.isc.trim().toLowerCase() === isc && label.silhouette)
+  const sameIsc = labels.value.filter((label) => label.nom.trim().toLowerCase() === isc && label.silhouette)
   const exact = sameIsc.find((label) => label.loadout.trim().toLowerCase() === loadout)
   return (exact ?? sameIsc[0])?.silhouette ?? ''
 }
@@ -241,7 +241,7 @@ function openCreate() {
 function openEdit(figurine: TtsFigurine) {
   editingId.value = figurine.id
   draft.value = {
-    isc: figurine.isc,
+    nom: figurine.nom,
     loadout: figurine.loadout,
     painter: figurine.painter,
     asset_bundle_url: figurine.asset_bundle_url,
@@ -295,7 +295,7 @@ async function downloadFigurine() {
     const loadout = option.loadout || figurine.loadout
     downloadBlob(
       new Blob([JSON.stringify(object, null, 2)], { type: 'application/json' }),
-      downloadFilename(figurine.isc, loadout),
+      downloadFilename(figurine.nom, loadout),
     )
     toast.success('Figurine téléchargée')
   } catch (error) {
@@ -389,15 +389,15 @@ function bindLoadMoreObserver() {
 
 async function save() {
   if (!canEditContent.value) return
-  if (!draft.value.isc.trim()) {
-    toast.error('Choisis un ISC.')
+  if (!draft.value.nom.trim()) {
+    toast.error('Choisis un nom.')
     return
   }
   saving.value = true
   const creating = editingId.value == null
   try {
     const payload = {
-      isc: draft.value.isc,
+      nom: draft.value.nom,
       loadout: draft.value.loadout,
       painter: draft.value.painter,
       asset_bundle_url: draft.value.asset_bundle_url,
@@ -417,7 +417,7 @@ async function save() {
     } else {
       editingId.value = saved.id
       draft.value = {
-        isc: saved.isc,
+        nom: saved.nom,
         loadout: saved.loadout,
         painter: saved.painter,
         asset_bundle_url: saved.asset_bundle_url,
@@ -441,7 +441,7 @@ async function removeCurrent() {
   if (!canEditContent.value) return
   const id = editingId.value
   if (id == null) return
-  const name = [draft.value.isc, draft.value.loadout].filter(Boolean).join(' · ') || 'cette figurine'
+  const name = [draft.value.nom, draft.value.loadout].filter(Boolean).join(' · ') || 'cette figurine'
   if (!window.confirm(`Supprimer la figurine « ${name} » ?`)) return
   try {
     await deleteTtsFigurine(id)
@@ -461,9 +461,9 @@ watch(canEditContent, (canEdit) => {
 })
 
 watch(
-  [() => draft.value.isc, labels],
+  [() => draft.value.nom, labels],
   () => {
-    const key = draft.value.isc.trim().toLowerCase()
+    const key = draft.value.nom.trim().toLowerCase()
     if (!key) {
       draft.value.loadout = ''
       return
@@ -479,7 +479,7 @@ watch(
     }
     const allowed = new Set(
       labels.value
-        .filter((label) => label.isc.trim().toLowerCase() === key)
+        .filter((label) => label.nom.trim().toLowerCase() === key)
         .map((label) => label.loadout.trim().toLowerCase()),
     )
     if (allowed.size === 0) return
@@ -533,7 +533,7 @@ async function loadLabels() {
       const rows = await fetchTtsProfileLabels()
       if (Number(props.armyId)) return
       labels.value = rows.map((row) => ({
-        isc: row.isc,
+        nom: row.nom,
         loadout: row.loadout,
         silhouette: '',
       }))
@@ -546,7 +546,7 @@ async function loadLabels() {
     const rows = await fetchTtsFigurineLabels(armyId)
     if (Number(props.armyId) !== armyId) return
     labels.value = rows.map((row) => ({
-      isc: row.isc,
+      nom: row.nom,
       loadout: row.loadout,
       silhouette: silhouetteOf(row),
     }))
@@ -576,9 +576,9 @@ onBeforeUnmount(() => {
       <CardHeader class="shrink-0 pb-3">
         <div class="flex items-start justify-between gap-2">
           <div class="min-w-0">
-            <CardTitle>{{ downloadTarget.isc }}</CardTitle>
+            <CardTitle>{{ downloadTarget.nom }}</CardTitle>
             <CardDescription>
-              Choisis un loadout de cet ISC. L’état 2 du fichier est la silhouette de ce profil.
+              Choisis un loadout de ce nom. L’état 2 du fichier est la silhouette de ce profil.
             </CardDescription>
           </div>
           <Button type="button" variant="ghost" size="sm" @click="closePanel">Fermer</Button>
@@ -595,7 +595,7 @@ onBeforeUnmount(() => {
         </Alert>
         <p v-else-if="loadoutsLoading" class="text-sm text-muted-foreground">Chargement des loadouts…</p>
         <p v-else-if="!loadouts.length" class="text-sm text-muted-foreground">
-          Aucun loadout connu pour cet ISC.
+          Aucun loadout connu pour ce nom.
         </p>
         <form v-else class="space-y-4" @submit.prevent="downloadFigurine">
           <div class="space-y-2">
@@ -657,7 +657,7 @@ onBeforeUnmount(() => {
       <CardHeader class="shrink-0 pb-3">
         <div class="flex items-start justify-between gap-2">
           <div class="min-w-0">
-            <CardTitle>{{ editingId == null ? 'Nouvelle figurine' : draft.isc || 'Figurine' }}</CardTitle>
+            <CardTitle>{{ editingId == null ? 'Nouvelle figurine' : draft.nom || 'Figurine' }}</CardTitle>
             <CardDescription v-if="canEditContent">Colle une capture dans cette fiche (Ctrl+V).</CardDescription>
           </div>
           <Button type="button" variant="ghost" size="sm" @click="closePanel">Fermer</Button>
@@ -667,14 +667,14 @@ onBeforeUnmount(() => {
         <form class="flex min-h-full flex-col gap-4" @submit.prevent="save">
           <div class="grid grid-cols-2 gap-3">
             <div class="min-w-0 space-y-1.5">
-              <Label>ISC</Label>
+              <Label>Nom</Label>
               <PlayerPicker
-                :model-value="draft.isc || undefined"
+                :model-value="draft.nom || undefined"
                 :options="iscPickerOptions"
                 :disabled="!canEditContent"
-                placeholder="Choisir un ISC"
-                :empty-message="armyId ? 'Aucun ISC dans cette sectorielle.' : 'Aucun ISC connu.'"
-                @update:model-value="draft.isc = $event ?? ''"
+                placeholder="Choisir un nom"
+                :empty-message="armyId ? 'Aucun nom dans cette sectorielle.' : 'Aucun nom connu.'"
+                @update:model-value="draft.nom = $event ?? ''"
               />
             </div>
             <div class="min-w-0 space-y-1.5">
@@ -696,9 +696,9 @@ onBeforeUnmount(() => {
             <PlayerPicker
               :model-value="draft.loadout || undefined"
               :options="loadoutPickerOptions"
-              :disabled="!canEditContent || !draft.isc"
+              :disabled="!canEditContent || !draft.nom"
               placeholder="Choisir un loadout"
-              empty-message="Aucun loadout pour cet ISC."
+              empty-message="Aucun loadout pour ce nom."
               @update:model-value="draft.loadout = $event ?? ''"
             />
           </div>
@@ -806,7 +806,7 @@ onBeforeUnmount(() => {
             <img
               v-if="figurine.photo_url"
               :src="photoSrc(figurine)"
-              :alt="figurine.isc"
+              :alt="figurine.nom"
               class="aspect-[4/3] w-full bg-muted/30 object-contain"
               loading="lazy"
               decoding="async"
@@ -829,7 +829,7 @@ onBeforeUnmount(() => {
         </div>
         <button type="button" class="block w-full min-w-0 px-3 pt-2 pb-3 text-left" @click="openEdit(figurine)">
           <div class="min-w-0 space-y-1">
-            <p class="truncate font-medium" :title="figurine.isc">{{ figurine.isc }}</p>
+            <p class="truncate font-medium" :title="figurine.nom">{{ figurine.nom }}</p>
             <p class="truncate text-sm text-muted-foreground" :title="figurine.loadout || undefined">
               {{ figurine.loadout || '—' }}
             </p>

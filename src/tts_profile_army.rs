@@ -52,6 +52,7 @@ struct ProfileDraft {
     army_id: Option<i64>,
     faction_slug: Option<String>,
     faction_label: String,
+    /// Nom du profil Army (`profiles[0].name`) — clé de liaison figurines / TTS.
     isc: String,
     loadout: String,
     nom_tts: String,
@@ -429,7 +430,7 @@ fn absorb_units(
         let Some(unit_id) = unit.get("id").and_then(Value::as_i64) else {
             continue;
         };
-        let unit_isc = unit
+        let unit_name = unit
             .get("name")
             .and_then(Value::as_str)
             .unwrap_or("Profil")
@@ -440,13 +441,6 @@ fn absorb_units(
         };
         for group in groups {
             let group_id = group.get("id").and_then(Value::as_i64).unwrap_or(0);
-            let isc = group
-                .get("isc")
-                .and_then(Value::as_str)
-                .map(str::trim)
-                .filter(|value| !value.is_empty())
-                .map(str::to_string)
-                .unwrap_or_else(|| unit_isc.clone());
             let base = group
                 .get("profiles")
                 .and_then(Value::as_array)
@@ -454,6 +448,22 @@ fn absorb_units(
             let Some(base) = base else {
                 continue;
             };
+            // Clé applicative = nom du profil Army (Dragao), pas le champ ISC pluriel (Dragoes).
+            let isc = base
+                .get("name")
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .map(str::to_string)
+                .or_else(|| {
+                    group
+                        .get("isc")
+                        .and_then(Value::as_str)
+                        .map(str::trim)
+                        .filter(|value| !value.is_empty())
+                        .map(str::to_string)
+                })
+                .unwrap_or_else(|| unit_name.clone());
             let Some(options) = group.get("options").and_then(Value::as_array) else {
                 continue;
             };
@@ -537,6 +547,15 @@ fn unit_factions(unit: &Value) -> Vec<i64> {
         .unwrap_or_default()
 }
 
+fn has_named_skill(names: &Names, skills: &[RefItem], skill_name: &str) -> bool {
+    skills.iter().any(|skill| {
+        names
+            .skills
+            .get(&skill.id)
+            .is_some_and(|name| name.eq_ignore_ascii_case(skill_name))
+    })
+}
+
 fn build_profile(
     names: &Names,
     armies: &[ArmyRow],
@@ -553,6 +572,10 @@ fn build_profile(
 ) -> Option<ProfileDraft> {
     let weapons = merged_refs(option.get("weapons"), base.get("weapons"));
     let skills = merged_refs(base.get("skills"), option.get("skills"));
+    // Commlink = option réservée au mode renfort, sans intérêt pour les profils TTS.
+    if has_named_skill(names, &skills, "Commlink") {
+        return None;
+    }
     let equips = merged_refs(base.get("equip"), option.get("equip"));
     let mut loadout = loadout_label(names, &weapons);
     if loadout.is_empty() {
@@ -823,7 +846,7 @@ fn extra_forms(
     let current_group = group.get("id").and_then(Value::as_i64);
     if let Some(profiles) = group.get("profiles").and_then(Value::as_array) {
         for (index, profile) in profiles.iter().enumerate().skip(1) {
-            // Transmutation / 2ᵉ profil du groupe : ISC = « Unité COMBAT FORM ».
+            // Transmutation / 2ᵉ profil du groupe : nom = « Unité COMBAT FORM ».
             if let Some(form) =
                 form_from_profile(names, profile, option, index as i64, Some(parent_isc))
             {
@@ -867,7 +890,7 @@ fn extra_forms(
         else {
             continue;
         };
-        // Périphérique / coéquipier : garder l'ISC propre (Auxbot, Operator…).
+        // Périphérique / coéquipier : garder le nom propre (Auxbot, Operator…).
         if let Some(form) = form_from_profile(names, profile, target_option, 900, None) {
             forms.push(form);
         }
@@ -875,7 +898,7 @@ fn extra_forms(
     forms
 }
 
-/// Préfixe l'ISC parent pour les formes de transmute (« Chernobog… BATTLE RAVAGED »).
+/// Préfixe le nom parent pour les formes de transmute (« Chernobog… BATTLE RAVAGED »).
 pub(crate) fn qualify_form_isc(parent_isc: &str, form_name: &str) -> String {
     let parent = parent_isc.trim();
     let form = form_name.trim();
@@ -2175,10 +2198,9 @@ mod tests {
             .iter()
             .any(|trait_| trait_.kind == "weapon" && trait_.name == "Combi Rifle"));
         assert_eq!(combi.forms.len(), 3);
-        assert!(combi
-            .forms
-            .iter()
-            .any(|form| form.isc == "BATTLE FORM" && form.silhouette_size.as_deref() == Some("6")));
+        assert!(combi.forms.iter().any(|form| {
+            form.isc == "FUSILIER BATTLE FORM" && form.silhouette_size.as_deref() == Some("6")
+        }));
         assert!(combi
             .forms
             .iter()
@@ -2373,19 +2395,21 @@ mod tests {
         absorb_units(&mut drafts, &names, &army, &armies, &document);
         let profiles: Vec<_> = drafts.into_values().collect();
         assert!(profiles.iter().any(|profile| {
-            profile.isc == "Masha, Polaris Handler" && profile.loadout.starts_with("Combi Rifle")
+            profile.isc == "MASHA" && profile.loadout.starts_with("Combi Rifle")
         }));
         assert!(profiles.iter().any(|profile| {
-            profile.isc == "Polaris Bearpode" && profile.loadout.starts_with("Combi Rifle")
+            profile.isc == "POLARIS BEARPODE" && profile.loadout.starts_with("Combi Rifle")
         }));
         assert!(profiles.iter().any(|profile| {
-            profile.isc == "Polaris Bearpode" && profile.loadout.starts_with("Heavy Machine Gun")
+            profile.isc == "POLARIS BEARPODE" && profile.loadout.starts_with("Heavy Machine Gun")
         }));
         assert!(!profiles.iter().any(|profile| profile.isc == "OPERATOR"));
         assert_eq!(
             profiles
                 .iter()
-                .filter(|profile| profile.isc.contains("Polaris") || profile.isc.contains("Masha"))
+                .filter(|profile| {
+                    profile.isc.contains("POLARIS") || profile.isc.contains("MASHA")
+                })
                 .count(),
             3
         );
@@ -2508,11 +2532,10 @@ mod tests {
         let mut drafts = BTreeMap::new();
         absorb_units(&mut drafts, &names, &army, &armies, &document);
         let profile = drafts.values().next().expect("profil");
-        assert_eq!(profile.isc, "Chernobog Armored Detachment");
+        assert_eq!(profile.isc, "CHERNOBOG");
         assert!(
             profile.forms.iter().any(|form| {
-                form.state_index == 1
-                    && form.isc == "Chernobog Armored Detachment BATTLE RAVAGED"
+                form.state_index == 1 && form.isc == "CHERNOBOG BATTLE RAVAGED"
             }),
             "forms = {:?}",
             profile
@@ -2677,7 +2700,10 @@ mod tests {
             .find(|form| form.state_index == 2)
             .expect("forme dismounted");
         assert_eq!(dismount.silhouette_size.as_deref(), Some("2"));
-        assert_eq!(dismount.isc, "Zondnautica Rapid Offensive Unit Dismounted");
+        assert_eq!(
+            dismount.isc,
+            "DISMOUNTED ZONDNAUTICA Rapid Offensive Unit"
+        );
 
         let zondmate = mounted
             .forms
@@ -2694,5 +2720,77 @@ mod tests {
                 .collect::<Vec<_>>(),
             vec![(1, 1)]
         );
+    }
+
+    #[test]
+    fn skips_commlink_options_reserved_for_reinforcements() {
+        let metadata = serde_json::json!({
+            "skills": [
+                {"id": 84, "name": "Courage"},
+                {"id": 999, "name": "Commlink"}
+            ],
+            "weapons": [
+                {"id": 33, "name": "Combi Rifle"},
+                {"id": 69, "name": "Pistol"},
+                {"id": 5, "name": "CC Weapon"}
+            ],
+            "equips": []
+        });
+        let army = ArmyRow {
+            id: 101,
+            parent_id: 101,
+            name: "PanOceania".into(),
+            slug: "panoceania".into(),
+        };
+        let document = serde_json::json!({
+            "filters": {
+                "extras": [],
+                "chars": [],
+                "type": [],
+                "peripheral": []
+            },
+            "units": [{
+                "id": 42,
+                "name": "FUSILIER",
+                "factions": [101],
+                "profileGroups": [{
+                    "id": 1,
+                    "isc": "Fusilier",
+                    "profiles": [{
+                        "name": "FUSILIER",
+                        "type": 1, "chars": [], "move": [4, 4],
+                        "cc": 13, "bs": 12, "ph": 10, "wip": 13, "arm": 1, "bts": 0, "w": 1,
+                        "str": false, "s": 2,
+                        "skills": [{"id": 84}], "equip": [], "weapons": []
+                    }],
+                    "options": [
+                        {
+                            "id": 1,
+                            "name": "FUSILIER",
+                            "disabled": false,
+                            "weapons": [{"id": 33}, {"id": 69}, {"id": 5}],
+                            "skills": [], "equip": [], "includes": []
+                        },
+                        {
+                            "id": 2,
+                            "name": "FUSILIER",
+                            "disabled": false,
+                            "weapons": [{"id": 33}, {"id": 69}, {"id": 5}],
+                            "skills": [{"id": 999}], "equip": [], "includes": []
+                        }
+                    ]
+                }]
+            }]
+        });
+        let names = names_from_metadata(&metadata);
+        let armies = vec![army.clone()];
+        let mut drafts = BTreeMap::new();
+        absorb_units(&mut drafts, &names, &army, &armies, &document);
+        let profiles: Vec<_> = drafts.into_values().collect();
+        assert_eq!(profiles.len(), 1);
+        assert_eq!(profiles[0].loadout, "Combi Rifle");
+        assert!(!profiles[0].traits.iter().any(|trait_| {
+            trait_.kind == "skill" && trait_.name.eq_ignore_ascii_case("Commlink")
+        }));
     }
 }

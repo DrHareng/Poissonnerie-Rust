@@ -28,6 +28,7 @@ pub struct FigurineWrite {
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub struct TtsFigurine {
     pub id: i64,
+    #[serde(rename = "nom")]
     pub isc: String,
     pub loadout: String,
     pub painter: String,
@@ -61,12 +62,14 @@ pub struct FigurineListPage {
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub struct FigurineListMeta {
     pub painters: Vec<String>,
+    #[serde(rename = "noms")]
     pub iscs: Vec<String>,
 }
 
 /// Figurine mémorisée pour une paire ISC + loadout de profil.
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub struct TtsFigurinePickPref {
+    #[serde(rename = "nom")]
     pub isc: String,
     pub loadout: String,
     pub figurine_id: i64,
@@ -430,7 +433,7 @@ impl TtsFigurineStore {
         loadout: &str,
         figurine_id: i64,
     ) -> Result<TtsFigurinePickPref> {
-        let isc_key = normalize_pref_key(isc, "l'ISC")?;
+        let isc_key = normalize_pref_key(isc, "le nom")?;
         let loadout_key = normalize_pref_key(loadout, "le loadout")?;
         let now = now_unix();
         let conn = self.conn.lock().unwrap();
@@ -579,7 +582,7 @@ fn map_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<TtsFigurine> {
 }
 
 fn normalize_write(input: &FigurineWrite) -> Result<FigurineWrite> {
-    let isc = bounded("l'ISC", &input.isc, 1, MAX_ISC_CHARS)?;
+    let isc = bounded("le nom", &input.isc, 1, MAX_ISC_CHARS)?;
     let loadout = bounded("le loadout", &input.loadout, 0, MAX_LOADOUT_CHARS)?;
     let painter = bounded("le nom du peintre", &input.painter, 0, MAX_PAINTER_CHARS)?;
     Ok(FigurineWrite {
@@ -591,8 +594,8 @@ fn normalize_write(input: &FigurineWrite) -> Result<FigurineWrite> {
 }
 
 fn normalize_pref_key(raw: &str, label: &str) -> Result<String> {
-    let min = if label.contains("ISC") { 1 } else { 0 };
-    let max = if label.contains("ISC") {
+    let min = if label == "le nom" { 1 } else { 0 };
+    let max = if label == "le nom" {
         MAX_ISC_CHARS
     } else {
         MAX_LOADOUT_CHARS

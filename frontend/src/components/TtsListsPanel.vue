@@ -60,7 +60,7 @@ const picks = ref<Record<number, TtsFigurine | TtsListRankedFigurine>>({})
 const holomaskProfiles = ref<Record<number, TtsProfileSummary>>({})
 /** Profils de la sectorielle (pour le choix Holomask). */
 const sectorProfiles = ref<TtsProfileSummary[]>([])
-/** Préférences utilisateur : clé `isc\\0loadout` → figurine_id */
+/** Préférences utilisateur : clé `nom\\0loadout` → figurine_id */
 const pickPrefs = ref<Record<string, number>>({})
 const pickPrefsLoaded = ref(false)
 
@@ -137,12 +137,12 @@ const pickerFiltered = computed(() => {
   const painter = pickerPainter.value.trim().toLowerCase()
   const needle = pickerSearch.value.trim().toLowerCase()
   const knownIscs = armyId
-    ? new Set(pickerLabels.value.map((label) => label.isc.trim().toLowerCase()))
+    ? new Set(pickerLabels.value.map((label) => label.nom.trim().toLowerCase()))
     : null
 
   let rows = catalog.value
   if (knownIscs) {
-    rows = rows.filter((figurine) => knownIscs.has(figurine.isc.trim().toLowerCase()))
+    rows = rows.filter((figurine) => knownIscs.has(figurine.nom.trim().toLowerCase()))
   }
   if (painter) {
     rows = rows.filter((figurine) => figurine.painter.trim().toLowerCase() === painter)
@@ -150,7 +150,7 @@ const pickerFiltered = computed(() => {
   rows = rows.filter((figurine) => figurineSilhouetteSize(figurine) === requiredSize)
   if (needle) {
     rows = rows.filter((figurine) =>
-      [figurine.isc, figurine.loadout, figurine.painter, figurine.asset_bundle_url]
+      [figurine.nom, figurine.loadout, figurine.painter, figurine.asset_bundle_url]
         .join(' ')
         .toLowerCase()
         .includes(needle),
@@ -197,16 +197,16 @@ function silhouetteOf(
 }
 
 function figurineSilhouetteSize(figurine: TtsFigurine) {
-  const isc = figurine.isc.trim().toLowerCase()
+  const isc = figurine.nom.trim().toLowerCase()
   const loadout = figurine.loadout.trim().toLowerCase()
   const sameIsc = pickerLabels.value.filter(
-    (label) => label.isc.trim().toLowerCase() === isc && label.silhouette_size?.trim(),
+    (label) => label.nom.trim().toLowerCase() === isc && label.silhouette_size?.trim(),
   )
   const exact = sameIsc.find((label) => label.loadout.trim().toLowerCase() === loadout)
   return (exact ?? sameIsc[0])?.silhouette_size?.trim() ?? ''
 }
 
-function photoSrc(figurine: Pick<TtsFigurine, 'photo_url' | 'updated_at' | 'isc'>) {
+function photoSrc(figurine: Pick<TtsFigurine, 'photo_url' | 'updated_at' | 'nom'>) {
   if (!figurine.photo_url) return ''
   return withBase(`${figurine.photo_url}?thumb=1&v=${figurine.updated_at}`)
 }
@@ -235,7 +235,7 @@ function rankCatalogFigurines(isc: string, loadout: string): TtsListRankedFiguri
   const loadoutKey = loadout.trim().toLowerCase()
   const painterKey = preferredPainter.value.trim().toLowerCase()
   const ranked = catalog.value
-    .filter((figurine) => figurine.isc.trim().toLowerCase() === iscKey)
+    .filter((figurine) => figurine.nom.trim().toLowerCase() === iscKey)
     .map((figurine) => {
       const exact_loadout =
         Boolean(loadoutKey) && figurine.loadout.trim().toLowerCase() === loadoutKey
@@ -274,11 +274,11 @@ function choiceFigurines(entry: TtsListExpandEntry) {
   const profile = effectiveProfile(entry)
   const rows = entry.holomask
     ? (() => {
-        return profile ? rankCatalogFigurines(profile.isc, profile.loadout) : []
+        return profile ? rankCatalogFigurines(profile.nom, profile.loadout) : []
       })()
     : [...entry.figurines]
   if (profile) {
-    const remembered = rememberedFigurine(profile.isc, profile.loadout)
+    const remembered = rememberedFigurine(profile.nom, profile.loadout)
     if (remembered && !rows.some((figurine) => figurine.id === remembered.id)) {
       rows.unshift({
         ...remembered,
@@ -315,13 +315,13 @@ async function persistFigurinePick(
   if (!profile) return
   try {
     const saved = await upsertMyTtsFigurinePick({
-      isc: profile.isc,
+      nom: profile.nom,
       loadout: profile.loadout,
       figurine_id: figurine.id,
     })
     pickPrefs.value = {
       ...pickPrefs.value,
-      [prefKey(saved.isc, saved.loadout)]: saved.figurine_id,
+      [prefKey(saved.nom, saved.loadout)]: saved.figurine_id,
     }
   } catch {
     // Préférence best-effort : ne bloque pas le choix local.
@@ -339,7 +339,7 @@ async function ensurePickPrefs() {
     const rows: TtsFigurinePickPref[] = await fetchMyTtsFigurinePicks()
     const next: Record<string, number> = {}
     for (const row of rows) {
-      next[prefKey(row.isc, row.loadout)] = row.figurine_id
+      next[prefKey(row.nom, row.loadout)] = row.figurine_id
     }
     pickPrefs.value = next
   } catch {
@@ -359,9 +359,9 @@ function resolveInitialPick(
 ): TtsFigurine | TtsListRankedFigurine | undefined {
   const profile = entry.profile
   if (profile) {
-    const remembered = rememberedFigurine(profile.isc, profile.loadout)
+    const remembered = rememberedFigurine(profile.nom, profile.loadout)
     if (remembered) return remembered
-    const prefId = pickPrefs.value[prefKey(profile.isc, profile.loadout)]
+    const prefId = pickPrefs.value[prefKey(profile.nom, profile.loadout)]
     if (prefId != null) {
       const fromEntry = entry.figurines.find((figurine) => figurine.id === prefId)
       if (fromEntry) return fromEntry
@@ -377,7 +377,7 @@ function holomaskProfileOptions(entry: TtsListExpandEntry) {
     .filter((profile) => profile.silhouette_size?.trim() === size)
     .map((profile) => ({
       value: String(profile.id),
-      label: `${profile.isc} · ${profile.loadout || '—'}`,
+      label: `${profile.nom} · ${profile.loadout || '—'}`,
     }))
 }
 
@@ -395,7 +395,7 @@ async function selectHolomaskProfile(entryIndex: number, profileId: string | und
   if (!profile) return
   holomaskProfiles.value = { ...holomaskProfiles.value, [entryIndex]: profile }
   await ensureCatalog()
-  const first = rankCatalogFigurines(profile.isc, profile.loadout)[0]
+  const first = rankCatalogFigurines(profile.nom, profile.loadout)[0]
   if (first) selectFigurine(entryIndex, first)
   else {
     const nextPicks = { ...picks.value }
@@ -427,7 +427,7 @@ const zoomItems = computed((): ImageViewerItem[] => {
     return [
       {
         src,
-        alt: figurine.isc,
+        alt: figurine.nom,
         caption: `${figurine.painter || 'Sans peintre'} · ${figurine.loadout || '—'}`,
       },
     ]
@@ -694,11 +694,11 @@ async function launch() {
                 <template v-if="entry.holomask">
                   Holomask
                   <span class="text-muted-foreground font-normal">
-                    · pour {{ entry.holomask_source_isc || '—' }}
+                    · pour {{ entry.holomask_source_nom || '—' }}
                   </span>
                 </template>
                 <template v-else-if="entry.profile">
-                  {{ entry.profile.isc }}
+                  {{ entry.profile.nom }}
                   <span class="text-muted-foreground font-normal">· {{ entry.profile.loadout || '—' }}</span>
                 </template>
                 <template v-else>
@@ -769,7 +769,7 @@ async function launch() {
                   <img
                     v-if="photoSrc(figurine)"
                     :src="photoSrc(figurine)"
-                    :alt="figurine.isc"
+                    :alt="figurine.nom"
                     class="size-full object-contain"
                   >
                   <div
@@ -829,7 +829,7 @@ async function launch() {
             v-else-if="effectiveProfile(entry) && !choiceFigurines(entry).length"
             class="text-muted-foreground mt-2 text-sm"
           >
-            Aucune figurine suggérée pour cet ISC — utilise « Choisir une autre figurine ».
+            Aucune figurine suggérée pour ce nom — utilise « Choisir une autre figurine ».
           </p>
         </li>
       </ul>
@@ -901,7 +901,7 @@ async function launch() {
               Choisir une figurine
             </CardTitle>
             <CardDescription>
-              {{ pickerEntry.profile?.isc }} · S{{ requiredSilhouetteSize || '—' }}
+              {{ pickerEntry.profile?.nom }} · S{{ requiredSilhouetteSize || '—' }}
             </CardDescription>
             <Button
               type="button"
@@ -945,7 +945,7 @@ async function launch() {
                 <Input
                   v-model="pickerSearch"
                   class="w-full pr-9"
-                  placeholder="ISC, loadout, peintre…"
+                  placeholder="Nom, loadout, peintre…"
                   autocomplete="off"
                 />
                 <button
@@ -987,7 +987,7 @@ async function launch() {
                     <img
                       v-if="photoSrc(figurine)"
                       :src="photoSrc(figurine)"
-                      :alt="figurine.isc"
+                      :alt="figurine.nom"
                       class="size-full object-cover"
                     >
                     <div
@@ -998,7 +998,7 @@ async function launch() {
                     </div>
                   </div>
                   <div class="space-y-0.5 p-1.5">
-                    <p class="truncate text-xs font-medium">{{ figurine.isc }}</p>
+                    <p class="truncate text-xs font-medium">{{ figurine.nom }}</p>
                     <p class="text-muted-foreground truncate text-[11px]">
                       {{ figurine.painter || '—' }} · {{ figurine.loadout || '—' }}
                     </p>

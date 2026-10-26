@@ -73,19 +73,19 @@ const figurineIscSet = computed(() =>
   new Set(props.figurineIscs.map((isc) => isc.trim().toLowerCase()).filter(Boolean)),
 )
 
-function isSpecialOps(profile: { isc: string }) {
-  const name = profile.isc.toLowerCase()
+function isSpecialOps(profile: { nom: string }) {
+  const name = profile.nom.toLowerCase()
   return name.includes('team-ops') || name.includes('team ops') || name.includes('spec-ops') || name.includes('spec ops')
 }
 
-function hasFigurine(profile: { isc: string }) {
-  return figurineIscSet.value.has(profile.isc.trim().toLowerCase())
+function hasFigurine(profile: { nom: string }) {
+  return figurineIscSet.value.has(profile.nom.trim().toLowerCase())
 }
 
-function figurinesLink(profile: { isc: string }) {
+function figurinesLink(profile: { nom: string }) {
   const query: Record<string, string> = { ...props.filterQuery }
   if (props.armyId?.trim()) query.sectorielle = props.armyId.trim()
-  query.recherche = profile.isc.trim()
+  query.recherche = profile.nom.trim()
   return { name: 'profils-figs-figs' as const, query }
 }
 
@@ -97,7 +97,7 @@ const filteredProfiles = computed(() => {
     if (props.figFilter === 'sans' && hasFigurine(profile)) return false
     if (!needle) return true
     return foldSearchText(
-      [profile.isc, profile.loadout, profile.nom_tts, profile.marker_name ?? '', profile.differences].join(' '),
+      [profile.nom, profile.loadout, profile.nom_tts, profile.marker_name ?? '', profile.differences].join(' '),
     ).includes(needle)
   })
 })
@@ -120,7 +120,7 @@ const tableRows = computed(() => {
 })
 
 function sameIsc(left: TtsProfileSummary, right: TtsProfileSummary) {
-  return left.isc.localeCompare(right.isc, undefined, { sensitivity: 'base' }) === 0
+  return left.nom.localeCompare(right.nom, undefined, { sensitivity: 'base' }) === 0
 }
 
 onMounted(async () => {
@@ -200,7 +200,7 @@ async function saveProfile() {
   try {
     const payload = {
       army_id: draft.value.army_id,
-      isc: draft.value.isc,
+      nom: draft.value.nom,
       loadout: draft.value.loadout,
       nom_tts: draft.value.nom_tts,
       description_tts: draft.value.description_tts,
@@ -209,7 +209,7 @@ async function saveProfile() {
       sectorial_ids: draftSectorialIds.value,
       forms: draft.value.forms.map((form) => ({
         id: form.id,
-        isc: form.isc,
+        nom: form.nom,
         loadout: form.loadout,
         nom_tts: form.nom_tts,
         description_tts: form.description_tts,
@@ -236,8 +236,8 @@ async function saveProfile() {
 }
 
 function formTitle(form: TtsProfileForm) {
-  if (form.nom_tts.toLowerCase().includes('(sapper)')) return `${form.isc} (sapper)`
-  return form.isc || form.nom_tts
+  if (form.nom_tts.toLowerCase().includes('(sapper)')) return `${form.nom} (sapper)`
+  return form.nom || form.nom_tts
 }
 
 function armyName(id: number) {
@@ -272,7 +272,7 @@ onBeforeUnmount(() => setCustomSide(false))
       <CardHeader class="shrink-0 pb-3">
         <div class="flex items-start justify-between gap-2">
           <div class="min-w-0">
-            <CardTitle class="break-words">{{ detail.isc }}</CardTitle>
+            <CardTitle class="break-words">{{ detail.nom }}</CardTitle>
             <CardDescription class="break-words">{{ detail.loadout || '—' }}</CardDescription>
           </div>
           <Button type="button" variant="ghost" size="sm" @click="closeSheet">Fermer</Button>
@@ -295,7 +295,7 @@ onBeforeUnmount(() => setCustomSide(false))
           :key="form.id"
           class="border-t border-border pt-3"
           :traits="form.traits"
-          :heading="form.isc"
+          :heading="form.nom"
           :subtitle="`${form.loadout || '—'} · ${silhouetteLabel(form)}`"
         />
       </CardContent>
@@ -334,7 +334,7 @@ onBeforeUnmount(() => setCustomSide(false))
         </colgroup>
         <TableHeader>
           <TableRow>
-            <TableHead class="sticky top-0 z-20 w-1/4 border-b border-border bg-background whitespace-normal">ISC</TableHead>
+            <TableHead class="sticky top-0 z-20 w-1/4 border-b border-border bg-background whitespace-normal">Nom</TableHead>
             <TableHead class="sticky top-0 z-20 border-b border-border bg-background whitespace-normal">Loadout</TableHead>
             <TableHead class="sticky top-0 z-20 w-10 border-b border-border bg-background text-center">Fig</TableHead>
           </TableRow>
@@ -353,7 +353,7 @@ onBeforeUnmount(() => setCustomSide(false))
               class="w-1/4 border-b border-border bg-background align-top font-medium whitespace-normal"
             >
               <div class="sticky top-10 z-10 bg-background">
-                {{ row.profile.isc }}
+                {{ row.profile.nom }}
               </div>
             </TableCell>
             <TableCell class="border-b border-border whitespace-normal">
@@ -429,11 +429,11 @@ onBeforeUnmount(() => setCustomSide(false))
 
       <div class="grid items-start gap-4" :class="draft.forms.length ? 'xl:grid-cols-2' : ''">
         <article class="grid gap-3 rounded-lg border border-border p-3">
-          <h2 class="text-sm font-medium">{{ draft.isc }}</h2>
+          <h2 class="text-sm font-medium">{{ draft.nom }}</h2>
           <div class="grid gap-3 md:grid-cols-2">
             <div class="grid gap-1.5">
-              <Label for="profile-isc">ISC</Label>
-              <Input id="profile-isc" v-model="draft.isc" required maxlength="255" />
+              <Label for="profile-isc">Nom</Label>
+              <Input id="profile-isc" v-model="draft.nom" required maxlength="255" />
             </div>
             <div class="grid gap-1.5">
               <Label for="profile-loadout">Loadout</Label>
@@ -491,8 +491,8 @@ onBeforeUnmount(() => setCustomSide(false))
           <h2 class="text-sm font-medium">{{ formTitle(form) }}</h2>
           <div class="grid gap-3 md:grid-cols-2">
             <div class="grid gap-1.5">
-              <Label :for="`form-isc-${form.id}`">ISC</Label>
-              <Input :id="`form-isc-${form.id}`" v-model="form.isc" required maxlength="255" />
+              <Label :for="`form-isc-${form.id}`">Nom</Label>
+              <Input :id="`form-isc-${form.id}`" v-model="form.nom" required maxlength="255" />
             </div>
             <div class="grid gap-1.5">
               <Label :for="`form-loadout-${form.id}`">Loadout</Label>
