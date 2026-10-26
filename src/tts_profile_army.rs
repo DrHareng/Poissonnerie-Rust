@@ -475,13 +475,16 @@ fn absorb_units(
                 let option_id = option.get("id").and_then(Value::as_i64).unwrap_or(0);
                 // Clé applicative = option.name (NISSE / PALBOT), pas profiles[0].name
                 // (Svalarheima NISSES / PALBOTS) ni l'ISC pluriel.
-                let isc = option
-                    .get("name")
-                    .and_then(Value::as_str)
-                    .map(str::trim)
-                    .filter(|value| !value.is_empty())
-                    .map(str::to_string)
-                    .unwrap_or_else(|| fallback_isc.clone());
+                // « … FTO » est fusionné avec le nom sans ce suffixe.
+                let isc = normalize_unit_name(
+                    &option
+                        .get("name")
+                        .and_then(Value::as_str)
+                        .map(str::trim)
+                        .filter(|value| !value.is_empty())
+                        .map(str::to_string)
+                        .unwrap_or_else(|| fallback_isc.clone()),
+                );
                 let key = (unit_id, group_id, option_id);
                 let factions = unit_factions(unit);
                 let listed = factions.contains(&army.id);
@@ -513,6 +516,16 @@ fn absorb_units(
             }
         }
     }
+}
+
+/// Retire un suffixe « FTO » pour rattacher l'option fireteam au même nom d'unité.
+fn normalize_unit_name(name: &str) -> String {
+    let trimmed = name.trim();
+    let lower = trimmed.to_ascii_lowercase();
+    if let Some(stripped) = lower.strip_suffix(" fto") {
+        return trimmed[..stripped.len()].trim_end().to_string();
+    }
+    trimmed.to_string()
 }
 
 /// Options marquées `disabled` au niveau du groupe restent importables si une option
@@ -3004,6 +3017,72 @@ mod tests {
         assert!(!profiles[0].traits.iter().any(|trait_| {
             trait_.kind == "skill" && trait_.name.eq_ignore_ascii_case("Commlink")
         }));
+    }
+
+    #[test]
+    fn normalize_unit_name_strips_fto_suffix() {
+        assert_eq!(normalize_unit_name("AQUILA FTO"), "AQUILA");
+        assert_eq!(normalize_unit_name("aquila fto"), "aquila");
+        assert_eq!(normalize_unit_name("MAXIMUS AGENT FTO"), "MAXIMUS AGENT");
+        assert_eq!(normalize_unit_name("NISSE"), "NISSE");
+        assert_eq!(normalize_unit_name("  SPECTOR FTO  "), "SPECTOR");
+    }
+
+    #[test]
+    fn fto_option_merges_into_base_unit_name() {
+        let metadata = serde_json::json!({
+            "skills": [],
+            "weapons": [
+                {"id": 2, "name": "Heavy Machine Gun"},
+                {"id": 169, "name": "MULTI Rifle"},
+                {"id": 69, "name": "Pistol"},
+                {"id": 5, "name": "CC Weapon"}
+            ],
+            "equips": []
+        });
+        let army = ArmyRow {
+            id: 101,
+            parent_id: 101,
+            name: "PanOceania".into(),
+            slug: "panoceania".into(),
+        };
+        let document = serde_json::json!({
+            "filters": { "extras": [], "chars": [], "type": [], "peripheral": [] },
+            "units": [{
+                "id": 50,
+                "name": "AQUILA GUARD",
+                "factions": [101],
+                "profileGroups": [{
+                    "id": 1,
+                    "profiles": [{
+                        "name": "AQUILA GUARD",
+                        "type": 1, "chars": [], "move": [4,4],
+                        "cc": 15, "bs": 14, "ph": 12, "wip": 13, "arm": 5, "bts": 3, "w": 2,
+                        "str": false, "s": 2, "skills": [], "equip": [], "weapons": []
+                    }],
+                    "options": [
+                        {
+                            "id": 1, "name": "AQUILA", "disabled": false,
+                            "weapons": [{"id": 2}, {"id": 69}, {"id": 5}],
+                            "skills": [], "equip": [], "includes": []
+                        },
+                        {
+                            "id": 2, "name": "AQUILA FTO", "disabled": false,
+                            "weapons": [{"id": 169}, {"id": 69}, {"id": 5}],
+                            "skills": [], "equip": [], "includes": []
+                        }
+                    ]
+                }]
+            }]
+        });
+        let names = names_from_metadata(&metadata);
+        let armies = vec![army.clone()];
+        let mut drafts = BTreeMap::new();
+        absorb_units(&mut drafts, &names, &army, &armies, &document);
+        let profiles: Vec<_> = drafts.into_values().collect();
+        assert_eq!(profiles.len(), 2);
+        assert!(profiles.iter().all(|profile| profile.isc == "AQUILA"));
+        assert!(!profiles.iter().any(|profile| profile.isc.contains("FTO")));
     }
 
     #[test]
