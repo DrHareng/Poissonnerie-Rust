@@ -142,6 +142,8 @@ pub fn import_from_army_api(
     attach_escape_pilots(&mut profiles);
     attach_sapper_forms(&mut profiles);
     apply_peripheral_names(&mut profiles);
+    // AI Motorcycle : le dismounted (+ périphérique) devient forme du monté, pas un slot séparé.
+    attach_ai_motorcycle_forms(&mut profiles, &mut unit_includes);
     apply_meshes_and_colors(&mut profiles, &meshes, &colors);
     if let Some(path) = mesh_file.filter(|path| path.exists()) {
         profiles.extend(mod_only_profiles(path, &armies)?);
@@ -1314,6 +1316,136 @@ fn attach_sapper_forms(profiles: &mut [ProfileDraft]) {
     }
 }
 
+fn has_ai_motorcycle(profile: &ProfileDraft) -> bool {
+    profile.traits.iter().any(|trait_| {
+        trait_.kind == "equipment" && trait_.name.eq_ignore_ascii_case("AI Motorcycle")
+    })
+}
+
+fn motorcycle_dismount_isc(mounted_isc: &str, dismounted_isc: &str) -> String {
+    let mounted = mounted_isc.trim();
+    let dismounted = dismounted_isc.trim();
+    if dismounted.eq_ignore_ascii_case(mounted) {
+        qualify_form_isc(mounted, "Dismounted")
+    } else {
+        dismounted.to_string()
+    }
+}
+
+fn profile_key(profile: &ProfileDraft) -> (i64, i64, i64) {
+    (profile.unit_id, profile.group_id, profile.option_id)
+}
+
+/// Zondnautica / AI Motorcycle : l'option d'unité référence monté + dismounted.
+/// Le dismounted (et son Zondmate) devient forme du monté ; le slot table reste le S4.
+fn attach_ai_motorcycle_forms(
+    profiles: &mut Vec<ProfileDraft>,
+    unit_includes: &mut BTreeMap<(i64, i64), Vec<UnitOptionInclude>>,
+) {
+    let index_by_key: BTreeMap<(i64, i64, i64), usize> = profiles
+        .iter()
+        .enumerate()
+        .map(|(index, profile)| (profile_key(profile), index))
+        .collect();
+    let mut consumed = vec![false; profiles.len()];
+    let mut attachments: Vec<(usize, FormDraft, Vec<FormDraft>)> = Vec::new();
+
+    for includes in unit_includes.values() {
+        if includes.len() < 2 {
+            continue;
+        }
+        let mut mounted_index = None;
+        let mut other_indices = Vec::new();
+        for include in includes {
+            let key = (include.unit_id, include.group_id, include.option_id);
+            let Some(&index) = index_by_key.get(&key) else {
+                continue;
+            };
+            if consumed[index] {
+                continue;
+            }
+            if has_ai_motorcycle(&profiles[index]) {
+                if mounted_index.is_some() {
+                    mounted_index = None;
+                    break;
+                }
+                mounted_index = Some(index);
+            } else {
+                other_indices.push(index);
+            }
+        }
+        let Some(mounted) = mounted_index else {
+            continue;
+        };
+        if other_indices.is_empty() {
+            continue;
+        }
+        for other in other_indices {
+            if consumed[other] {
+                continue;
+            }
+            let dismounted = &profiles[other];
+            let form = FormDraft {
+                state_index: 2,
+                isc: motorcycle_dismount_isc(&profiles[mounted].isc, &dismounted.isc),
+                loadout: dismounted.loadout.clone(),
+                nom_tts: String::new(),
+                description_tts: dismounted.description_tts.clone(),
+                silhouette_size: dismounted.silhouette_size.clone(),
+                silhouette_type: dismounted.silhouette_type.clone(),
+                marker_name: dismounted.marker_name.clone(),
+                mesh_url: None,
+                marker_mesh_url: None,
+                traits: dismounted.traits.clone(),
+            };
+            let nested = dismounted.forms.clone();
+            attachments.push((mounted, form, nested));
+            consumed[other] = true;
+        }
+    }
+
+    for (mounted, form, nested) in attachments {
+        let already = profiles[mounted].forms.iter().any(|existing| {
+            existing.isc == form.isc
+                && existing.loadout == form.loadout
+                && existing.silhouette_size == form.silhouette_size
+        });
+        if !already {
+            profiles[mounted].forms.push(form);
+        }
+        for nested_form in nested {
+            let already = profiles[mounted].forms.iter().any(|existing| {
+                existing.isc == nested_form.isc
+                    && existing.loadout == nested_form.loadout
+                    && existing.state_index == nested_form.state_index
+            });
+            if !already {
+                profiles[mounted].forms.push(nested_form);
+            }
+        }
+    }
+
+    // Les includes d'unité ne gardent que le profil monté (déploiement table).
+    for includes in unit_includes.values_mut() {
+        includes.retain(|include| {
+            let key = (include.unit_id, include.group_id, include.option_id);
+            index_by_key
+                .get(&key)
+                .is_none_or(|&index| !consumed[index])
+        });
+        for (sort_order, include) in includes.iter_mut().enumerate() {
+            include.sort_order = sort_order as i64;
+        }
+    }
+
+    let mut index = 0;
+    profiles.retain(|_| {
+        let keep = !consumed[index];
+        index += 1;
+        keep
+    });
+}
+
 fn attach_escape_pilots(profiles: &mut Vec<ProfileDraft>) {
     let factions: BTreeSet<String> = profiles
         .iter()
@@ -2415,6 +2547,152 @@ mod tests {
                 .map(|row| (row.group_id, row.option_id, row.quantity))
                 .collect::<Vec<_>>(),
             vec![(1, 1, 1), (2, 1, 1)]
+        );
+    }
+
+    #[test]
+    fn attaches_ai_motorcycle_dismount_and_peripheral_as_forms() {
+        let metadata = serde_json::json!({
+            "skills": [
+                {"id": 84, "name": "Courage"},
+                {"id": 246, "name": "Transmutation"}
+            ],
+            "weapons": [
+                {"id": 74, "name": "Spitfire"},
+                {"id": 69, "name": "Pistol"},
+                {"id": 5, "name": "CC Weapon"},
+                {"id": 18, "name": "Chain Rifle"},
+                {"id": 71, "name": "PARA CC Weapon"}
+            ],
+            "equips": [{"id": 205, "name": "AI Motorcycle"}]
+        });
+        let army = ArmyRow {
+            id: 501,
+            parent_id: 501,
+            name: "Nomads".into(),
+            slug: "nomads".into(),
+        };
+        let document = serde_json::json!({
+            "filters": {
+                "extras": [{"id": 254, "name": "Auto"}],
+                "chars": [],
+                "type": [],
+                "peripheral": [{"id": 5, "name": "ZONDMATE"}]
+            },
+            "units": [{
+                "id": 1091,
+                "name": "ZONDNAUTICA Rapid Offensive Unit",
+                "factions": [501],
+                "options": [{
+                    "id": 1,
+                    "name": "ZONDNAUTICA-A",
+                    "disabled": false,
+                    "includes": [
+                        {"q": 1, "group": 1, "option": 1},
+                        {"q": 1, "group": 2, "option": 1}
+                    ]
+                }],
+                "profileGroups": [
+                    {
+                        "id": 1,
+                        "isc": "Zondnautica Rapid Offensive Unit",
+                        "profiles": [{
+                            "name": "MOUNTED ZONDNAUTICA Rapid Offensive Unit",
+                            "type": 2, "chars": [], "move": [8, 4],
+                            "cc": 15, "bs": 12, "ph": 12, "wip": 13, "arm": 3, "bts": 3, "w": 1,
+                            "str": false, "s": 4,
+                            "skills": [{"id": 84}, {"id": 246, "extra": [254]}],
+                            "equip": [{"id": 205}], "weapons": [], "peripheral": []
+                        }],
+                        "options": [{
+                            "id": 1,
+                            "name": "ZONDNAUTICA-A",
+                            "disabled": true,
+                            "weapons": [{"id": 74}, {"id": 69}, {"id": 5}],
+                            "skills": [], "equip": [], "includes": [], "peripheral": []
+                        }]
+                    },
+                    {
+                        "id": 2,
+                        "isc": "Zondnautica Rapid Offensive Unit ",
+                        "profiles": [{
+                            "name": "DISMOUNTED ZONDNAUTICA Rapid Offensive Unit",
+                            "type": 2, "chars": [], "move": [4, 4],
+                            "cc": 15, "bs": 12, "ph": 11, "wip": 13, "arm": 2, "bts": 3, "w": 1,
+                            "str": false, "s": 2,
+                            "skills": [{"id": 84}],
+                            "equip": [], "weapons": [], "peripheral": []
+                        }],
+                        "options": [{
+                            "id": 1,
+                            "name": "ZONDNAUT-A",
+                            "disabled": true,
+                            "weapons": [{"id": 74}, {"id": 69}, {"id": 5}],
+                            "skills": [], "equip": [],
+                            "includes": [{"q": 1, "group": 3, "option": 1}],
+                            "peripheral": [{"id": 5}]
+                        }]
+                    },
+                    {
+                        "id": 3,
+                        "isc": "ZondMate",
+                        "profiles": [{
+                            "name": "ZONDMATE",
+                            "type": 5, "chars": [], "move": [8, 4],
+                            "cc": 13, "bs": 10, "ph": 10, "wip": 11, "arm": 1, "bts": 3, "w": 1,
+                            "str": true, "s": 5,
+                            "skills": [{"id": 84}],
+                            "equip": [{"id": 205}], "weapons": [], "peripheral": []
+                        }],
+                        "options": [{
+                            "id": 1,
+                            "name": "ZONDMATE",
+                            "disabled": true,
+                            "weapons": [{"id": 18}, {"id": 71}],
+                            "skills": [], "equip": [], "includes": [], "peripheral": []
+                        }]
+                    }
+                ]
+            }]
+        });
+        let mut names = names_from_metadata(&metadata);
+        absorb_filters(&mut names, &document);
+        let armies = vec![army.clone()];
+        let mut drafts = BTreeMap::new();
+        absorb_units(&mut drafts, &names, &army, &armies, &document);
+        let mut unit_includes = BTreeMap::new();
+        absorb_unit_includes(&mut unit_includes, &document);
+        let mut profiles: Vec<_> = drafts.into_values().collect();
+        apply_peripheral_names(&mut profiles);
+        attach_ai_motorcycle_forms(&mut profiles, &mut unit_includes);
+
+        assert_eq!(profiles.len(), 1, "seul le monté reste déployable");
+        let mounted = &profiles[0];
+        assert_eq!(mounted.silhouette_size.as_deref(), Some("4"));
+        assert!(has_ai_motorcycle(mounted));
+
+        let dismount = mounted
+            .forms
+            .iter()
+            .find(|form| form.state_index == 2)
+            .expect("forme dismounted");
+        assert_eq!(dismount.silhouette_size.as_deref(), Some("2"));
+        assert_eq!(dismount.isc, "Zondnautica Rapid Offensive Unit Dismounted");
+
+        let zondmate = mounted
+            .forms
+            .iter()
+            .find(|form| form.state_index == 900 && form.isc == "ZONDMATE")
+            .expect("périphérique zondmate");
+        assert_eq!(zondmate.silhouette_size.as_deref(), Some("5"));
+
+        let includes = unit_includes.get(&(1091, 1)).expect("includes unitaires");
+        assert_eq!(
+            includes
+                .iter()
+                .map(|row| (row.group_id, row.option_id))
+                .collect::<Vec<_>>(),
+            vec![(1, 1)]
         );
     }
 }
