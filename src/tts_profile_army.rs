@@ -52,7 +52,7 @@ struct ProfileDraft {
     army_id: Option<i64>,
     faction_slug: Option<String>,
     faction_label: String,
-    /// Nom du profil Army (`profiles[0].name`) — clé de liaison figurines / TTS.
+    /// Nom d'unité TTS : `option.name` (NISSE), pas le titre long `profiles[0].name`.
     isc: String,
     loadout: String,
     nom_tts: String,
@@ -448,8 +448,8 @@ fn absorb_units(
             let Some(base) = base else {
                 continue;
             };
-            // Clé applicative = nom du profil Army (Dragao), pas le champ ISC pluriel (Dragoes).
-            let isc = base
+            // Repli si option.name est vide : titre de carte → ISC groupe → nom d'unité.
+            let fallback_isc = base
                 .get("name")
                 .and_then(Value::as_str)
                 .map(str::trim)
@@ -473,6 +473,15 @@ fn absorb_units(
                     continue;
                 }
                 let option_id = option.get("id").and_then(Value::as_i64).unwrap_or(0);
+                // Clé applicative = option.name (NISSE / PALBOT), pas profiles[0].name
+                // (Svalarheima NISSES / PALBOTS) ni l'ISC pluriel.
+                let isc = option
+                    .get("name")
+                    .and_then(Value::as_str)
+                    .map(str::trim)
+                    .filter(|value| !value.is_empty())
+                    .map(str::to_string)
+                    .unwrap_or_else(|| fallback_isc.clone());
                 let key = (unit_id, group_id, option_id);
                 let factions = unit_factions(unit);
                 let listed = factions.contains(&army.id);
@@ -2603,10 +2612,11 @@ mod tests {
             profile.isc == "MASHA" && profile.loadout.starts_with("Combi Rifle")
         }));
         assert!(profiles.iter().any(|profile| {
-            profile.isc == "POLARIS BEARPODE" && profile.loadout.starts_with("Combi Rifle")
+            profile.isc == "POLARIS BEARPODE ALPHA" && profile.loadout.starts_with("Combi Rifle")
         }));
         assert!(profiles.iter().any(|profile| {
-            profile.isc == "POLARIS BEARPODE" && profile.loadout.starts_with("Heavy Machine Gun")
+            profile.isc == "POLARIS BEARPODE BETA"
+                && profile.loadout.starts_with("Heavy Machine Gun")
         }));
         assert!(!profiles.iter().any(|profile| profile.isc == "OPERATOR"));
         assert_eq!(
@@ -2905,10 +2915,7 @@ mod tests {
             .find(|form| form.state_index == 2)
             .expect("forme dismounted");
         assert_eq!(dismount.silhouette_size.as_deref(), Some("2"));
-        assert_eq!(
-            dismount.isc,
-            "DISMOUNTED ZONDNAUTICA Rapid Offensive Unit"
-        );
+        assert_eq!(dismount.isc, "ZONDNAUT-A");
 
         let zondmate = mounted
             .forms
