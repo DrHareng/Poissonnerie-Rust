@@ -73,7 +73,8 @@ const figurineIscSet = computed(() =>
   new Set(props.figurineIscs.map((isc) => isc.trim().toLowerCase()).filter(Boolean)),
 )
 
-function isSpecialOps(profile: { nom: string }) {
+function isSpecialOps(profile: Pick<TtsProfileSummary, 'nom' | 'team_ops'>) {
+  if (profile.team_ops) return true
   const name = profile.nom.toLowerCase()
   return (
     name.includes('team-ops') ||

@@ -597,6 +597,8 @@ export interface TtsProfileSummary {
   form_count: number
   linked: boolean
   differences: string
+  /** Spec-Ops / Team-Ops (compétence Infinity Spec-Ops / Infinity Team-Ops, ou nom). */
+  team_ops: boolean
 }
 
 export interface TtsProfileForm {

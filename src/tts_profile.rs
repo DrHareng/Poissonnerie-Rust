@@ -1020,6 +1020,8 @@ pub struct TtsProfileSummary {
     pub linked: bool,
     /// Jetons présents sur ce profil et absents d'au moins un autre du même ISC et loadout.
     pub differences: String,
+    /// Spec-Ops / Team-Ops (compétence Infinity Spec-Ops / Infinity Team-Ops, ou nom).
+    pub team_ops: bool,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
@@ -1347,6 +1349,7 @@ pub fn list_profiles(
             let mut summary = map_summary(row)?;
             summary.differences.clear();
             let description: String = row.get(12)?;
+            summary.team_ops = profile_is_team_ops(&summary.isc, &description);
             Ok((summary, description))
         },
     )?;
@@ -1355,6 +1358,20 @@ pub fn list_profiles(
         .context("lecture des profils TTS")?;
     apply_description_differences(&mut listed);
     Ok(listed.into_iter().map(|(summary, _)| summary).collect())
+}
+
+/// True pour les troupes Spec-Ops / Team-Ops (compétence ou libellé ISC).
+fn profile_is_team_ops(isc: &str, description: &str) -> bool {
+    let desc = description.to_ascii_lowercase();
+    if desc.contains("infinity spec-ops") || desc.contains("infinity team-ops") {
+        return true;
+    }
+    let name = isc.to_ascii_lowercase();
+    name.contains("team-ops")
+        || name.contains("team ops")
+        || name.contains("spec-ops")
+        || name.contains("spec ops")
+        || name.contains("specbot")
 }
 
 fn description_pieces(description: &str) -> Vec<String> {
@@ -2169,6 +2186,7 @@ fn map_summary(row: &rusqlite::Row<'_>) -> rusqlite::Result<TtsProfileSummary> {
         form_count: row.get(10)?,
         linked: row.get::<_, i64>(11)? != 0,
         differences: String::new(),
+        team_ops: false,
     })
 }
 
@@ -2266,6 +2284,21 @@ fn army_id_for_slug(conn: &Connection, slug: &str) -> Result<Option<i64>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn profile_is_team_ops_detects_skills_and_names() {
+        assert!(profile_is_team_ops(
+            "HATAIL",
+            "MI\n----------Skills---------\nInfinity Spec-Ops ● Immunity(Shock)",
+        ));
+        assert!(profile_is_team_ops(
+            "CUSTOM",
+            "----------Skills---------\nInfinity Team-Ops ● Mimetism(-3)",
+        ));
+        assert!(profile_is_team_ops("SPECBOT", "Regular"));
+        assert!(profile_is_team_ops("TOHAA TEAM-OPS", "Regular"));
+        assert!(!profile_is_team_ops("FUSILIER", "Regular ● Cube"));
+    }
 
     /// `armies` doit exister avant `migrate` (FK des tables TTS reconstruites).
     fn test_conn() -> Connection {

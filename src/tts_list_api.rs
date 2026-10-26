@@ -568,6 +568,7 @@ fn summary_from_peripheral(
         form_count: 0,
         linked: parent.linked,
         differences: String::new(),
+        team_ops: parent.team_ops,
     }
 }
 
