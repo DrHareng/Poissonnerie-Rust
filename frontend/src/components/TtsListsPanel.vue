@@ -139,6 +139,9 @@ const pickerFiltered = computed(() => {
   const knownIscs = armyId
     ? new Set(pickerLabels.value.map((label) => label.nom.trim().toLowerCase()))
     : null
+  const profile = pickerEntry.value ? effectiveProfile(pickerEntry.value) : null
+  const unitKey = profile?.nom.trim().toLowerCase() ?? ''
+  const loadoutKey = profile?.loadout.trim().toLowerCase() ?? ''
 
   let rows = catalog.value
   if (knownIscs) {
@@ -156,7 +159,21 @@ const pickerFiltered = computed(() => {
         .includes(needle),
     )
   }
-  return rows
+  // Même unité / loadout exact d'abord, puis autres loadouts de l'unité, puis le reste.
+  return [...rows].sort((left, right) => {
+    const score = (figurine: TtsFigurine) => {
+      const sameUnit = unitKey && figurine.nom.trim().toLowerCase() === unitKey
+      if (!sameUnit) return 0
+      if (loadoutKey && figurine.loadout.trim().toLowerCase() === loadoutKey) return 2
+      return 1
+    }
+    return (
+      score(right) - score(left) ||
+      left.nom.localeCompare(right.nom, 'fr', { sensitivity: 'base' }) ||
+      left.painter.localeCompare(right.painter, 'fr', { sensitivity: 'base' }) ||
+      left.id - right.id
+    )
+  })
 })
 
 const sidePanelOpen = computed(() => result.value != null)
@@ -269,11 +286,13 @@ function rememberedFigurine(ttsLoadoutId: number): TtsFigurine | TtsListRankedFi
 function choiceFigurines(entry: TtsListExpandEntry) {
   const selected = picks.value[entry.index]
   const profile = effectiveProfile(entry)
-  const rows = entry.holomask
-    ? (() => {
-        return profile ? rankCatalogFigurines(profile.nom, profile.loadout) : []
-      })()
-    : [...entry.figurines]
+  // Catalogue : même unité, loadout exact puis autres loadouts.
+  const rows: TtsListRankedFigurine[] =
+    profile && catalogLoaded.value
+      ? rankCatalogFigurines(profile.nom, profile.loadout)
+      : entry.holomask
+        ? []
+        : [...entry.figurines]
   if (profile) {
     const remembered = rememberedFigurine(profile.tts_loadout_id)
     if (remembered && !rows.some((figurine) => figurine.id === remembered.id)) {
@@ -296,9 +315,14 @@ function choiceFigurines(entry: TtsListExpandEntry) {
   return rows
 }
 
-function selectFigurine(entryIndex: number, figurine: TtsFigurine | TtsListRankedFigurine) {
+/** `remember` : enregistre le premier choix préféré (uniquement via la fenêtre catalogue). */
+function selectFigurine(
+  entryIndex: number,
+  figurine: TtsFigurine | TtsListRankedFigurine,
+  options: { remember?: boolean } = {},
+) {
   picks.value = { ...picks.value, [entryIndex]: figurine }
-  void persistFigurinePick(entryIndex, figurine)
+  if (options.remember) void persistFigurinePick(entryIndex, figurine)
 }
 
 async function persistFigurinePick(
@@ -529,7 +553,7 @@ function onPickerBackdrop(event: MouseEvent) {
 function chooseFromCatalog(figurine: TtsFigurine) {
   const index = pickerEntryIndex.value
   if (index == null) return
-  selectFigurine(index, figurine)
+  selectFigurine(index, figurine, { remember: true })
   closePicker()
 }
 
@@ -961,45 +985,74 @@ async function launch() {
               <AlertTitle>Erreur</AlertTitle>
               <AlertDescription>{{ pickerError }}</AlertDescription>
             </Alert>
-            <p v-else-if="pickerLoading" class="text-muted-foreground shrink-0 text-sm">
-              Chargement…
-            </p>
-            <p
-              v-else-if="!pickerFiltered.length"
-              class="text-muted-foreground shrink-0 text-sm"
-            >
-              Aucune figurine en S{{ requiredSilhouetteSize }}.
-            </p>
-            <div v-else class="min-h-0 flex-1 overflow-y-auto">
-              <div class="grid grid-cols-3 gap-2 sm:grid-cols-4 md:grid-cols-5">
-                <button
-                  v-for="figurine in pickerFiltered"
-                  :key="figurine.id"
-                  type="button"
-                  class="border-border hover:border-foreground/40 focus-visible:ring-ring flex flex-col overflow-hidden rounded-md border text-left transition focus-visible:outline-none focus-visible:ring-2"
-                  @click="chooseFromCatalog(figurine)"
+            <!-- Hauteur fixe = 3 lignes de figs (placeholder invisible), pour éviter le reflow à la recherche. -->
+            <div class="relative shrink-0">
+              <div
+                class="invisible grid grid-cols-3 gap-2 sm:grid-cols-4 md:grid-cols-5"
+                aria-hidden="true"
+              >
+                <div
+                  v-for="n in 15"
+                  :key="n"
+                  class="flex flex-col overflow-hidden"
+                  :class="{
+                    'max-sm:hidden': n > 9,
+                    'max-md:hidden': n > 12,
+                  }"
                 >
-                  <div class="bg-muted aspect-square w-full overflow-hidden">
-                    <img
-                      v-if="photoSrc(figurine)"
-                      :src="photoSrc(figurine)"
-                      :alt="figurine.nom"
-                      class="size-full object-cover"
-                    >
-                    <div
-                      v-else
-                      class="text-muted-foreground flex size-full items-center justify-center text-xs"
-                    >
-                      Pas de photo
-                    </div>
-                  </div>
+                  <div class="aspect-square w-full" />
                   <div class="space-y-0.5 p-1.5">
-                    <p class="truncate text-xs font-medium">{{ figurine.nom }}</p>
-                    <p class="text-muted-foreground truncate text-[11px]">
-                      {{ figurine.painter || '—' }} · {{ figurine.loadout || '—' }}
-                    </p>
+                    <p class="truncate text-xs font-medium">&nbsp;</p>
+                    <p class="truncate text-[11px]">&nbsp;</p>
                   </div>
-                </button>
+                </div>
+              </div>
+              <div class="absolute inset-0 overflow-y-auto">
+                <p
+                  v-if="pickerLoading"
+                  class="text-muted-foreground flex h-full items-center justify-center text-sm"
+                >
+                  Chargement…
+                </p>
+                <p
+                  v-else-if="!pickerFiltered.length"
+                  class="text-muted-foreground flex h-full items-center justify-center text-sm"
+                >
+                  Aucune figurine en S{{ requiredSilhouetteSize }}.
+                </p>
+                <div
+                  v-else
+                  class="grid grid-cols-3 gap-2 sm:grid-cols-4 md:grid-cols-5"
+                >
+                  <button
+                    v-for="figurine in pickerFiltered"
+                    :key="figurine.id"
+                    type="button"
+                    class="border-border hover:border-foreground/40 focus-visible:ring-ring flex flex-col overflow-hidden rounded-md border text-left transition focus-visible:outline-none focus-visible:ring-2"
+                    @click="chooseFromCatalog(figurine)"
+                  >
+                    <div class="bg-muted aspect-square w-full overflow-hidden">
+                      <img
+                        v-if="photoSrc(figurine)"
+                        :src="photoSrc(figurine)"
+                        :alt="figurine.nom"
+                        class="size-full object-cover"
+                      >
+                      <div
+                        v-else
+                        class="text-muted-foreground flex size-full items-center justify-center text-xs"
+                      >
+                        Pas de photo
+                      </div>
+                    </div>
+                    <div class="space-y-0.5 p-1.5">
+                      <p class="truncate text-xs font-medium">{{ figurine.nom }}</p>
+                      <p class="text-muted-foreground truncate text-[11px]">
+                        {{ figurine.painter || '—' }} · {{ figurine.loadout || '—' }}
+                      </p>
+                    </div>
+                  </button>
+                </div>
               </div>
             </div>
           </CardContent>

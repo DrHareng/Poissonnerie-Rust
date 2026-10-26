@@ -585,26 +585,11 @@ fn rank_figurines(
     let loadout_key = loadout.trim().to_ascii_lowercase();
     let in_sectorial = sectorial_iscs.contains(&isc_key);
 
-    let by_id: Vec<&TtsFigurine> = all
+    // Même unité (ISC) : loadout exact d'abord, puis les autres loadouts.
+    let pool: Vec<&TtsFigurine> = all
         .iter()
-        .filter(|figurine| figurine.tts_loadout_id == Some(tts_loadout_id))
+        .filter(|figurine| figurine.isc.trim().eq_ignore_ascii_case(isc))
         .collect();
-    let by_fallback: Vec<&TtsFigurine> = fallback_loadout_id
-        .map(|fallback| {
-            all.iter()
-                .filter(|figurine| figurine.tts_loadout_id == Some(fallback))
-                .collect()
-        })
-        .unwrap_or_default();
-    let pool: Vec<&TtsFigurine> = if !by_id.is_empty() {
-        by_id
-    } else if !by_fallback.is_empty() {
-        by_fallback
-    } else {
-        all.iter()
-            .filter(|figurine| figurine.isc.trim().eq_ignore_ascii_case(isc))
-            .collect()
-    };
 
     let mut ranked: Vec<RankedFigurine> = pool
         .into_iter()
@@ -612,11 +597,15 @@ fn rank_figurines(
             let exact_loadout = figurine.tts_loadout_id == Some(tts_loadout_id)
                 || (!loadout_key.is_empty()
                     && figurine.loadout.trim().eq_ignore_ascii_case(loadout));
+            let fallback_match = fallback_loadout_id
+                .is_some_and(|fallback| figurine.tts_loadout_id == Some(fallback));
             let painter_match = preferred_painter
                 .is_some_and(|painter| figurine.painter.trim().eq_ignore_ascii_case(painter));
             let mut score = 0;
             if exact_loadout {
                 score += 100;
+            } else if fallback_match {
+                score += 50;
             }
             if in_sectorial {
                 score += 20;
