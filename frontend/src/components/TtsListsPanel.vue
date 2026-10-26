@@ -60,7 +60,7 @@ const picks = ref<Record<number, TtsFigurine | TtsListRankedFigurine>>({})
 const holomaskProfiles = ref<Record<number, TtsProfileSummary>>({})
 /** Profils de la sectorielle (pour le choix Holomask). */
 const sectorProfiles = ref<TtsProfileSummary[]>([])
-/** Préférences utilisateur : clé `nom\\0loadout` → figurine_id */
+/** Préférences utilisateur : clé `String(tts_loadout_id)` → figurine_id */
 const pickPrefs = ref<Record<string, number>>({})
 const pickPrefsLoaded = ref(false)
 
@@ -254,15 +254,12 @@ function rankCatalogFigurines(isc: string, loadout: string): TtsListRankedFiguri
   return ranked
 }
 
-function prefKey(isc: string, loadout: string) {
-  return `${isc.trim().toLowerCase()}\0${loadout.trim().toLowerCase()}`
+function prefKey(ttsLoadoutId: number) {
+  return String(ttsLoadoutId)
 }
 
-function rememberedFigurine(
-  isc: string,
-  loadout: string,
-): TtsFigurine | TtsListRankedFigurine | null {
-  const id = pickPrefs.value[prefKey(isc, loadout)]
+function rememberedFigurine(ttsLoadoutId: number): TtsFigurine | TtsListRankedFigurine | null {
+  const id = pickPrefs.value[prefKey(ttsLoadoutId)]
   if (id == null) return null
   const fromCatalog = catalog.value.find((figurine) => figurine.id === id)
   if (fromCatalog) return fromCatalog
@@ -278,7 +275,7 @@ function choiceFigurines(entry: TtsListExpandEntry) {
       })()
     : [...entry.figurines]
   if (profile) {
-    const remembered = rememberedFigurine(profile.nom, profile.loadout)
+    const remembered = rememberedFigurine(profile.tts_loadout_id)
     if (remembered && !rows.some((figurine) => figurine.id === remembered.id)) {
       rows.unshift({
         ...remembered,
@@ -315,13 +312,12 @@ async function persistFigurinePick(
   if (!profile) return
   try {
     const saved = await upsertMyTtsFigurinePick({
-      nom: profile.nom,
-      loadout: profile.loadout,
+      tts_loadout_id: profile.tts_loadout_id,
       figurine_id: figurine.id,
     })
     pickPrefs.value = {
       ...pickPrefs.value,
-      [prefKey(saved.nom, saved.loadout)]: saved.figurine_id,
+      [prefKey(saved.tts_loadout_id)]: saved.figurine_id,
     }
   } catch {
     // Préférence best-effort : ne bloque pas le choix local.
@@ -339,7 +335,7 @@ async function ensurePickPrefs() {
     const rows: TtsFigurinePickPref[] = await fetchMyTtsFigurinePicks()
     const next: Record<string, number> = {}
     for (const row of rows) {
-      next[prefKey(row.nom, row.loadout)] = row.figurine_id
+      next[prefKey(row.tts_loadout_id)] = row.figurine_id
     }
     pickPrefs.value = next
   } catch {
@@ -359,9 +355,9 @@ function resolveInitialPick(
 ): TtsFigurine | TtsListRankedFigurine | undefined {
   const profile = entry.profile
   if (profile) {
-    const remembered = rememberedFigurine(profile.nom, profile.loadout)
+    const remembered = rememberedFigurine(profile.tts_loadout_id)
     if (remembered) return remembered
-    const prefId = pickPrefs.value[prefKey(profile.nom, profile.loadout)]
+    const prefId = pickPrefs.value[prefKey(profile.tts_loadout_id)]
     if (prefId != null) {
       const fromEntry = entry.figurines.find((figurine) => figurine.id === prefId)
       if (fromEntry) return fromEntry

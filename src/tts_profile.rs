@@ -854,8 +854,17 @@ fn replace_profiles(conn: &Connection, profiles: &[ParsedProfile]) -> Result<Imp
     let tx = conn.unchecked_transaction()?;
     tx.execute("DELETE FROM tts_profile_traits", [])?;
     tx.execute("DELETE FROM tts_profile_sectorials", [])?;
-    tx.execute("DELETE FROM tts_profile_forms", [])?;
     tx.execute("DELETE FROM tts_profiles", [])?;
+    // Loadouts orphelins (sauf ceux encore référencés par une figurine).
+    tx.execute(
+        "
+        DELETE FROM tts_loadouts
+        WHERE id NOT IN (
+            SELECT tts_loadout_id FROM tts_figurines WHERE tts_loadout_id IS NOT NULL
+        )
+        ",
+        [],
+    )?;
 
     let mut forms = 0usize;
     let mut without_army = 0usize;
@@ -870,54 +879,66 @@ fn replace_profiles(conn: &Connection, profiles: &[ParsedProfile]) -> Result<Imp
         if army_id.is_none() {
             without_army += 1;
         }
+        let unit_id = get_or_create_unit(&tx, &profile.isc)?;
+        let loadout_id = insert_loadout(
+            &tx,
+            &profile.nom_tts,
+            &profile.description_tts,
+            profile.silhouette_size.as_deref(),
+            profile.silhouette_type.as_deref(),
+            profile.marker_name.as_deref(),
+            profile.mesh_url.as_deref(),
+            profile.marker_mesh_url.as_deref(),
+        )?;
         tx.execute(
             "
             INSERT INTO tts_profiles (
-                army_id, faction_slug, faction_label, isc, loadout, nom_tts, description_tts,
-                silhouette_size, silhouette_type, marker_name, mesh_url, marker_mesh_url,
-                source_bag, source_index
+                army_id, faction_slug, faction_label, unit_id, tts_loadout_id,
+                parent_profile_id, state_index, loadout, source_bag, source_index
             )
-            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)
+            VALUES (?1, ?2, ?3, ?4, ?5, NULL, 0, ?6, ?7, ?8)
             ",
             params![
                 army_id,
                 profile.faction_slug,
                 profile.faction_label,
-                profile.isc,
+                unit_id,
+                loadout_id,
                 profile.loadout,
-                profile.nom_tts,
-                profile.description_tts,
-                profile.silhouette_size,
-                profile.silhouette_type,
-                profile.marker_name,
-                profile.mesh_url,
-                profile.marker_mesh_url,
                 profile.source_bag,
                 profile.source_index,
             ],
         )?;
         let profile_id = tx.last_insert_rowid();
         for form in &profile.forms {
+            let form_unit_id = get_or_create_unit(&tx, &form.isc)?;
+            let form_loadout_id = insert_loadout(
+                &tx,
+                &form.nom_tts,
+                &form.description_tts,
+                form.silhouette_size.as_deref(),
+                form.silhouette_type.as_deref(),
+                form.marker_name.as_deref(),
+                form.mesh_url.as_deref(),
+                form.marker_mesh_url.as_deref(),
+            )?;
             tx.execute(
                 "
-                INSERT INTO tts_profile_forms (
-                    profile_id, state_index, isc, loadout, nom_tts, description_tts,
-                    silhouette_size, silhouette_type, marker_name, mesh_url, marker_mesh_url
+                INSERT INTO tts_profiles (
+                    army_id, faction_slug, faction_label, unit_id, tts_loadout_id,
+                    parent_profile_id, state_index, loadout, source_bag, source_index
                 )
-                VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
+                VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, '', 0)
                 ",
                 params![
+                    army_id,
+                    profile.faction_slug,
+                    profile.faction_label,
+                    form_unit_id,
+                    form_loadout_id,
                     profile_id,
                     form.state_index,
-                    form.isc,
                     form.loadout,
-                    form.nom_tts,
-                    form.description_tts,
-                    form.silhouette_size,
-                    form.silhouette_type,
-                    form.marker_name,
-                    form.mesh_url,
-                    form.marker_mesh_url,
                 ],
             )?;
             forms += 1;
@@ -934,6 +955,53 @@ fn replace_profiles(conn: &Connection, profiles: &[ParsedProfile]) -> Result<Imp
     })
 }
 
+/// Unité TTS (ISC) : crée la ligne si absente, retourne son id.
+fn get_or_create_unit(conn: &Connection, nom: &str) -> Result<i64> {
+    let nom = nom.trim();
+    conn.execute(
+        "INSERT OR IGNORE INTO tts_units (nom) VALUES (?1)",
+        params![nom],
+    )?;
+    conn.query_row(
+        "SELECT id FROM tts_units WHERE nom = ?1",
+        params![nom],
+        |row| row.get(0),
+    )
+    .context("lecture de l'unité TTS")
+}
+
+#[allow(clippy::too_many_arguments)]
+fn insert_loadout(
+    conn: &Connection,
+    nom_tts: &str,
+    description_tts: &str,
+    silhouette_size: Option<&str>,
+    silhouette_type: Option<&str>,
+    marker_name: Option<&str>,
+    mesh_url: Option<&str>,
+    marker_mesh_url: Option<&str>,
+) -> Result<i64> {
+    conn.execute(
+        "
+        INSERT INTO tts_loadouts (
+            nom_tts, description_tts, silhouette_size, silhouette_type,
+            marker_name, mesh_url, marker_mesh_url
+        )
+        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+        ",
+        params![
+            nom_tts,
+            description_tts,
+            silhouette_size,
+            silhouette_type,
+            marker_name,
+            mesh_url,
+            marker_mesh_url,
+        ],
+    )?;
+    Ok(conn.last_insert_rowid())
+}
+
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub struct TtsProfileSummary {
     pub id: i64,
@@ -942,6 +1010,7 @@ pub struct TtsProfileSummary {
     #[serde(rename = "nom")]
     pub isc: String,
     pub loadout: String,
+    pub tts_loadout_id: i64,
     pub nom_tts: String,
     pub silhouette_size: Option<String>,
     pub silhouette_type: Option<String>,
@@ -960,6 +1029,7 @@ pub struct TtsProfileForm {
     #[serde(rename = "nom")]
     pub isc: String,
     pub loadout: String,
+    pub tts_loadout_id: i64,
     pub nom_tts: String,
     pub description_tts: String,
     pub silhouette_size: Option<String>,
@@ -979,6 +1049,7 @@ pub struct TtsProfileDetail {
     #[serde(rename = "nom")]
     pub isc: String,
     pub loadout: String,
+    pub tts_loadout_id: i64,
     pub nom_tts: String,
     pub description_tts: String,
     pub silhouette_size: Option<String>,
@@ -1000,6 +1071,7 @@ pub struct TtsProfileTrait {
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub struct TtsProfileLabel {
+    pub tts_loadout_id: i64,
     #[serde(rename = "nom")]
     pub isc: String,
     pub loadout: String,
@@ -1024,6 +1096,7 @@ pub struct TtsProfileLoadout {
 /// y compris les périphériques (GO-BOT, STALDRON, …).
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub struct TtsFigurineLabel {
+    pub tts_loadout_id: i64,
     #[serde(rename = "nom")]
     pub isc: String,
     pub loadout: String,
@@ -1156,48 +1229,27 @@ impl TtsProfileStore {
 
     pub fn list_labels(&self) -> Result<Vec<TtsProfileLabel>> {
         let conn = self.conn.lock().unwrap();
-        let mut labels: BTreeMap<(String, String), TtsProfileLabel> = BTreeMap::new();
+        let mut labels: BTreeMap<i64, TtsProfileLabel> = BTreeMap::new();
         let mut stmt = conn.prepare(
             "
-            SELECT isc, loadout
-            FROM tts_profiles
-            ORDER BY isc COLLATE NOCASE, loadout COLLATE NOCASE, id
+            SELECT p.tts_loadout_id, u.nom, p.loadout
+            FROM tts_profiles p
+            JOIN tts_units u ON u.id = p.unit_id
+            JOIN tts_loadouts l ON l.id = p.tts_loadout_id
+            ORDER BY (p.parent_profile_id IS NOT NULL),
+                u.nom COLLATE NOCASE, p.loadout COLLATE NOCASE, p.id
             ",
         )?;
         let profile_rows = stmt.query_map([], |row| {
             Ok(TtsProfileLabel {
-                isc: row.get(0)?,
-                loadout: row.get(1)?,
+                tts_loadout_id: row.get(0)?,
+                isc: row.get(1)?,
+                loadout: row.get(2)?,
             })
         })?;
         for row in profile_rows {
             let label = row?;
-            let key = (
-                label.isc.trim().to_ascii_lowercase(),
-                label.loadout.trim().to_ascii_lowercase(),
-            );
-            labels.entry(key).or_insert(label);
-        }
-        let mut stmt = conn.prepare(
-            "
-            SELECT isc, loadout
-            FROM tts_profile_forms
-            ORDER BY isc COLLATE NOCASE, loadout COLLATE NOCASE, id
-            ",
-        )?;
-        let form_rows = stmt.query_map([], |row| {
-            Ok(TtsProfileLabel {
-                isc: row.get(0)?,
-                loadout: row.get(1)?,
-            })
-        })?;
-        for row in form_rows {
-            let label = row?;
-            let key = (
-                label.isc.trim().to_ascii_lowercase(),
-                label.loadout.trim().to_ascii_lowercase(),
-            );
-            labels.entry(key).or_insert(label);
+            labels.entry(label.tts_loadout_id).or_insert(label);
         }
         let mut rows: Vec<_> = labels.into_values().collect();
         rows.sort_by(|left, right| {
@@ -1260,28 +1312,32 @@ pub fn list_profiles(
     let mut stmt = conn.prepare(
         "
         SELECT
-            p.id, p.army_id, p.faction_label, p.isc, p.loadout, p.nom_tts,
-            p.silhouette_size, p.silhouette_type, p.marker_name,
-            (SELECT COUNT(*) FROM tts_profile_forms f WHERE f.profile_id = p.id),
+            p.id, p.army_id, p.faction_label, u.nom, p.loadout, p.tts_loadout_id, l.nom_tts,
+            l.silhouette_size, l.silhouette_type, l.marker_name,
+            (SELECT COUNT(*) FROM tts_profiles c WHERE c.parent_profile_id = p.id),
             EXISTS (
                 SELECT 1 FROM tts_profile_sectorials s
                 WHERE s.profile_id = p.id AND s.army_id = ?1
             ),
-            p.description_tts
+            l.description_tts
         FROM tts_profiles p
-        WHERE (
-            ?3 = 1 AND p.army_id IS NULL
-        ) OR (
-            ?3 = 0 AND (
-                p.army_id = ?1
-                OR (?2 IS NOT NULL AND p.army_id = ?2)
-                OR EXISTS (
-                    SELECT 1 FROM tts_profile_sectorials s
-                    WHERE s.profile_id = p.id AND s.army_id = ?1
+        JOIN tts_units u ON u.id = p.unit_id
+        JOIN tts_loadouts l ON l.id = p.tts_loadout_id
+        WHERE p.parent_profile_id IS NULL
+          AND (
+            (?3 = 1 AND p.army_id IS NULL)
+            OR (
+                ?3 = 0 AND (
+                    p.army_id = ?1
+                    OR (?2 IS NOT NULL AND p.army_id = ?2)
+                    OR EXISTS (
+                        SELECT 1 FROM tts_profile_sectorials s
+                        WHERE s.profile_id = p.id AND s.army_id = ?1
+                    )
                 )
             )
-        )
-        ORDER BY p.isc COLLATE NOCASE, p.silhouette_size, p.silhouette_type,
+          )
+        ORDER BY u.nom COLLATE NOCASE, l.silhouette_size, l.silhouette_type,
             p.loadout COLLATE NOCASE, p.id
         ",
     )?;
@@ -1290,7 +1346,7 @@ pub fn list_profiles(
         |row| {
             let mut summary = map_summary(row)?;
             summary.differences.clear();
-            let description: String = row.get(11)?;
+            let description: String = row.get(12)?;
             Ok((summary, description))
         },
     )?;
@@ -1380,15 +1436,18 @@ fn list_loadouts(
     let mut stmt = conn.prepare(
         "
         SELECT
-            p.id, p.loadout, p.faction_label, p.marker_name, p.silhouette_size,
-            p.silhouette_type, p.description_tts,
+            p.id, p.loadout, p.faction_label, l.marker_name, l.silhouette_size,
+            l.silhouette_type, l.description_tts,
             (
                 SELECT COUNT(*)
-                FROM tts_profile_forms f
-                WHERE f.profile_id = p.id AND f.state_index != 900
+                FROM tts_profiles c
+                WHERE c.parent_profile_id = p.id AND c.state_index != 900
             )
         FROM tts_profiles p
-        WHERE p.isc = ?1 COLLATE NOCASE
+        JOIN tts_units u ON u.id = p.unit_id
+        JOIN tts_loadouts l ON l.id = p.tts_loadout_id
+        WHERE u.nom = ?1 COLLATE NOCASE
+          AND p.parent_profile_id IS NULL
           AND (
             ?2 IS NULL
             OR p.army_id = ?2
@@ -1452,10 +1511,12 @@ fn list_form_loadouts(
         let mut stmt = conn.prepare(
             "
             SELECT
-                p.id, f.id, f.isc, f.loadout, p.faction_label, f.marker_name, f.silhouette_size,
-                f.silhouette_type, f.description_tts
-            FROM tts_profile_forms f
-            JOIN tts_profiles p ON p.id = f.profile_id
+                p.id, f.id, u.nom, f.loadout, p.faction_label, l.marker_name, l.silhouette_size,
+                l.silhouette_type, l.description_tts
+            FROM tts_profiles f
+            JOIN tts_profiles p ON p.id = f.parent_profile_id
+            JOIN tts_units u ON u.id = f.unit_id
+            JOIN tts_loadouts l ON l.id = f.tts_loadout_id
             WHERE (
                 p.army_id = ?1
                 OR EXISTS (
@@ -1474,10 +1535,12 @@ fn list_form_loadouts(
         let mut stmt = conn.prepare(
             "
             SELECT
-                p.id, f.id, f.isc, f.loadout, p.faction_label, f.marker_name, f.silhouette_size,
-                f.silhouette_type, f.description_tts
-            FROM tts_profile_forms f
-            JOIN tts_profiles p ON p.id = f.profile_id
+                p.id, f.id, u.nom, f.loadout, p.faction_label, l.marker_name, l.silhouette_size,
+                l.silhouette_type, l.description_tts
+            FROM tts_profiles f
+            JOIN tts_profiles p ON p.id = f.parent_profile_id
+            JOIN tts_units u ON u.id = f.unit_id
+            JOIN tts_loadouts l ON l.id = f.tts_loadout_id
             ORDER BY f.loadout COLLATE NOCASE, p.faction_label COLLATE NOCASE, f.id
             ",
         )?;
@@ -1514,67 +1577,36 @@ fn apply_loadout_differences(mut rows: Vec<(TtsProfileLoadout, String)>) -> Vec<
 }
 
 fn figurine_labels_for_army(conn: &Connection, army_id: i64) -> Result<Vec<TtsFigurineLabel>> {
-    let mut labels: BTreeMap<(String, String), TtsFigurineLabel> = BTreeMap::new();
+    let mut labels: BTreeMap<i64, TtsFigurineLabel> = BTreeMap::new();
     let mut stmt = conn.prepare(
         "
-        SELECT p.isc, p.loadout, p.marker_name, p.silhouette_size, p.silhouette_type
+        SELECT p.tts_loadout_id, u.nom, p.loadout, l.marker_name, l.silhouette_size, l.silhouette_type
         FROM tts_profiles p
-        WHERE p.army_id = ?1
+        JOIN tts_units u ON u.id = p.unit_id
+        JOIN tts_loadouts l ON l.id = p.tts_loadout_id
+        LEFT JOIN tts_profiles par ON par.id = p.parent_profile_id
+        WHERE COALESCE(par.army_id, p.army_id) = ?1
            OR EXISTS (
                 SELECT 1 FROM tts_profile_sectorials s
-                WHERE s.profile_id = p.id AND s.army_id = ?1
+                WHERE s.profile_id = COALESCE(p.parent_profile_id, p.id) AND s.army_id = ?1
            )
-        ORDER BY p.isc COLLATE NOCASE, p.loadout COLLATE NOCASE, p.id
+        ORDER BY (p.parent_profile_id IS NOT NULL),
+            u.nom COLLATE NOCASE, p.loadout COLLATE NOCASE, p.id
         ",
     )?;
     let profile_rows = stmt.query_map(params![army_id], |row| {
         Ok(TtsFigurineLabel {
-            isc: row.get(0)?,
-            loadout: row.get(1)?,
-            marker_name: row.get(2)?,
-            silhouette_size: row.get(3)?,
-            silhouette_type: row.get(4)?,
+            tts_loadout_id: row.get(0)?,
+            isc: row.get(1)?,
+            loadout: row.get(2)?,
+            marker_name: row.get(3)?,
+            silhouette_size: row.get(4)?,
+            silhouette_type: row.get(5)?,
         })
     })?;
     for row in profile_rows {
         let label = row?;
-        let key = (
-            label.isc.trim().to_ascii_lowercase(),
-            label.loadout.trim().to_ascii_lowercase(),
-        );
-        labels.entry(key).or_insert(label);
-    }
-    let mut stmt = conn.prepare(
-        "
-        SELECT f.isc, f.loadout, f.marker_name, f.silhouette_size, f.silhouette_type
-        FROM tts_profile_forms f
-        JOIN tts_profiles p ON p.id = f.profile_id
-        WHERE (
-            p.army_id = ?1
-            OR EXISTS (
-                SELECT 1 FROM tts_profile_sectorials s
-                WHERE s.profile_id = p.id AND s.army_id = ?1
-            )
-          )
-        ORDER BY f.isc COLLATE NOCASE, f.loadout COLLATE NOCASE, f.id
-        ",
-    )?;
-    let form_rows = stmt.query_map(params![army_id], |row| {
-        Ok(TtsFigurineLabel {
-            isc: row.get(0)?,
-            loadout: row.get(1)?,
-            marker_name: row.get(2)?,
-            silhouette_size: row.get(3)?,
-            silhouette_type: row.get(4)?,
-        })
-    })?;
-    for row in form_rows {
-        let label = row?;
-        let key = (
-            label.isc.trim().to_ascii_lowercase(),
-            label.loadout.trim().to_ascii_lowercase(),
-        );
-        labels.entry(key).or_insert(label);
+        labels.entry(label.tts_loadout_id).or_insert(label);
     }
     let mut rows: Vec<_> = labels.into_values().collect();
     rows.sort_by(|left, right| {
@@ -1598,11 +1630,14 @@ fn get_form(
     let mut stmt = conn.prepare(
         "
         SELECT
-            f.id, f.state_index, f.isc, f.loadout, f.nom_tts, f.description_tts,
-            f.silhouette_size, f.silhouette_type, f.marker_name, f.mesh_url,
-            f.marker_mesh_url, f.profile_id
-        FROM tts_profile_forms f
+            f.id, f.state_index, u.nom, f.loadout, l.nom_tts, l.description_tts,
+            l.silhouette_size, l.silhouette_type, l.marker_name, l.mesh_url,
+            l.marker_mesh_url, f.parent_profile_id, f.tts_loadout_id
+        FROM tts_profiles f
+        JOIN tts_units u ON u.id = f.unit_id
+        JOIN tts_loadouts l ON l.id = f.tts_loadout_id
         WHERE f.id = ?1
+          AND f.parent_profile_id IS NOT NULL
           AND (?2 IS NULL OR f.state_index = ?2)
         ",
     )?;
@@ -1623,9 +1658,10 @@ fn get_form(
             marker_name: row.get(8)?,
             mesh_url: row.get(9)?,
             marker_mesh_url: row.get(10)?,
+            tts_loadout_id: row.get(12)?,
             traits: Vec::new(),
         },
-        row.get(11)?,
+        row.get::<_, i64>(11)?,
     )))
 }
 
@@ -1707,13 +1743,16 @@ fn find_by_army_source(
     let mut stmt = conn.prepare(
         "
         SELECT
-            p.id, p.army_id, p.faction_label, p.isc, p.loadout, p.nom_tts,
-            p.silhouette_size, p.silhouette_type, p.marker_name,
-            (SELECT COUNT(*) FROM tts_profile_forms f WHERE f.profile_id = p.id),
+            p.id, p.army_id, p.faction_label, u.nom, p.loadout, p.tts_loadout_id, l.nom_tts,
+            l.silhouette_size, l.silhouette_type, l.marker_name,
+            (SELECT COUNT(*) FROM tts_profiles c WHERE c.parent_profile_id = p.id),
             0,
             ''
         FROM tts_profiles p
+        JOIN tts_units u ON u.id = p.unit_id
+        JOIN tts_loadouts l ON l.id = p.tts_loadout_id
         WHERE p.source_bag = ?1 AND p.source_index = ?2
+          AND p.parent_profile_id IS NULL
         ORDER BY p.id
         ",
     )?;
@@ -1805,13 +1844,12 @@ fn replace_unit_option_includes(conn: &Connection, includes: &[UnitOptionInclude
 fn marker_mesh_catalog(conn: &Connection) -> Result<BTreeMap<String, String>> {
     let mut stmt = conn.prepare(
         "
-        SELECT marker_name, marker_mesh_url
-        FROM tts_profiles
-        WHERE marker_name IS NOT NULL AND marker_mesh_url IS NOT NULL AND marker_mesh_url != ''
-        UNION ALL
-        SELECT marker_name, marker_mesh_url
-        FROM tts_profile_forms
-        WHERE marker_name IS NOT NULL AND marker_mesh_url IS NOT NULL AND marker_mesh_url != ''
+        SELECT l.marker_name, l.marker_mesh_url
+        FROM tts_profiles p
+        JOIN tts_units u ON u.id = p.unit_id
+        JOIN tts_loadouts l ON l.id = p.tts_loadout_id
+        WHERE l.marker_name IS NOT NULL
+          AND l.marker_mesh_url IS NOT NULL AND l.marker_mesh_url != ''
         ",
     )?;
     let pairs = stmt
@@ -1827,6 +1865,7 @@ fn army_counts(conn: &Connection) -> Result<Vec<TtsProfileArmyCount>> {
         SELECT p.army_id, a.name, a.slug, COUNT(*)
         FROM tts_profiles p
         LEFT JOIN armies a ON a.id = p.army_id
+        WHERE p.parent_profile_id IS NULL
         GROUP BY p.army_id
         ORDER BY a.name COLLATE NOCASE, p.army_id
         ",
@@ -1847,10 +1886,13 @@ fn get_profile(conn: &Connection, id: i64) -> Result<Option<TtsProfileDetail>> {
     let mut stmt = conn.prepare(
         "
         SELECT
-            id, army_id, faction_slug, faction_label, isc, loadout, nom_tts, description_tts,
-            silhouette_size, silhouette_type, marker_name, mesh_url, marker_mesh_url
-        FROM tts_profiles
-        WHERE id = ?1
+            p.id, p.army_id, p.faction_slug, p.faction_label, u.nom, p.loadout,
+            p.tts_loadout_id, l.nom_tts, l.description_tts, l.silhouette_size, l.silhouette_type,
+            l.marker_name, l.mesh_url, l.marker_mesh_url
+        FROM tts_profiles p
+        JOIN tts_units u ON u.id = p.unit_id
+        JOIN tts_loadouts l ON l.id = p.tts_loadout_id
+        WHERE p.id = ?1 AND p.parent_profile_id IS NULL
         ",
     )?;
     let profile = stmt
@@ -1862,29 +1904,23 @@ fn get_profile(conn: &Connection, id: i64) -> Result<Option<TtsProfileDetail>> {
     };
     profile.forms = list_forms(conn, id)?;
     profile.sectorial_ids = list_sectorial_ids(conn, id)?;
-    profile.traits = list_traits(conn, id, None)?;
+    profile.traits = list_traits(conn, id)?;
     for form in &mut profile.forms {
-        form.traits = list_traits(conn, id, Some(form.id))?;
+        form.traits = list_traits(conn, form.id)?;
     }
     Ok(Some(profile))
 }
 
-fn list_traits(
-    conn: &Connection,
-    profile_id: i64,
-    form_id: Option<i64>,
-) -> Result<Vec<TtsProfileTrait>> {
+fn list_traits(conn: &Connection, profile_id: i64) -> Result<Vec<TtsProfileTrait>> {
     let mut stmt = conn.prepare(
         "
         SELECT kind, name, detail
         FROM tts_profile_traits
-        WHERE profile_id = ?1 AND (
-            (?2 IS NULL AND form_id IS NULL) OR form_id = ?2
-        )
+        WHERE profile_id = ?1
         ORDER BY sort_order, id
         ",
     )?;
-    let rows = stmt.query_map(params![profile_id, form_id], |row| {
+    let rows = stmt.query_map(params![profile_id], |row| {
         Ok(TtsProfileTrait {
             kind: row.get(0)?,
             name: row.get(1)?,
@@ -1906,31 +1942,18 @@ fn sectorial_ids_by_isc(conn: &Connection) -> Result<HashMap<String, Vec<i64>>> 
     };
     let mut stmt = conn.prepare(
         "
-        SELECT p.isc, s.army_id
+        SELECT u.nom, s.army_id
         FROM tts_profiles p
-        JOIN tts_profile_sectorials s ON s.profile_id = p.id
+        JOIN tts_units u ON u.id = p.unit_id
+        JOIN tts_loadouts l ON l.id = p.tts_loadout_id
+        JOIN tts_profile_sectorials s ON s.profile_id = COALESCE(p.parent_profile_id, p.id)
+        WHERE p.parent_profile_id IS NULL OR p.state_index = 900
         ",
     )?;
-    let profile_rows = stmt.query_map([], |row| {
+    let rows = stmt.query_map([], |row| {
         Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
     })?;
-    for row in profile_rows {
-        let (isc, army_id) = row?;
-        push(isc, army_id);
-    }
-    let mut stmt = conn.prepare(
-        "
-        SELECT f.isc, s.army_id
-        FROM tts_profile_forms f
-        JOIN tts_profiles p ON p.id = f.profile_id
-        JOIN tts_profile_sectorials s ON s.profile_id = p.id
-        WHERE f.state_index = 900
-        ",
-    )?;
-    let form_rows = stmt.query_map([], |row| {
-        Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
-    })?;
-    for row in form_rows {
+    for row in rows {
         let (isc, army_id) = row?;
         push(isc, army_id);
     }
@@ -1958,11 +1981,13 @@ fn list_forms(conn: &Connection, profile_id: i64) -> Result<Vec<TtsProfileForm>>
     let mut stmt = conn.prepare(
         "
         SELECT
-            id, state_index, isc, loadout, nom_tts, description_tts,
-            silhouette_size, silhouette_type, marker_name, mesh_url, marker_mesh_url
-        FROM tts_profile_forms
-        WHERE profile_id = ?1
-        ORDER BY state_index, id
+            p.id, p.state_index, u.nom, p.loadout, p.tts_loadout_id, l.nom_tts, l.description_tts,
+            l.silhouette_size, l.silhouette_type, l.marker_name, l.mesh_url, l.marker_mesh_url
+        FROM tts_profiles p
+        JOIN tts_units u ON u.id = p.unit_id
+        JOIN tts_loadouts l ON l.id = p.tts_loadout_id
+        WHERE p.parent_profile_id = ?1
+        ORDER BY p.state_index, p.id
         ",
     )?;
     let rows = stmt.query_map(params![profile_id], |row| {
@@ -1971,13 +1996,14 @@ fn list_forms(conn: &Connection, profile_id: i64) -> Result<Vec<TtsProfileForm>>
             state_index: row.get(1)?,
             isc: row.get(2)?,
             loadout: row.get(3)?,
-            nom_tts: row.get(4)?,
-            description_tts: row.get(5)?,
-            silhouette_size: row.get(6)?,
-            silhouette_type: row.get(7)?,
-            marker_name: row.get(8)?,
-            mesh_url: row.get(9)?,
-            marker_mesh_url: row.get(10)?,
+            tts_loadout_id: row.get(4)?,
+            nom_tts: row.get(5)?,
+            description_tts: row.get(6)?,
+            silhouette_size: row.get(7)?,
+            silhouette_type: row.get(8)?,
+            marker_name: row.get(9)?,
+            mesh_url: row.get(10)?,
+            marker_mesh_url: row.get(11)?,
             traits: Vec::new(),
         })
     })?;
@@ -2006,30 +2032,29 @@ fn update_profile(conn: &Connection, id: i64, update: &ProfileUpdate) -> Result<
         "
         UPDATE tts_profiles
         SET army_id = ?2,
-            isc = ?3,
-            loadout = ?4,
-            nom_tts = ?5,
-            description_tts = ?6,
-            silhouette_size = ?7,
-            silhouette_type = ?8,
-            marker_name = ?9
-        WHERE id = ?1
+            loadout = ?3
+        WHERE id = ?1 AND parent_profile_id IS NULL
         ",
-        params![
-            id,
-            update.army_id,
-            isc,
-            loadout,
-            nom_tts,
-            description,
-            blank(update.silhouette_size.as_deref()),
-            silhouette_type,
-            blank(update.marker_name.as_deref()),
-        ],
+        params![id, update.army_id, loadout],
     )?;
     if changed == 0 {
         bail!("profil introuvable");
     }
+    update_unit_and_loadout(
+        &tx,
+        id,
+        &isc,
+        &nom_tts,
+        &description,
+        blank(update.silhouette_size.as_deref()),
+        silhouette_type,
+        blank(update.marker_name.as_deref()),
+    )?;
+    // Les formes héritent de la sectorielle du profil parent.
+    tx.execute(
+        "UPDATE tts_profiles SET army_id = ?2 WHERE parent_profile_id = ?1",
+        params![id, update.army_id],
+    )?;
     for form in &update.forms {
         let form_isc = require_text(&form.isc, "Nom de la forme", 255)?;
         let form_nom = require_text(&form.nom_tts, "nom TTS de la forme", 500)?;
@@ -2042,35 +2067,91 @@ fn update_profile(conn: &Connection, id: i64, update: &ProfileUpdate) -> Result<
         let form_size = at_least_sapper_size(&form_nom, blank(form.silhouette_size.as_deref()));
         let changed = tx.execute(
             "
-            UPDATE tts_profile_forms
-            SET isc = ?3,
-                loadout = ?4,
-                nom_tts = ?5,
-                description_tts = ?6,
-                silhouette_size = ?7,
-                silhouette_type = ?8,
-                marker_name = ?9
-            WHERE id = ?1 AND profile_id = ?2
+            UPDATE tts_profiles
+            SET loadout = ?3
+            WHERE id = ?1 AND parent_profile_id = ?2
             ",
             params![
                 form.id,
                 id,
-                form_isc,
                 bounded_text(&form.loadout, "loadout de la forme", 500)?,
-                form_nom,
-                form_description,
-                form_size,
-                form_kind,
-                blank(form.marker_name.as_deref()),
             ],
         )?;
         if changed == 0 {
             bail!("forme transformée introuvable");
         }
+        update_unit_and_loadout(
+            &tx,
+            form.id,
+            &form_isc,
+            &form_nom,
+            &form_description,
+            form_size,
+            form_kind,
+            blank(form.marker_name.as_deref()),
+        )?;
     }
     replace_sectorials(&tx, id, &update.sectorial_ids)?;
     tx.commit()?;
     get_profile(conn, id)?.context("profil introuvable après mise à jour")
+}
+
+/// Met à jour l'unité (ISC) et le loadout TTS d'un profil (parent ou enfant).
+///
+/// Une unité est partagée entre plusieurs profils : renommer l'ISC rattache ce profil
+/// à l'unité du nouveau nom (créée au besoin) sans toucher aux autres profils.
+#[allow(clippy::too_many_arguments)]
+fn update_unit_and_loadout(
+    conn: &Connection,
+    profile_id: i64,
+    isc: &str,
+    nom_tts: &str,
+    description_tts: &str,
+    silhouette_size: Option<String>,
+    silhouette_type: &str,
+    marker_name: Option<String>,
+) -> Result<()> {
+    let (unit_id, loadout_id, current_nom): (i64, i64, String) = conn
+        .query_row(
+            "
+            SELECT p.unit_id, p.tts_loadout_id, u.nom
+            FROM tts_profiles p
+            JOIN tts_units u ON u.id = p.unit_id
+            WHERE p.id = ?1
+            ",
+            params![profile_id],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        )
+        .context("profil introuvable")?;
+    if current_nom != isc {
+        let new_unit = get_or_create_unit(conn, isc)?;
+        if new_unit != unit_id {
+            conn.execute(
+                "UPDATE tts_profiles SET unit_id = ?2 WHERE id = ?1",
+                params![profile_id, new_unit],
+            )?;
+        }
+    }
+    conn.execute(
+        "
+        UPDATE tts_loadouts
+        SET nom_tts = ?2,
+            description_tts = ?3,
+            silhouette_size = ?4,
+            silhouette_type = ?5,
+            marker_name = ?6
+        WHERE id = ?1
+        ",
+        params![
+            loadout_id,
+            nom_tts,
+            description_tts,
+            silhouette_size,
+            silhouette_type,
+            marker_name,
+        ],
+    )?;
+    Ok(())
 }
 
 fn map_summary(row: &rusqlite::Row<'_>) -> rusqlite::Result<TtsProfileSummary> {
@@ -2080,12 +2161,13 @@ fn map_summary(row: &rusqlite::Row<'_>) -> rusqlite::Result<TtsProfileSummary> {
         faction_label: row.get(2)?,
         isc: row.get(3)?,
         loadout: row.get(4)?,
-        nom_tts: row.get(5)?,
-        silhouette_size: row.get(6)?,
-        silhouette_type: row.get(7)?,
-        marker_name: row.get(8)?,
-        form_count: row.get(9)?,
-        linked: row.get::<_, i64>(10)? != 0,
+        tts_loadout_id: row.get(5)?,
+        nom_tts: row.get(6)?,
+        silhouette_size: row.get(7)?,
+        silhouette_type: row.get(8)?,
+        marker_name: row.get(9)?,
+        form_count: row.get(10)?,
+        linked: row.get::<_, i64>(11)? != 0,
         differences: String::new(),
     })
 }
@@ -2098,13 +2180,14 @@ fn map_detail_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<TtsProfileDetail>
         faction_label: row.get(3)?,
         isc: row.get(4)?,
         loadout: row.get(5)?,
-        nom_tts: row.get(6)?,
-        description_tts: row.get(7)?,
-        silhouette_size: row.get(8)?,
-        silhouette_type: row.get(9)?,
-        marker_name: row.get(10)?,
-        mesh_url: row.get(11)?,
-        marker_mesh_url: row.get(12)?,
+        tts_loadout_id: row.get(6)?,
+        nom_tts: row.get(7)?,
+        description_tts: row.get(8)?,
+        silhouette_size: row.get(9)?,
+        silhouette_type: row.get(10)?,
+        marker_name: row.get(11)?,
+        mesh_url: row.get(12)?,
+        marker_mesh_url: row.get(13)?,
         forms: Vec::new(),
         sectorial_ids: Vec::new(),
         traits: Vec::new(),
@@ -2183,6 +2266,79 @@ fn army_id_for_slug(conn: &Connection, slug: &str) -> Result<Option<i64>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// `armies` doit exister avant `migrate` (FK des tables TTS reconstruites).
+    fn test_conn() -> Connection {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "
+            CREATE TABLE IF NOT EXISTS armies (
+                id INTEGER PRIMARY KEY,
+                parent_id INTEGER NOT NULL,
+                name TEXT NOT NULL,
+                slug TEXT NOT NULL,
+                logo_url TEXT NOT NULL,
+                discontinued INTEGER NOT NULL DEFAULT 0,
+                short_name TEXT,
+                synced_at INTEGER NOT NULL
+            );
+            ",
+        )
+        .unwrap();
+        migrate(&conn).unwrap();
+        conn
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn insert_profile(
+        conn: &Connection,
+        army_id: Option<i64>,
+        faction_label: &str,
+        isc: &str,
+        loadout: &str,
+        nom_tts: &str,
+        description: &str,
+        silhouette_size: Option<&str>,
+        silhouette_type: Option<&str>,
+        marker_name: Option<&str>,
+        marker_mesh_url: Option<&str>,
+        source_bag: &str,
+        source_index: i64,
+        parent_profile_id: Option<i64>,
+        state_index: i64,
+    ) -> i64 {
+        let unit_id = get_or_create_unit(conn, isc).unwrap();
+        let loadout_id = insert_loadout(
+            conn,
+            nom_tts,
+            description,
+            silhouette_size,
+            silhouette_type,
+            marker_name,
+            None,
+            marker_mesh_url,
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO tts_profiles (
+                army_id, faction_label, unit_id, tts_loadout_id, parent_profile_id,
+                state_index, loadout, source_bag, source_index
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+            params![
+                army_id,
+                faction_label,
+                unit_id,
+                loadout_id,
+                parent_profile_id,
+                state_index,
+                loadout,
+                source_bag,
+                source_index
+            ],
+        )
+        .unwrap();
+        conn.last_insert_rowid()
+    }
 
     #[test]
     fn splits_colored_nickname_into_isc_and_loadout() {
@@ -2491,8 +2647,7 @@ mod tests {
 
     #[test]
     fn lists_a_sectorial_with_its_faction_catalog_and_updates() {
-        let conn = Connection::open_in_memory().unwrap();
-        migrate(&conn).unwrap();
+        let conn = test_conn();
         conn.execute_batch(
             "
             CREATE TABLE IF NOT EXISTS armies (
@@ -2518,21 +2673,57 @@ mod tests {
             [],
         )
         .unwrap();
-        conn.execute(
-            "INSERT INTO tts_profiles (army_id, faction_label, isc, loadout, nom_tts, description_tts, source_bag, source_index) VALUES (101, 'PanOceania', 'FUSILIER', 'Combi', 'FUSILIER', 'desc', 'bag', 0)",
-            [],
-        )
-        .unwrap();
-        conn.execute(
-            "INSERT INTO tts_profiles (army_id, faction_label, isc, loadout, nom_tts, description_tts, source_bag, source_index) VALUES (103, 'PanOceania', 'MAGISTER', 'HMG', 'MAGISTER', 'desc', 'bag', 1)",
-            [],
-        )
-        .unwrap();
-        conn.execute(
-            "INSERT INTO tts_profile_forms (profile_id, state_index, isc, nom_tts) VALUES (1, 3, 'DOG', 'DOG')",
-            [],
-        )
-        .unwrap();
+        let fusilier = insert_profile(
+            &conn,
+            Some(101),
+            "PanOceania",
+            "FUSILIER",
+            "Combi",
+            "FUSILIER",
+            "desc",
+            None,
+            None,
+            None,
+            None,
+            "bag",
+            0,
+            None,
+            0,
+        );
+        insert_profile(
+            &conn,
+            Some(103),
+            "PanOceania",
+            "MAGISTER",
+            "HMG",
+            "MAGISTER",
+            "desc",
+            None,
+            None,
+            None,
+            None,
+            "bag",
+            1,
+            None,
+            0,
+        );
+        let dog = insert_profile(
+            &conn,
+            Some(101),
+            "PanOceania",
+            "DOG",
+            "",
+            "DOG",
+            "",
+            None,
+            None,
+            None,
+            None,
+            "",
+            0,
+            Some(fusilier),
+            3,
+        );
 
         let shared = list_profiles(
             &conn,
@@ -2560,7 +2751,7 @@ mod tests {
 
         let updated = update_profile(
             &conn,
-            1,
+            fusilier,
             &ProfileUpdate {
                 army_id: Some(103),
                 isc: "FUSILIER".into(),
@@ -2570,7 +2761,7 @@ mod tests {
                 silhouette_size: Some("2".into()),
                 marker_name: None,
                 forms: vec![ProfileFormUpdate {
-                    id: 1,
+                    id: dog,
                     isc: "WARRIOR".into(),
                     loadout: String::new(),
                     nom_tts: "Warrior (sapper)".into(),
@@ -2608,8 +2799,7 @@ mod tests {
 
     #[test]
     fn reports_description_subtleties_for_the_same_loadout() {
-        let conn = Connection::open_in_memory().unwrap();
-        migrate(&conn).unwrap();
+        let conn = test_conn();
         conn.execute_batch(
             "
             CREATE TABLE IF NOT EXISTS armies (
@@ -2627,16 +2817,40 @@ mod tests {
             ",
         )
         .unwrap();
-        conn.execute(
-            "INSERT INTO tts_profiles (army_id, faction_label, isc, loadout, nom_tts, description_tts, source_bag, source_index) VALUES (101, 'Aleph', 'THYREOS', 'SMG', 'THYREOS', 'Skills ● Camouflage ● Mimetism(-3)', 'bag', 0)",
-            [],
-        )
-        .unwrap();
-        conn.execute(
-            "INSERT INTO tts_profiles (army_id, faction_label, isc, loadout, nom_tts, description_tts, source_bag, source_index) VALUES (101, 'Aleph', 'THYREOS', 'SMG', 'THYREOS', 'Skills ● Camouflage ● Mimetism(-3) ● Minelayer', 'bag', 1)",
-            [],
-        )
-        .unwrap();
+        insert_profile(
+            &conn,
+            Some(101),
+            "Aleph",
+            "THYREOS",
+            "SMG",
+            "THYREOS",
+            "Skills ● Camouflage ● Mimetism(-3)",
+            None,
+            None,
+            None,
+            None,
+            "bag",
+            0,
+            None,
+            0,
+        );
+        insert_profile(
+            &conn,
+            Some(101),
+            "Aleph",
+            "THYREOS",
+            "SMG",
+            "THYREOS",
+            "Skills ● Camouflage ● Mimetism(-3) ● Minelayer",
+            None,
+            None,
+            None,
+            None,
+            "bag",
+            1,
+            None,
+            0,
+        );
         let listed = list_profiles(
             &conn,
             &ProfileListQuery {
@@ -2661,8 +2875,7 @@ mod tests {
 
     #[test]
     fn lists_loadouts_of_one_isc_and_the_usual_silhouette_mesh() {
-        let conn = Connection::open_in_memory().unwrap();
-        migrate(&conn).unwrap();
+        let conn = test_conn();
         conn.execute_batch(
             "
             CREATE TABLE IF NOT EXISTS armies (
@@ -2678,43 +2891,107 @@ mod tests {
             ",
         )
         .unwrap();
-        conn.execute(
-            "INSERT INTO tts_profiles (faction_label, isc, loadout, nom_tts, description_tts, silhouette_size, silhouette_type, marker_name, marker_mesh_url, source_bag, source_index) VALUES ('Haqqislam', 'YUAN YUAN', 'DA', 'YUAN', 'Skills ● Booty', '2', 'normale', 'Silhouette 2', 'https://example.test/rare.obj', 'bag', 0)",
-            [],
-        )
-        .unwrap();
-        let yuan_id = conn.last_insert_rowid();
-        conn.execute(
-            "INSERT INTO tts_profiles (faction_label, isc, loadout, nom_tts, description_tts, silhouette_size, silhouette_type, marker_name, marker_mesh_url, source_bag, source_index) VALUES ('Haqqislam', 'YUAN YUAN', 'DA', 'YUAN', 'Skills ● Booty ● Mimetism(-3)', '2', 'camo-3', 'Camouflage (-3) S2', 'https://example.test/s2.obj', 'bag', 1)",
-            [],
-        )
-        .unwrap();
-        conn.execute(
-            "INSERT INTO tts_profiles (faction_label, isc, loadout, nom_tts, description_tts, marker_name, marker_mesh_url, source_bag, source_index) VALUES ('PanOceania', 'FUSILIER', 'Combi', 'FUSILIER', '', 'Silhouette 2', 'https://example.test/s2.obj', 'bag', 2)",
-            [],
-        )
-        .unwrap();
-        conn.execute(
-            "INSERT INTO tts_profiles (faction_label, isc, loadout, nom_tts, description_tts, marker_name, marker_mesh_url, source_bag, source_index) VALUES ('PanOceania', 'FUSILIER', 'HMG', 'FUSILIER', '', 'Silhouette 2', 'https://example.test/s2.obj', 'bag', 3)",
-            [],
-        )
-        .unwrap();
-        assert_eq!(
-            conn.execute(
-                "INSERT INTO tts_profile_forms (profile_id, state_index, isc, loadout, nom_tts, description_tts, marker_name) VALUES (?1, 900, 'STALDRON', 'STALDRON', 'STALDRON', '', 'Silhouette 1')",
-                params![yuan_id],
-            )
-            .unwrap(),
-            1
+        let yuan_id = insert_profile(
+            &conn,
+            None,
+            "Haqqislam",
+            "YUAN YUAN",
+            "DA",
+            "YUAN",
+            "Skills ● Booty",
+            Some("2"),
+            Some("normale"),
+            Some("Silhouette 2"),
+            Some("https://example.test/rare.obj"),
+            "bag",
+            0,
+            None,
+            0,
         );
-        let staldrone_id = conn.last_insert_rowid();
-        assert_eq!(
-            conn.execute(
-                "INSERT INTO tts_profile_forms (profile_id, state_index, isc, nom_tts, marker_name, marker_mesh_url) VALUES (?1, 1, 'DOG', 'DOG', 'Silhouette 6', 'https://example.test/s6.obj')",
-                params![yuan_id],
-            )
-            .unwrap(),
-            1
+        insert_profile(
+            &conn,
+            None,
+            "Haqqislam",
+            "YUAN YUAN",
+            "DA",
+            "YUAN",
+            "Skills ● Booty ● Mimetism(-3)",
+            Some("2"),
+            Some("camo-3"),
+            Some("Camouflage (-3) S2"),
+            Some("https://example.test/s2.obj"),
+            "bag",
+            1,
+            None,
+            0,
+        );
+        insert_profile(
+            &conn,
+            None,
+            "PanOceania",
+            "FUSILIER",
+            "Combi",
+            "FUSILIER",
+            "",
+            None,
+            None,
+            Some("Silhouette 2"),
+            Some("https://example.test/s2.obj"),
+            "bag",
+            2,
+            None,
+            0,
+        );
+        insert_profile(
+            &conn,
+            None,
+            "PanOceania",
+            "FUSILIER",
+            "HMG",
+            "FUSILIER",
+            "",
+            None,
+            None,
+            Some("Silhouette 2"),
+            Some("https://example.test/s2.obj"),
+            "bag",
+            3,
+            None,
+            0,
+        );
+        let staldrone_id = insert_profile(
+            &conn,
+            None,
+            "Haqqislam",
+            "STALDRON",
+            "STALDRON",
+            "STALDRON",
+            "",
+            None,
+            None,
+            Some("Silhouette 1"),
+            None,
+            "",
+            0,
+            Some(yuan_id),
+            900,
+        );
+        insert_profile(
+            &conn,
+            None,
+            "Haqqislam",
+            "DOG",
+            "",
+            "DOG",
+            "",
+            None,
+            None,
+            Some("Silhouette 6"),
+            Some("https://example.test/s6.obj"),
+            "",
+            0,
+            Some(yuan_id),
+            1,
         );
 
         let loadouts = list_loadouts(&conn, "yuan yuan", None).unwrap();
@@ -2744,8 +3021,7 @@ mod tests {
 
     #[test]
     fn loadouts_stay_inside_the_chosen_sectorial() {
-        let conn = Connection::open_in_memory().unwrap();
-        migrate(&conn).unwrap();
+        let conn = test_conn();
         conn.execute_batch(
             "
             CREATE TABLE IF NOT EXISTS armies (
@@ -2770,17 +3046,40 @@ mod tests {
             ",
         )
         .unwrap();
-        conn.execute(
-            "INSERT INTO tts_profiles (army_id, faction_label, isc, loadout, nom_tts, source_bag, source_index) VALUES (401, 'Haqqislam', 'YUAN YUAN', 'DA', 'YUAN', 'bag', 0)",
-            [],
-        )
-        .unwrap();
-        let haqq_id = conn.last_insert_rowid();
-        conn.execute(
-            "INSERT INTO tts_profiles (army_id, faction_label, isc, loadout, nom_tts, source_bag, source_index) VALUES (101, 'PanOceania', 'YUAN YUAN', 'HMG', 'YUAN', 'bag', 1)",
-            [],
-        )
-        .unwrap();
+        let haqq_id = insert_profile(
+            &conn,
+            Some(401),
+            "Haqqislam",
+            "YUAN YUAN",
+            "DA",
+            "YUAN",
+            "",
+            None,
+            None,
+            None,
+            None,
+            "bag",
+            0,
+            None,
+            0,
+        );
+        insert_profile(
+            &conn,
+            Some(101),
+            "PanOceania",
+            "YUAN YUAN",
+            "HMG",
+            "YUAN",
+            "",
+            None,
+            None,
+            None,
+            None,
+            "bag",
+            1,
+            None,
+            0,
+        );
         conn.execute(
             "INSERT INTO tts_profile_sectorials (profile_id, army_id) VALUES (?1, 402)",
             params![haqq_id],

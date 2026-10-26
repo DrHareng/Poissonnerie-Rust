@@ -585,6 +585,7 @@ export interface TtsMapVariant {
 
 export interface TtsProfileSummary {
   id: number
+  tts_loadout_id: number
   army_id: number | null
   faction_label: string
   nom: string
@@ -600,6 +601,7 @@ export interface TtsProfileSummary {
 
 export interface TtsProfileForm {
   id: number
+  tts_loadout_id: number
   state_index: number
   nom: string
   loadout: string
@@ -621,6 +623,7 @@ export interface TtsProfileTrait {
 
 export interface TtsProfileDetail {
   id: number
+  tts_loadout_id: number
   army_id: number | null
   faction_slug: string | null
   faction_label: string
@@ -640,6 +643,8 @@ export interface TtsProfileDetail {
 
 export interface TtsFigurine {
   id: number
+  /** null = figurine orpheline (non liée au catalogue). */
+  tts_loadout_id: number | null
   nom: string
   loadout: string
   painter: string
@@ -663,14 +668,17 @@ export interface TtsFigurineMeta {
 }
 
 export interface TtsFigurineWrite {
-  nom: string
-  loadout: string
+  tts_loadout_id?: number | null
+  /** Requis seulement si orpheline (sans tts_loadout_id). */
+  nom?: string
+  loadout?: string
   painter: string
   asset_bundle_url: string
 }
 
 /** Figurine mémorisée pour une paire nom + loadout (utilisateur connecté). */
 export interface TtsFigurinePickPref {
+  tts_loadout_id: number
   nom: string
   loadout: string
   figurine_id: number
@@ -690,6 +698,7 @@ export interface TtsFigurineLoadout {
 }
 
 export interface TtsFigurineLabel {
+  tts_loadout_id: number
   nom: string
   loadout: string
   marker_name: string | null
@@ -698,6 +707,7 @@ export interface TtsFigurineLabel {
 }
 
 export interface TtsProfileLabel {
+  tts_loadout_id: number
   nom: string
   loadout: string
 }

@@ -108,12 +108,14 @@ fn plan_and_maybe_apply(conn: &Connection, apply: bool) -> Result<FigurineIscFix
         let tx = conn.unchecked_transaction()?;
         for fix in &report.fixes {
             tx.execute(
-                "UPDATE tts_figurines SET isc = ?1, updated_at = ?2 WHERE id = ?3",
+                "UPDATE tts_figurines SET isc = ?1, legacy_nom = ?1, updated_at = ?2 WHERE id = ?3",
                 params![fix.to_isc, now_unix(), fix.id],
             )?;
             report.applied += 1;
         }
         tx.commit()?;
+        // Best-effort : relie les figurines corrigées aux loadouts TTS.
+        let _ = crate::tts_reattach::reattach_figurines_to_loadouts(conn);
     }
 
     Ok(report)
@@ -136,10 +138,12 @@ struct FigurineRow {
 fn load_transmute_forms(conn: &Connection) -> Result<Vec<TransmuteForm>> {
     let mut stmt = conn.prepare(
         "
-        SELECT isc, loadout
-        FROM tts_profile_forms
-        WHERE state_index != 900 AND state_index != 1000
-        ORDER BY id
+        SELECT u.nom, p.loadout
+        FROM tts_profiles p
+        JOIN tts_units u ON u.id = p.unit_id
+        WHERE p.parent_profile_id IS NOT NULL
+          AND p.state_index != 900 AND p.state_index != 1000
+        ORDER BY p.id
         ",
     )?;
     let rows = stmt
@@ -178,11 +182,8 @@ fn load_figurines(conn: &Connection) -> Result<Vec<FigurineRow>> {
 
 fn load_known_iscs(conn: &Connection) -> Result<BTreeSet<String>> {
     let mut known = BTreeSet::new();
-    let mut stmt = conn.prepare("SELECT isc FROM tts_profiles")?;
-    for row in stmt.query_map([], |row| row.get::<_, String>(0))? {
-        known.insert(row?.trim().to_ascii_lowercase());
-    }
-    let mut stmt = conn.prepare("SELECT isc FROM tts_profile_forms")?;
+    // Unités des profils parents et des formes (profils enfants).
+    let mut stmt = conn.prepare("SELECT nom FROM tts_units")?;
     for row in stmt.query_map([], |row| row.get::<_, String>(0))? {
         known.insert(row?.trim().to_ascii_lowercase());
     }
@@ -294,25 +295,48 @@ mod tests {
             ",
         )
         .unwrap();
-        let insert_profile = |conn: &Connection, isc: &str, loadout: &str, bag: &str| -> i64 {
+        // Profil (parent si `parent_id` est None, sinon forme = profil enfant) + unité + loadout TTS.
+        let insert_row = |conn: &Connection,
+                          isc: &str,
+                          loadout: &str,
+                          bag: &str,
+                          parent_id: Option<i64>|
+         -> i64 {
+            conn.execute("INSERT OR IGNORE INTO tts_units (nom) VALUES (?1)", params![isc])
+                .unwrap();
+            let unit_id: i64 = conn
+                .query_row("SELECT id FROM tts_units WHERE nom = ?1", params![isc], |row| {
+                    row.get(0)
+                })
+                .unwrap();
+            conn.execute(
+                "INSERT INTO tts_loadouts (nom_tts, description_tts) VALUES ('X', '')",
+                [],
+            )
+            .unwrap();
+            let loadout_id = conn.last_insert_rowid();
             conn.execute(
                 "INSERT INTO tts_profiles (
-                    faction_label, isc, loadout, nom_tts, description_tts,
-                    source_bag, source_index
-                 ) VALUES ('Test', ?1, ?2, 'X', '', ?3, 1)",
-                params![isc, loadout, bag],
+                    faction_label, unit_id, tts_loadout_id, parent_profile_id,
+                    state_index, loadout, source_bag, source_index
+                 ) VALUES ('Test', ?1, ?2, ?3, ?4, ?5, ?6, 1)",
+                params![
+                    unit_id,
+                    loadout_id,
+                    parent_id,
+                    i64::from(parent_id.is_some()),
+                    loadout,
+                    bag
+                ],
             )
             .unwrap();
             conn.last_insert_rowid()
         };
+        let insert_profile = |conn: &Connection, isc: &str, loadout: &str, bag: &str| -> i64 {
+            insert_row(conn, isc, loadout, bag, None)
+        };
         let insert_form = |conn: &Connection, profile_id: i64, isc: &str, loadout: &str| {
-            conn.execute(
-                "INSERT INTO tts_profile_forms (
-                    profile_id, state_index, isc, loadout, nom_tts, description_tts
-                 ) VALUES (?1, 1, ?2, ?3, '', '')",
-                params![profile_id, isc, loadout],
-            )
-            .unwrap();
+            insert_row(conn, isc, loadout, "", Some(profile_id));
         };
 
         let dog_id = insert_profile(&conn, "Dog-Warriors", "Chain Rifle", "army:1:1");
@@ -347,8 +371,10 @@ mod tests {
     fn insert_fig(conn: &Connection, isc: &str, loadout: &str) -> i64 {
         let now = 1_i64;
         conn.execute(
-            "INSERT INTO tts_figurines (isc, loadout, painter, asset_bundle_url, created_at, updated_at)
-             VALUES (?1, ?2, 'Alex', 'https://example.test/a', ?3, ?3)",
+            "INSERT INTO tts_figurines (
+                isc, loadout, legacy_nom, legacy_loadout, painter, asset_bundle_url,
+                created_at, updated_at
+             ) VALUES (?1, ?2, ?1, ?2, 'Alex', 'https://example.test/a', ?3, ?3)",
             params![isc, loadout, now],
         )
         .unwrap();

@@ -393,6 +393,8 @@ fn expand_profile_slot(
             all_figurines,
             &profile.isc,
             &profile.loadout,
+            profile.tts_loadout_id,
+            None,
             sectorial_iscs,
             preferred_painter,
         ),
@@ -431,6 +433,8 @@ fn expand_profile_slot(
                     all_figurines,
                     &form.isc,
                     &form.loadout,
+                    form.tts_loadout_id,
+                    None,
                     sectorial_iscs,
                     preferred_painter,
                 );
@@ -556,6 +560,7 @@ fn summary_from_peripheral(
         faction_label: parent.faction_label.clone(),
         isc: form.isc.clone(),
         loadout: form.loadout.clone(),
+        tts_loadout_id: form.tts_loadout_id,
         nom_tts: form.nom_tts.clone(),
         silhouette_size: form.silhouette_size.clone(),
         silhouette_type: form.silhouette_type.clone(),
@@ -570,6 +575,8 @@ fn rank_figurines(
     all: &[TtsFigurine],
     isc: &str,
     loadout: &str,
+    tts_loadout_id: i64,
+    fallback_loadout_id: Option<i64>,
     sectorial_iscs: &HashSet<String>,
     preferred_painter: Option<&str>,
 ) -> Vec<RankedFigurine> {
@@ -577,12 +584,33 @@ fn rank_figurines(
     let loadout_key = loadout.trim().to_ascii_lowercase();
     let in_sectorial = sectorial_iscs.contains(&isc_key);
 
-    let mut ranked: Vec<RankedFigurine> = all
+    let by_id: Vec<&TtsFigurine> = all
         .iter()
-        .filter(|figurine| figurine.isc.trim().eq_ignore_ascii_case(isc))
+        .filter(|figurine| figurine.tts_loadout_id == Some(tts_loadout_id))
+        .collect();
+    let by_fallback: Vec<&TtsFigurine> = fallback_loadout_id
+        .map(|fallback| {
+            all.iter()
+                .filter(|figurine| figurine.tts_loadout_id == Some(fallback))
+                .collect()
+        })
+        .unwrap_or_default();
+    let pool: Vec<&TtsFigurine> = if !by_id.is_empty() {
+        by_id
+    } else if !by_fallback.is_empty() {
+        by_fallback
+    } else {
+        all.iter()
+            .filter(|figurine| figurine.isc.trim().eq_ignore_ascii_case(isc))
+            .collect()
+    };
+
+    let mut ranked: Vec<RankedFigurine> = pool
+        .into_iter()
         .map(|figurine| {
-            let exact_loadout =
-                !loadout_key.is_empty() && figurine.loadout.trim().eq_ignore_ascii_case(loadout);
+            let exact_loadout = figurine.tts_loadout_id == Some(tts_loadout_id)
+                || (!loadout_key.is_empty()
+                    && figurine.loadout.trim().eq_ignore_ascii_case(loadout));
             let painter_match = preferred_painter
                 .is_some_and(|painter| figurine.painter.trim().eq_ignore_ascii_case(painter));
             let mut score = 0;
@@ -632,8 +660,16 @@ fn form_asset_bundles_from_profile(
         .iter()
         .filter(|form| form.state_index != PERIPHERAL_STATE_INDEX)
     {
-        if let Some(url) = tts_figurine::best_asset_bundle(
+        let fallback = tts_figurine::parent_fallback_loadout_id(
+            form.state_index,
+            form.silhouette_size.as_deref(),
+            profile.tts_loadout_id,
+            profile.silhouette_size.as_deref(),
+        );
+        if let Some(url) = tts_figurine::best_asset_bundle_for_form(
             figurines,
+            form.tts_loadout_id,
+            fallback,
             &form.isc,
             &form.loadout,
             preferred_painter,

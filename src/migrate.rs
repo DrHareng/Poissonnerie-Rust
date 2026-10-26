@@ -1,6 +1,6 @@
 use anyhow::Result;
 use rusqlite::types::ValueRef;
-use rusqlite::{Connection, Row};
+use rusqlite::{Connection, OptionalExtension, Row};
 
 pub fn migrate(conn: &Connection) -> Result<()> {
     conn.execute_batch(
@@ -296,6 +296,7 @@ pub fn migrate(conn: &Connection) -> Result<()> {
     migrate_tts_maps(conn)?;
     migrate_tts_profiles(conn)?;
     migrate_tts_figurines(conn)?;
+    migrate_tts_units_loadouts_split(conn)?;
     migrate_content_updates(conn)?;
 
     if column_exists(conn, "matches", "tournament_id")?
@@ -1104,6 +1105,29 @@ fn migrate_site_content(conn: &Connection) -> Result<()> {
 }
 
 fn migrate_tts_profiles(conn: &Connection) -> Result<()> {
+    // Schéma déjà découpé (unités / loadouts) : ne pas recréer les index sur `isc`.
+    if column_exists(conn, "tts_profiles", "tts_loadout_id")? {
+        conn.execute_batch(
+            "
+            CREATE INDEX IF NOT EXISTS idx_tts_profiles_unit
+                ON tts_profiles(unit_id);
+            CREATE INDEX IF NOT EXISTS idx_tts_profiles_loadout
+                ON tts_profiles(tts_loadout_id);
+            CREATE INDEX IF NOT EXISTS idx_tts_profiles_parent
+                ON tts_profiles(parent_profile_id, state_index);
+            CREATE INDEX IF NOT EXISTS idx_tts_profiles_source
+                ON tts_profiles(source_bag, source_index);
+            CREATE INDEX IF NOT EXISTS idx_tts_profile_sectorials_army
+                ON tts_profile_sectorials(army_id);
+            CREATE INDEX IF NOT EXISTS idx_tts_profile_traits_profile
+                ON tts_profile_traits(profile_id, sort_order);
+            CREATE INDEX IF NOT EXISTS idx_tts_army_unit_includes_lookup
+                ON tts_army_unit_includes(unit_id, unit_option_id);
+            ",
+        )?;
+        return Ok(());
+    }
+
     conn.execute_batch(
         "
         CREATE TABLE IF NOT EXISTS tts_profiles (
@@ -1147,7 +1171,7 @@ fn migrate_tts_profiles(conn: &Connection) -> Result<()> {
 
         CREATE TABLE IF NOT EXISTS tts_profile_sectorials (
             profile_id INTEGER NOT NULL REFERENCES tts_profiles(id) ON DELETE CASCADE,
-            army_id INTEGER NOT NULL REFERENCES armies(id),
+            army_id INTEGER NOT NULL,
             PRIMARY KEY (profile_id, army_id)
         );
         CREATE INDEX IF NOT EXISTS idx_tts_profile_sectorials_army
@@ -1246,6 +1270,505 @@ fn migrate_tts_figurines(conn: &Connection) -> Result<()> {
             ON tts_figurine_pick_prefs(figurine_id);
         ",
     )?;
+    Ok(())
+}
+
+/// Unités + loadouts TTS + formes en profils enfants + FK figurines.
+fn migrate_tts_units_loadouts_split(conn: &Connection) -> Result<()> {
+    if column_exists(conn, "tts_profiles", "tts_loadout_id")?
+        && table_has_rows_or_exists(conn, "tts_units")?
+    {
+        // Déjà migré : s'assurer que les index / prefs / reattach sont à jour.
+        ensure_figurine_loadout_columns(conn)?;
+        rebuild_pick_prefs_if_needed(conn)?;
+        let _ = crate::tts_reattach::reattach_figurines_to_loadouts(conn);
+        return Ok(());
+    }
+
+    conn.execute_batch(
+        "
+        CREATE TABLE IF NOT EXISTS tts_units (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            nom TEXT NOT NULL UNIQUE
+        );
+        CREATE INDEX IF NOT EXISTS idx_tts_units_nom
+            ON tts_units(nom);
+
+        CREATE TABLE IF NOT EXISTS tts_loadouts (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            nom_tts TEXT NOT NULL,
+            description_tts TEXT NOT NULL DEFAULT '',
+            silhouette_size TEXT,
+            silhouette_type TEXT,
+            marker_name TEXT,
+            mesh_url TEXT,
+            marker_mesh_url TEXT
+        );
+        ",
+    )?;
+
+    // Backfill depuis l'ancien schéma plat (profils + forms).
+    if column_exists(conn, "tts_profiles", "isc")?
+        && column_exists(conn, "tts_profiles", "nom_tts")?
+        && !column_exists(conn, "tts_profiles", "tts_loadout_id")?
+    {
+        backfill_units_loadouts_from_flat(conn)?;
+    }
+
+    ensure_figurine_loadout_columns(conn)?;
+    rebuild_pick_prefs_if_needed(conn)?;
+    let _ = crate::tts_reattach::reattach_figurines_to_loadouts(conn);
+    let _ = crate::tts_reattach::migrate_pick_prefs_to_loadouts(conn);
+    Ok(())
+}
+
+fn table_has_rows_or_exists(conn: &Connection, table: &str) -> Result<bool> {
+    let exists: Option<i64> = conn
+        .query_row(
+            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?1",
+            rusqlite::params![table],
+            |row| row.get(0),
+        )
+        .optional()?;
+    Ok(exists.is_some())
+}
+
+fn ensure_figurine_loadout_columns(conn: &Connection) -> Result<()> {
+    if !column_exists(conn, "tts_figurines", "legacy_nom")? {
+        conn.execute(
+            "ALTER TABLE tts_figurines ADD COLUMN legacy_nom TEXT NOT NULL DEFAULT ''",
+            [],
+        )?;
+        if column_exists(conn, "tts_figurines", "isc")? {
+            conn.execute(
+                "UPDATE tts_figurines SET legacy_nom = isc WHERE trim(legacy_nom) = ''",
+                [],
+            )?;
+        }
+    }
+    if !column_exists(conn, "tts_figurines", "legacy_loadout")? {
+        conn.execute(
+            "ALTER TABLE tts_figurines ADD COLUMN legacy_loadout TEXT NOT NULL DEFAULT ''",
+            [],
+        )?;
+        if column_exists(conn, "tts_figurines", "loadout")? {
+            conn.execute(
+                "UPDATE tts_figurines SET legacy_loadout = loadout WHERE trim(legacy_loadout) = ''",
+                [],
+            )?;
+        }
+    }
+    if !column_exists(conn, "tts_figurines", "tts_loadout_id")? {
+        conn.execute(
+            "ALTER TABLE tts_figurines ADD COLUMN tts_loadout_id INTEGER REFERENCES tts_loadouts(id)",
+            [],
+        )?;
+    }
+    conn.execute_batch(
+        "
+        CREATE INDEX IF NOT EXISTS idx_tts_figurines_loadout
+            ON tts_figurines(tts_loadout_id);
+        ",
+    )?;
+    Ok(())
+}
+
+fn rebuild_pick_prefs_if_needed(conn: &Connection) -> Result<()> {
+    if !table_has_rows_or_exists(conn, "tts_figurine_pick_prefs")? {
+        return Ok(());
+    }
+    // Déjà sur la nouvelle PK ?
+    if column_exists(conn, "tts_figurine_pick_prefs", "tts_loadout_id")?
+        && !column_exists(conn, "tts_figurine_pick_prefs", "isc_key")?
+    {
+        return Ok(());
+    }
+
+    // Ajouter colonne nullable pour backfill, puis reconstruire la table.
+    if !column_exists(conn, "tts_figurine_pick_prefs", "tts_loadout_id")? {
+        conn.execute(
+            "ALTER TABLE tts_figurine_pick_prefs ADD COLUMN tts_loadout_id INTEGER REFERENCES tts_loadouts(id)",
+            [],
+        )?;
+    }
+    let _ = crate::tts_reattach::migrate_pick_prefs_to_loadouts(conn);
+
+    conn.execute_batch(
+        "
+        CREATE TABLE IF NOT EXISTS tts_figurine_pick_prefs_v2 (
+            user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            tts_loadout_id INTEGER NOT NULL REFERENCES tts_loadouts(id) ON DELETE CASCADE,
+            figurine_id INTEGER NOT NULL REFERENCES tts_figurines(id) ON DELETE CASCADE,
+            updated_at INTEGER NOT NULL,
+            PRIMARY KEY (user_id, tts_loadout_id)
+        );
+        ",
+    )?;
+    conn.execute(
+        "
+        INSERT OR IGNORE INTO tts_figurine_pick_prefs_v2 (
+            user_id, tts_loadout_id, figurine_id, updated_at
+        )
+        SELECT user_id, tts_loadout_id, figurine_id, updated_at
+        FROM tts_figurine_pick_prefs
+        WHERE tts_loadout_id IS NOT NULL
+        ",
+        [],
+    )?;
+    conn.execute_batch(
+        "
+        DROP TABLE tts_figurine_pick_prefs;
+        ALTER TABLE tts_figurine_pick_prefs_v2 RENAME TO tts_figurine_pick_prefs;
+        CREATE INDEX IF NOT EXISTS idx_tts_figurine_pick_prefs_figurine
+            ON tts_figurine_pick_prefs(figurine_id);
+        ",
+    )?;
+    Ok(())
+}
+
+fn backfill_units_loadouts_from_flat(conn: &Connection) -> Result<()> {
+    let tx = conn.unchecked_transaction()?;
+
+    // 1. Unités depuis profils + formes
+    tx.execute_batch(
+        "
+        INSERT OR IGNORE INTO tts_units (nom)
+        SELECT DISTINCT trim(isc) FROM tts_profiles WHERE trim(isc) != '';
+        ",
+    )?;
+    if table_has_rows_or_exists(&tx, "tts_profile_forms")? {
+        tx.execute_batch(
+            "
+            INSERT OR IGNORE INTO tts_units (nom)
+            SELECT DISTINCT trim(isc) FROM tts_profile_forms WHERE trim(isc) != '';
+            ",
+        )?;
+    }
+
+    // 2. Rebuild profils avec FKs ; formes → profils enfants
+    tx.execute_batch(
+        "
+        CREATE TABLE tts_profiles_v2 (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            army_id INTEGER,
+            faction_slug TEXT,
+            faction_label TEXT NOT NULL,
+            unit_id INTEGER NOT NULL REFERENCES tts_units(id),
+            tts_loadout_id INTEGER NOT NULL REFERENCES tts_loadouts(id),
+            parent_profile_id INTEGER REFERENCES tts_profiles_v2(id) ON DELETE CASCADE,
+            state_index INTEGER NOT NULL DEFAULT 0,
+            loadout TEXT NOT NULL DEFAULT '',
+            source_bag TEXT NOT NULL DEFAULT '',
+            source_index INTEGER NOT NULL DEFAULT 0
+        );
+        ",
+    )?;
+
+    // Map old profile id → new profile id
+    let mut old_profiles = tx.prepare(
+        "
+        SELECT id, army_id, faction_slug, faction_label, isc, loadout,
+               nom_tts, description_tts, silhouette_size, silhouette_type,
+               marker_name, mesh_url, marker_mesh_url, source_bag, source_index
+        FROM tts_profiles
+        ORDER BY id
+        ",
+    )?;
+    let profile_rows = old_profiles
+        .query_map([], |row| {
+            Ok((
+                row.get::<_, i64>(0)?,
+                row.get::<_, Option<i64>>(1)?,
+                row.get::<_, Option<String>>(2)?,
+                row.get::<_, String>(3)?,
+                row.get::<_, String>(4)?,
+                row.get::<_, String>(5)?,
+                row.get::<_, String>(6)?,
+                row.get::<_, String>(7)?,
+                row.get::<_, Option<String>>(8)?,
+                row.get::<_, Option<String>>(9)?,
+                row.get::<_, Option<String>>(10)?,
+                row.get::<_, Option<String>>(11)?,
+                row.get::<_, Option<String>>(12)?,
+                row.get::<_, String>(13)?,
+                row.get::<_, i64>(14)?,
+            ))
+        })?
+        .collect::<std::result::Result<Vec<_>, _>>()?;
+    drop(old_profiles);
+
+    let mut id_map: std::collections::HashMap<i64, i64> = std::collections::HashMap::new();
+    for (
+        old_id,
+        army_id,
+        faction_slug,
+        faction_label,
+        isc,
+        loadout,
+        nom_tts,
+        description_tts,
+        silhouette_size,
+        silhouette_type,
+        marker_name,
+        mesh_url,
+        marker_mesh_url,
+        source_bag,
+        source_index,
+    ) in profile_rows
+    {
+        let unit_id: i64 = tx.query_row(
+            "SELECT id FROM tts_units WHERE nom = ?1",
+            rusqlite::params![isc.trim()],
+            |row| row.get(0),
+        )?;
+        tx.execute(
+            "
+            INSERT INTO tts_loadouts (
+                nom_tts, description_tts, silhouette_size, silhouette_type,
+                marker_name, mesh_url, marker_mesh_url
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+            ",
+            rusqlite::params![
+                nom_tts,
+                description_tts,
+                silhouette_size,
+                silhouette_type,
+                marker_name,
+                mesh_url,
+                marker_mesh_url,
+            ],
+        )?;
+        let loadout_id = tx.last_insert_rowid();
+        tx.execute(
+            "
+            INSERT INTO tts_profiles_v2 (
+                id, army_id, faction_slug, faction_label, unit_id, tts_loadout_id,
+                parent_profile_id, state_index, loadout, source_bag, source_index
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, NULL, 0, ?7, ?8, ?9)
+            ",
+            rusqlite::params![
+                old_id,
+                army_id,
+                faction_slug,
+                faction_label,
+                unit_id,
+                loadout_id,
+                loadout,
+                source_bag,
+                source_index,
+            ],
+        )?;
+        id_map.insert(old_id, old_id);
+    }
+
+    // Formes → profils enfants ; traits form_id → profile_id enfant
+    let mut form_id_to_child: std::collections::HashMap<i64, i64> = std::collections::HashMap::new();
+    if table_has_rows_or_exists(&tx, "tts_profile_forms")? {
+        let mut forms = tx.prepare(
+            "
+            SELECT id, profile_id, state_index, isc, loadout,
+                   nom_tts, description_tts, silhouette_size, silhouette_type,
+                   marker_name, mesh_url, marker_mesh_url
+            FROM tts_profile_forms
+            ORDER BY profile_id, state_index, id
+            ",
+        )?;
+        let form_rows = forms
+            .query_map([], |row| {
+                Ok((
+                    row.get::<_, i64>(0)?,
+                    row.get::<_, i64>(1)?,
+                    row.get::<_, i64>(2)?,
+                    row.get::<_, String>(3)?,
+                    row.get::<_, String>(4)?,
+                    row.get::<_, String>(5)?,
+                    row.get::<_, String>(6)?,
+                    row.get::<_, Option<String>>(7)?,
+                    row.get::<_, Option<String>>(8)?,
+                    row.get::<_, Option<String>>(9)?,
+                    row.get::<_, Option<String>>(10)?,
+                    row.get::<_, Option<String>>(11)?,
+                ))
+            })?
+            .collect::<std::result::Result<Vec<_>, _>>()?;
+        drop(forms);
+
+        for (
+            form_id,
+            parent_old,
+            state_index,
+            isc,
+            loadout,
+            nom_tts,
+            description_tts,
+            silhouette_size,
+            silhouette_type,
+            marker_name,
+            mesh_url,
+            marker_mesh_url,
+        ) in form_rows
+        {
+            let Some(&parent_new) = id_map.get(&parent_old) else {
+                continue;
+            };
+            let unit_id: i64 = match tx.query_row(
+                "SELECT id FROM tts_units WHERE nom = ?1",
+                rusqlite::params![isc.trim()],
+                |row| row.get(0),
+            ) {
+                Ok(id) => id,
+                Err(_) => {
+                    tx.execute(
+                        "INSERT INTO tts_units (nom) VALUES (?1)",
+                        rusqlite::params![isc.trim()],
+                    )?;
+                    tx.last_insert_rowid()
+                }
+            };
+            tx.execute(
+                "
+                INSERT INTO tts_loadouts (
+                    nom_tts, description_tts, silhouette_size, silhouette_type,
+                    marker_name, mesh_url, marker_mesh_url
+                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+                ",
+                rusqlite::params![
+                    nom_tts,
+                    description_tts,
+                    silhouette_size,
+                    silhouette_type,
+                    marker_name,
+                    mesh_url,
+                    marker_mesh_url,
+                ],
+            )?;
+            let loadout_id = tx.last_insert_rowid();
+            // Hériter faction du parent
+            let (army_id, faction_slug, faction_label): (
+                Option<i64>,
+                Option<String>,
+                String,
+            ) = tx.query_row(
+                "SELECT army_id, faction_slug, faction_label FROM tts_profiles_v2 WHERE id = ?1",
+                rusqlite::params![parent_new],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )?;
+            tx.execute(
+                "
+                INSERT INTO tts_profiles_v2 (
+                    army_id, faction_slug, faction_label, unit_id, tts_loadout_id,
+                    parent_profile_id, state_index, loadout, source_bag, source_index
+                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, '', 0)
+                ",
+                rusqlite::params![
+                    army_id,
+                    faction_slug,
+                    faction_label,
+                    unit_id,
+                    loadout_id,
+                    parent_new,
+                    state_index,
+                    loadout,
+                ],
+            )?;
+            let child_id = tx.last_insert_rowid();
+            form_id_to_child.insert(form_id, child_id);
+        }
+    }
+
+    // Traits : déplacer form_id → profile_id enfant
+    tx.execute_batch(
+        "
+        CREATE TABLE tts_profile_traits_v2 (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            profile_id INTEGER NOT NULL REFERENCES tts_profiles_v2(id) ON DELETE CASCADE,
+            kind TEXT NOT NULL,
+            name TEXT NOT NULL,
+            detail TEXT,
+            sort_order INTEGER NOT NULL DEFAULT 0
+        );
+        ",
+    )?;
+    let mut trait_stmt = tx.prepare(
+        "
+        SELECT profile_id, form_id, kind, name, detail, sort_order
+        FROM tts_profile_traits
+        ",
+    )?;
+    let trait_rows = trait_stmt
+        .query_map([], |row| {
+            Ok((
+                row.get::<_, i64>(0)?,
+                row.get::<_, Option<i64>>(1)?,
+                row.get::<_, String>(2)?,
+                row.get::<_, String>(3)?,
+                row.get::<_, Option<String>>(4)?,
+                row.get::<_, i64>(5)?,
+            ))
+        })?
+        .collect::<std::result::Result<Vec<_>, _>>()?;
+    drop(trait_stmt);
+
+    for (profile_id, form_id, kind, name, detail, sort_order) in trait_rows {
+        let target_profile = if let Some(fid) = form_id {
+            match form_id_to_child.get(&fid) {
+                Some(&child) => child,
+                None => continue,
+            }
+        } else {
+            match id_map.get(&profile_id) {
+                Some(&pid) => pid,
+                None => continue,
+            }
+        };
+        tx.execute(
+            "
+            INSERT INTO tts_profile_traits_v2 (profile_id, kind, name, detail, sort_order)
+            VALUES (?1, ?2, ?3, ?4, ?5)
+            ",
+            rusqlite::params![target_profile, kind, name, detail, sort_order],
+        )?;
+    }
+
+    // Sectorials : remap ids (inchangés pour parents)
+    tx.execute_batch(
+        "
+        CREATE TABLE tts_profile_sectorials_v2 (
+            profile_id INTEGER NOT NULL REFERENCES tts_profiles_v2(id) ON DELETE CASCADE,
+            army_id INTEGER NOT NULL,
+            PRIMARY KEY (profile_id, army_id)
+        );
+        INSERT OR IGNORE INTO tts_profile_sectorials_v2 (profile_id, army_id)
+        SELECT profile_id, army_id FROM tts_profile_sectorials;
+        ",
+    )?;
+
+    tx.execute_batch(
+        "
+        DROP TABLE tts_profile_traits;
+        DROP TABLE tts_profile_sectorials;
+        DROP TABLE IF EXISTS tts_profile_forms;
+        DROP TABLE tts_profiles;
+        ALTER TABLE tts_profiles_v2 RENAME TO tts_profiles;
+        ALTER TABLE tts_profile_traits_v2 RENAME TO tts_profile_traits;
+        ALTER TABLE tts_profile_sectorials_v2 RENAME TO tts_profile_sectorials;
+
+        CREATE INDEX IF NOT EXISTS idx_tts_profiles_unit
+            ON tts_profiles(unit_id);
+        CREATE INDEX IF NOT EXISTS idx_tts_profiles_loadout
+            ON tts_profiles(tts_loadout_id);
+        CREATE INDEX IF NOT EXISTS idx_tts_profiles_parent
+            ON tts_profiles(parent_profile_id, state_index);
+        CREATE INDEX IF NOT EXISTS idx_tts_profiles_source
+            ON tts_profiles(source_bag, source_index);
+        CREATE INDEX IF NOT EXISTS idx_tts_profile_sectorials_army
+            ON tts_profile_sectorials(army_id);
+        CREATE INDEX IF NOT EXISTS idx_tts_profile_traits_profile
+            ON tts_profile_traits(profile_id, sort_order);
+        ",
+    )?;
+
+    tx.commit()?;
     Ok(())
 }
 

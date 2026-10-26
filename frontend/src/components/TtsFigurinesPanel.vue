@@ -3,6 +3,7 @@ import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import { Download } from '@lucide/vue'
 import { toast } from 'vue-sonner'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
+import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import ArmyLogo from '@/components/ArmyLogo.vue'
@@ -34,12 +35,18 @@ const PAGE_SIZE = 20
 const SEARCH_DEBOUNCE_MS = 200
 
 type FigurineLabel = {
+  /** null si les libellés viennent du catalogue global (sans id). */
+  tts_loadout_id: number | null
   nom: string
   loadout: string
   silhouette: string
 }
 
-type Draft = TtsFigurineWrite
+type Draft = Omit<TtsFigurineWrite, 'nom' | 'loadout'> & {
+  nom: string
+  loadout: string
+  tts_loadout_id: number | null
+}
 
 const props = defineProps<{
   armyId?: string
@@ -71,6 +78,8 @@ let loadGeneration = 0
 let loadMoreObserver: IntersectionObserver | null = null
 const panel = ref<'edit' | 'download' | null>(null)
 const editingId = ref<number | null>(null)
+/** Lien d'origine de la figurine en édition (conservé si nom/loadout ne changent pas). */
+const originalLink = ref<{ id: number | null; nom: string; loadout: string } | null>(null)
 const downloadTarget = ref<TtsFigurine | null>(null)
 const loadouts = ref<TtsFigurineLoadout[]>([])
 const loadoutsLoading = ref(false)
@@ -110,7 +119,7 @@ const selectedLoadout = computed(() =>
 )
 
 function emptyDraft(): Draft {
-  return { nom: '', loadout: '', painter: '', asset_bundle_url: '' }
+  return { tts_loadout_id: null, nom: '', loadout: '', painter: '', asset_bundle_url: '' }
 }
 
 function uniqueSorted(values: string[]) {
@@ -130,6 +139,7 @@ function uniqueSorted(values: string[]) {
 
 function resetCreateForm() {
   editingId.value = null
+  originalLink.value = null
   draft.value = emptyDraft()
   draft.value.painter = painterFilter.value.trim()
   existingPhoto.value = ''
@@ -240,7 +250,13 @@ function openCreate() {
 
 function openEdit(figurine: TtsFigurine) {
   editingId.value = figurine.id
+  originalLink.value = {
+    id: figurine.tts_loadout_id,
+    nom: figurine.nom,
+    loadout: figurine.loadout,
+  }
   draft.value = {
+    tts_loadout_id: figurine.tts_loadout_id,
     nom: figurine.nom,
     loadout: figurine.loadout,
     painter: figurine.painter,
@@ -345,6 +361,7 @@ async function loadFigurines(reset = true) {
       q: search.value,
       painter: painterFilter.value,
       armyId: props.armyId,
+      // `incomplete` côté backend inclut déjà les figurines orphelines (unlinked).
       incomplete: props.incompleteOnly,
     })
     if (generation !== loadGeneration) return
@@ -396,7 +413,8 @@ async function save() {
   saving.value = true
   const creating = editingId.value == null
   try {
-    const payload = {
+    const payload: TtsFigurineWrite = {
+      tts_loadout_id: draft.value.tts_loadout_id,
       nom: draft.value.nom,
       loadout: draft.value.loadout,
       painter: draft.value.painter,
@@ -416,7 +434,9 @@ async function save() {
       panel.value = 'edit'
     } else {
       editingId.value = saved.id
+      originalLink.value = { id: saved.tts_loadout_id, nom: saved.nom, loadout: saved.loadout }
       draft.value = {
+        tts_loadout_id: saved.tts_loadout_id,
         nom: saved.nom,
         loadout: saved.loadout,
         painter: saved.painter,
@@ -453,6 +473,39 @@ async function removeCurrent() {
     toast.error(error instanceof Error ? error.message : 'Impossible de supprimer la figurine')
   }
 }
+
+// Garde draft.tts_loadout_id aligné sur la paire nom + loadout choisie dans les libellés.
+watch(
+  [() => draft.value.nom, () => draft.value.loadout, labels],
+  () => {
+    const nom = draft.value.nom.trim().toLowerCase()
+    const loadout = draft.value.loadout.trim().toLowerCase()
+    if (!nom) {
+      draft.value.tts_loadout_id = null
+      return
+    }
+    const match = labels.value.find(
+      (label) =>
+        label.tts_loadout_id != null &&
+        label.nom.trim().toLowerCase() === nom &&
+        label.loadout.trim().toLowerCase() === loadout,
+    )
+    if (match) {
+      draft.value.tts_loadout_id = match.tts_loadout_id
+      return
+    }
+    // Libellés pas encore chargés ou catalogue global sans ids : ne pas casser le lien existant.
+    if (labels.value.length === 0) return
+    const original = originalLink.value
+    if (original && sameText(original.nom, draft.value.nom) && sameText(original.loadout, draft.value.loadout)) {
+      draft.value.tts_loadout_id = original.id
+      return
+    }
+    if (labels.value.some((label) => label.tts_loadout_id != null)) {
+      draft.value.tts_loadout_id = null
+    }
+  },
+)
 
 watch(panelOpen, (open) => setCustomSide(open), { immediate: true })
 
@@ -533,6 +586,7 @@ async function loadLabels() {
       const rows = await fetchTtsProfileLabels()
       if (Number(props.armyId)) return
       labels.value = rows.map((row) => ({
+        tts_loadout_id: row.tts_loadout_id,
         nom: row.nom,
         loadout: row.loadout,
         silhouette: '',
@@ -546,6 +600,7 @@ async function loadLabels() {
     const rows = await fetchTtsFigurineLabels(armyId)
     if (Number(props.armyId) !== armyId) return
     labels.value = rows.map((row) => ({
+      tts_loadout_id: row.tts_loadout_id,
       nom: row.nom,
       loadout: row.loadout,
       silhouette: silhouetteOf(row),
@@ -657,7 +712,12 @@ onBeforeUnmount(() => {
       <CardHeader class="shrink-0 pb-3">
         <div class="flex items-start justify-between gap-2">
           <div class="min-w-0">
-            <CardTitle>{{ editingId == null ? 'Nouvelle figurine' : draft.nom || 'Figurine' }}</CardTitle>
+            <CardTitle class="flex flex-wrap items-center gap-2">
+              {{ editingId == null ? 'Nouvelle figurine' : draft.nom || 'Figurine' }}
+              <Badge v-if="editingId != null && draft.tts_loadout_id == null" variant="destructive">
+                Orpheline
+              </Badge>
+            </CardTitle>
             <CardDescription v-if="canEditContent">Colle une capture dans cette fiche (Ctrl+V).</CardDescription>
           </div>
           <Button type="button" variant="ghost" size="sm" @click="closePanel">Fermer</Button>
@@ -829,7 +889,16 @@ onBeforeUnmount(() => {
         </div>
         <button type="button" class="block w-full min-w-0 px-3 pt-2 pb-3 text-left" @click="openEdit(figurine)">
           <div class="min-w-0 space-y-1">
-            <p class="truncate font-medium" :title="figurine.nom">{{ figurine.nom }}</p>
+            <div class="flex min-w-0 items-center gap-1.5">
+              <p class="min-w-0 truncate font-medium" :title="figurine.nom">{{ figurine.nom }}</p>
+              <Badge
+                v-if="figurine.tts_loadout_id == null"
+                variant="destructive"
+                title="Non liée au catalogue de profils"
+              >
+                Orpheline
+              </Badge>
+            </div>
             <p class="truncate text-sm text-muted-foreground" :title="figurine.loadout || undefined">
               {{ figurine.loadout || '—' }}
             </p>

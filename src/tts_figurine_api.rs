@@ -65,7 +65,11 @@ pub fn tts_figurine_routes() -> Router<AppState> {
 
 #[derive(Debug, Deserialize)]
 struct FigurineBody {
-    #[serde(rename = "nom")]
+    /// Loadout TTS lié : nom / loadout sont alors recopiés depuis le profil.
+    #[serde(default)]
+    tts_loadout_id: Option<i64>,
+    /// Requis seulement pour une figurine orpheline (sans `tts_loadout_id`).
+    #[serde(rename = "nom", default)]
     isc: String,
     #[serde(default)]
     loadout: String,
@@ -78,6 +82,7 @@ struct FigurineBody {
 impl FigurineBody {
     fn write(&self) -> FigurineWrite {
         FigurineWrite {
+            tts_loadout_id: self.tts_loadout_id.filter(|id| *id > 0),
             isc: self.isc.clone(),
             loadout: self.loadout.clone(),
             painter: self.painter.clone(),
@@ -102,6 +107,8 @@ struct FigurineListQuery {
     all: Option<bool>,
     /// Figurines avec ISC / loadout / peintre / asset bundle / photo manquant.
     incomplete: Option<bool>,
+    /// Figurines sans loadout TTS (orphelines / legacy).
+    unlinked: Option<bool>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -149,10 +156,7 @@ async fn require_admin(state: &AppState, session: &Session) -> Result<User, ApiE
 
 #[derive(Debug, Deserialize)]
 struct FigurinePickBody {
-    #[serde(rename = "nom")]
-    isc: String,
-    #[serde(default)]
-    loadout: String,
+    tts_loadout_id: i64,
     figurine_id: i64,
 }
 
@@ -176,7 +180,7 @@ async fn upsert_my_figurine_pick(
     let user = require_user(&state, &session).await?;
     state
         .tts_figurines
-        .upsert_pick_pref(user.id, &body.isc, &body.loadout, body.figurine_id)
+        .upsert_pick_pref(user.id, body.tts_loadout_id, body.figurine_id)
         .map(Json)
         .map_err(|error| ApiError::bad_request(error.to_string()))
 }
@@ -249,7 +253,9 @@ async fn figurine_object(
                 "ce loadout n'est pas dans cette sectorielle",
             ));
         }
-        if !same_isc(&figurine.isc, &form.isc) {
+        if figurine.tts_loadout_id != Some(form.tts_loadout_id)
+            && !same_isc(&figurine.isc, &form.isc)
+        {
             return Err(ApiError::bad_request(
                 "ce loadout ne correspond pas à ce nom",
             ));
@@ -277,7 +283,9 @@ async fn figurine_object(
             .get(profile_id)
             .map_err(|error| ApiError::bad_request(error.to_string()))?
             .ok_or_else(|| ApiError::bad_request("profil introuvable"))?;
-        if !same_isc(&figurine.isc, &profile.isc) {
+        if figurine.tts_loadout_id != Some(profile.tts_loadout_id)
+            && !same_isc(&figurine.isc, &profile.isc)
+        {
             return Err(ApiError::bad_request(
                 "ce loadout ne correspond pas à ce nom",
             ));
@@ -310,10 +318,18 @@ fn form_asset_bundles_from_profile(
     for form in profile
         .forms
         .iter()
-        .filter(|form| form.state_index != 900)
+        .filter(|form| form.state_index != crate::tts_figurine::PERIPHERAL_STATE_INDEX)
     {
-        if let Some(url) = crate::tts_figurine::best_asset_bundle(
+        let fallback = crate::tts_figurine::parent_fallback_loadout_id(
+            form.state_index,
+            form.silhouette_size.as_deref(),
+            profile.tts_loadout_id,
+            profile.silhouette_size.as_deref(),
+        );
+        if let Some(url) = crate::tts_figurine::best_asset_bundle_for_form(
             figurines,
+            form.tts_loadout_id,
+            fallback,
             &form.isc,
             &form.loadout,
             preferred_painter,
@@ -447,6 +463,7 @@ async fn list_figurines(
             painter: query.painter,
             army_id: query.army_id,
             incomplete: query.incomplete.unwrap_or(false),
+            unlinked: query.unlinked.unwrap_or(false),
         })
         .map_err(|error| ApiError::bad_request(error.to_string()))?;
     page.items = attach_sectorials(&state, page.items)?;

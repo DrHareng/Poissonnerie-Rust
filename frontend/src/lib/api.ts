@@ -119,6 +119,8 @@ export type FetchTtsFigurinesOptions = {
   all?: boolean
   /** Nom / loadout / peintre / asset bundle / photo manquant. */
   incomplete?: boolean
+  /** Figurines orphelines (tts_loadout_id null). */
+  unlinked?: boolean
 }
 
 export function fetchTtsFigurines(
@@ -138,6 +140,7 @@ export function fetchTtsFigurines(
   const armyId = Number(options.armyId)
   if (armyId > 0) params.set('army_id', String(armyId))
   if (options.incomplete) params.set('incomplete', 'true')
+  if (options.unlinked) params.set('unlinked', '1')
   return request<PaginatedTtsFigurines>(`/api/tts-figurines?${params}`)
 }
 
@@ -160,8 +163,7 @@ export function fetchMyTtsFigurinePicks(): Promise<TtsFigurinePickPref[]> {
 }
 
 export function upsertMyTtsFigurinePick(payload: {
-  nom: string
-  loadout?: string
+  tts_loadout_id: number
   figurine_id: number
 }): Promise<TtsFigurinePickPref> {
   return request<TtsFigurinePickPref>('/api/me/tts-figurine-picks', {

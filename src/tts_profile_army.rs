@@ -1809,9 +1809,11 @@ fn snapshot_meshes(conn: &Connection, mesh_file: Option<&Path>) -> Result<Vec<Me
     }
     let mut stmt = conn.prepare(
         "
-        SELECT isc, loadout, mesh_url, marker_mesh_url, marker_name
-        FROM tts_profiles
-        WHERE mesh_url IS NOT NULL
+        SELECT u.nom, p.loadout, l.mesh_url, l.marker_mesh_url, l.marker_name
+        FROM tts_profiles p
+        JOIN tts_units u ON u.id = p.unit_id
+        JOIN tts_loadouts l ON l.id = p.tts_loadout_id
+        WHERE l.mesh_url IS NOT NULL AND p.parent_profile_id IS NULL
         ",
     )?;
     let rows = stmt.query_map([], |row| {
@@ -1833,9 +1835,11 @@ fn snapshot_colors(conn: &Connection) -> Result<HashMap<String, String>> {
     let mut colors = HashMap::new();
     let mut stmt = conn.prepare(
         "
-        SELECT faction_slug, nom_tts
-        FROM tts_profiles
-        WHERE faction_slug IS NOT NULL AND nom_tts LIKE '[______]%'
+        SELECT p.faction_slug, l.nom_tts
+        FROM tts_profiles p
+        JOIN tts_loadouts l ON l.id = p.tts_loadout_id
+        WHERE p.faction_slug IS NOT NULL AND l.nom_tts LIKE '[______]%'
+          AND p.parent_profile_id IS NULL
         ",
     )?;
     let rows = stmt.query_map([], |row| {
@@ -1851,17 +1855,124 @@ fn snapshot_colors(conn: &Connection) -> Result<HashMap<String, String>> {
     Ok(colors)
 }
 
+fn has_lieutenant(traits: &[TraitDraft]) -> bool {
+    traits.iter().any(|t| {
+        t.kind.eq_ignore_ascii_case("char") && t.name.trim().eq_ignore_ascii_case("Lieutenant")
+    })
+}
+
+fn traits_without_lieutenant(traits: &[TraitDraft]) -> Vec<TraitDraft> {
+    traits
+        .iter()
+        .filter(|t| {
+            !(t.kind.eq_ignore_ascii_case("char")
+                && t.name.trim().eq_ignore_ascii_case("Lieutenant"))
+        })
+        .cloned()
+        .collect()
+}
+
+/// Clé de partage loadout TTS : unité + groupe + loadout + silhouette, hors Lieutenant.
+fn tts_share_key(profile: &ProfileDraft) -> (i64, i64, String, String, String) {
+    (
+        profile.unit_id,
+        profile.group_id,
+        profile.loadout.trim().to_ascii_lowercase(),
+        profile
+            .silhouette_size
+            .as_deref()
+            .unwrap_or("")
+            .trim()
+            .to_ascii_lowercase(),
+        profile
+            .silhouette_type
+            .as_deref()
+            .unwrap_or("")
+            .trim()
+            .to_ascii_lowercase(),
+    )
+}
+
+fn ensure_unit(conn: &Connection, nom: &str) -> Result<i64> {
+    let nom = nom.trim();
+    if let Ok(id) = conn.query_row(
+        "SELECT id FROM tts_units WHERE nom = ?1",
+        params![nom],
+        |row| row.get::<_, i64>(0),
+    ) {
+        return Ok(id);
+    }
+    conn.execute("INSERT INTO tts_units (nom) VALUES (?1)", params![nom])?;
+    Ok(conn.last_insert_rowid())
+}
+
+fn insert_loadout(
+    conn: &Connection,
+    nom_tts: &str,
+    description_tts: &str,
+    silhouette_size: &Option<String>,
+    silhouette_type: &Option<String>,
+    marker_name: &Option<String>,
+    mesh_url: &Option<String>,
+    marker_mesh_url: &Option<String>,
+) -> Result<i64> {
+    conn.execute(
+        "
+        INSERT INTO tts_loadouts (
+            nom_tts, description_tts, silhouette_size, silhouette_type,
+            marker_name, mesh_url, marker_mesh_url
+        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+        ",
+        params![
+            nom_tts,
+            description_tts,
+            silhouette_size,
+            silhouette_type,
+            marker_name,
+            mesh_url,
+            marker_mesh_url,
+        ],
+    )?;
+    Ok(conn.last_insert_rowid())
+}
+
 fn store_profiles(
     conn: &Connection,
     profiles: &[ProfileDraft],
     includes: &[UnitOptionInclude],
 ) -> Result<ArmyImportReport> {
+    // Préserver les prefs utilisateur (user_id, figurine_id) avant wipe des loadouts.
+    let prefs_snapshot: Vec<(i64, i64, i64)> = {
+        let mut stmt = conn.prepare(
+            "
+            SELECT user_id, figurine_id, updated_at
+            FROM tts_figurine_pick_prefs
+            ",
+        )?;
+        let rows = stmt
+            .query_map([], |row| {
+                Ok((
+                    row.get::<_, i64>(0)?,
+                    row.get::<_, i64>(1)?,
+                    row.get::<_, i64>(2)?,
+                ))
+            })?
+            .collect::<std::result::Result<Vec<_>, _>>()
+            .unwrap_or_default();
+        rows
+    };
+
     let tx = conn.unchecked_transaction()?;
+    // Détacher les figs avant wipe des loadouts (FK).
+    tx.execute("UPDATE tts_figurines SET tts_loadout_id = NULL", [])?;
+    tx.execute("DELETE FROM tts_figurine_pick_prefs", [])?;
     tx.execute("DELETE FROM tts_profile_traits", [])?;
     tx.execute("DELETE FROM tts_profile_sectorials", [])?;
-    tx.execute("DELETE FROM tts_profile_forms", [])?;
     tx.execute("DELETE FROM tts_profiles", [])?;
+    tx.execute("DELETE FROM tts_loadouts", [])?;
     tx.execute("DELETE FROM tts_army_unit_includes", [])?;
+    // Garder tts_units : on réutilise / complète.
+
     for include in includes {
         tx.execute(
             "
@@ -1881,64 +1992,134 @@ fn store_profiles(
             ],
         )?;
     }
+
+    // Pré-résoudre le partage Lt : sibling non-Lt fournit le loadout TTS.
+    let mut share_owner: HashMap<(i64, i64, String, String, String), usize> = HashMap::new();
+    for (index, profile) in profiles.iter().enumerate() {
+        if has_lieutenant(&profile.traits) {
+            continue;
+        }
+        share_owner
+            .entry(tts_share_key(profile))
+            .or_insert(index);
+    }
+    let mut shared_loadout_ids: HashMap<(i64, i64, String, String, String), i64> = HashMap::new();
+
     let mut forms = 0usize;
     let mut sectorials = 0usize;
     for profile in profiles {
+        let db_unit_id = ensure_unit(&tx, &profile.isc)?;
+        let key = tts_share_key(profile);
+        let tts_loadout_id = if has_lieutenant(&profile.traits) {
+            if let Some(&owner_idx) = share_owner.get(&key) {
+                if let Some(&existing) = shared_loadout_ids.get(&key) {
+                    existing
+                } else {
+                    // Créer depuis le sibling non-Lt si pas encore inséré.
+                    let owner = &profiles[owner_idx];
+                    let desc = description_from_traits(&traits_without_lieutenant(&owner.traits));
+                    let id = insert_loadout(
+                        &tx,
+                        &owner.nom_tts,
+                        &desc,
+                        &owner.silhouette_size,
+                        &owner.silhouette_type,
+                        &owner.marker_name,
+                        &owner.mesh_url,
+                        &owner.marker_mesh_url,
+                    )?;
+                    shared_loadout_ids.insert(key.clone(), id);
+                    id
+                }
+            } else {
+                // Pas de sibling non-Lt : loadout propre sans Lt dans la description TTS.
+                let desc = description_from_traits(&traits_without_lieutenant(&profile.traits));
+                insert_loadout(
+                    &tx,
+                    &profile.nom_tts,
+                    &desc,
+                    &profile.silhouette_size,
+                    &profile.silhouette_type,
+                    &profile.marker_name,
+                    &profile.mesh_url,
+                    &profile.marker_mesh_url,
+                )?
+            }
+        } else if let Some(&existing) = shared_loadout_ids.get(&key) {
+            existing
+        } else {
+            let id = insert_loadout(
+                &tx,
+                &profile.nom_tts,
+                &profile.description_tts,
+                &profile.silhouette_size,
+                &profile.silhouette_type,
+                &profile.marker_name,
+                &profile.mesh_url,
+                &profile.marker_mesh_url,
+            )?;
+            shared_loadout_ids.insert(key, id);
+            id
+        };
+
         tx.execute(
             "
             INSERT INTO tts_profiles (
-                army_id, faction_slug, faction_label, isc, loadout, nom_tts, description_tts,
-                silhouette_size, silhouette_type, marker_name, mesh_url, marker_mesh_url,
-                source_bag, source_index
+                army_id, faction_slug, faction_label, unit_id, tts_loadout_id,
+                parent_profile_id, state_index, loadout, source_bag, source_index
             )
-            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)
+            VALUES (?1, ?2, ?3, ?4, ?5, NULL, 0, ?6, ?7, ?8)
             ",
             params![
                 profile.army_id,
                 profile.faction_slug,
                 profile.faction_label,
-                profile.isc,
+                db_unit_id,
+                tts_loadout_id,
                 profile.loadout,
-                profile.nom_tts,
-                profile.description_tts,
-                profile.silhouette_size,
-                profile.silhouette_type,
-                profile.marker_name,
-                profile.mesh_url,
-                profile.marker_mesh_url,
                 format!("army:{}:{}", profile.unit_id, profile.group_id),
                 profile.option_id,
             ],
         )?;
         let profile_id = tx.last_insert_rowid();
-        insert_traits(&tx, profile_id, None, &profile.traits)?;
+        insert_traits(&tx, profile_id, &profile.traits)?;
+
         for form in &profile.forms {
+            let form_unit_id = ensure_unit(&tx, &form.isc)?;
+            let form_loadout_id = insert_loadout(
+                &tx,
+                &form.nom_tts,
+                &form.description_tts,
+                &form.silhouette_size,
+                &form.silhouette_type,
+                &form.marker_name,
+                &form.mesh_url,
+                &form.marker_mesh_url,
+            )?;
             tx.execute(
                 "
-                INSERT INTO tts_profile_forms (
-                    profile_id, state_index, isc, loadout, nom_tts, description_tts,
-                    silhouette_size, silhouette_type, marker_name, mesh_url, marker_mesh_url
+                INSERT INTO tts_profiles (
+                    army_id, faction_slug, faction_label, unit_id, tts_loadout_id,
+                    parent_profile_id, state_index, loadout, source_bag, source_index
                 )
-                VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
+                VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, '', 0)
                 ",
                 params![
+                    profile.army_id,
+                    profile.faction_slug,
+                    profile.faction_label,
+                    form_unit_id,
+                    form_loadout_id,
                     profile_id,
                     form.state_index,
-                    form.isc,
                     form.loadout,
-                    form.nom_tts,
-                    form.description_tts,
-                    form.silhouette_size,
-                    form.silhouette_type,
-                    form.marker_name,
-                    form.mesh_url,
-                    form.marker_mesh_url,
                 ],
             )?;
-            let form_id = tx.last_insert_rowid();
-            insert_traits(&tx, profile_id, Some(form_id), &form.traits)?;
+            let child_id = tx.last_insert_rowid();
+            insert_traits(&tx, child_id, &form.traits)?;
             forms += 1;
         }
+
         for army_id in &profile.sectorials {
             let exists: bool = tx.query_row(
                 "SELECT EXISTS(SELECT 1 FROM armies WHERE id = ?1)",
@@ -1957,6 +2138,36 @@ fn store_profiles(
     }
     let count = profiles.len();
     tx.commit()?;
+
+    // Rattacher les figurines après import (legacy_nom / legacy_loadout).
+    let _ = crate::tts_reattach::reattach_figurines_to_loadouts(conn);
+
+    // Restaurer les prefs sur le nouveau tts_loadout_id de chaque figurine.
+    for (user_id, figurine_id, updated_at) in prefs_snapshot {
+        let loadout_id: Option<i64> = conn
+            .query_row(
+                "SELECT tts_loadout_id FROM tts_figurines WHERE id = ?1",
+                params![figurine_id],
+                |row| row.get(0),
+            )
+            .ok()
+            .flatten();
+        let Some(loadout_id) = loadout_id else {
+            continue;
+        };
+        let _ = conn.execute(
+            "
+            INSERT INTO tts_figurine_pick_prefs (
+                user_id, tts_loadout_id, figurine_id, updated_at
+            ) VALUES (?1, ?2, ?3, ?4)
+            ON CONFLICT(user_id, tts_loadout_id) DO UPDATE SET
+                figurine_id = excluded.figurine_id,
+                updated_at = excluded.updated_at
+            ",
+            params![user_id, loadout_id, figurine_id, updated_at],
+        );
+    }
+
     Ok(ArmyImportReport {
         armies: 0,
         profiles: count,
@@ -1966,21 +2177,15 @@ fn store_profiles(
     })
 }
 
-fn insert_traits(
-    conn: &Connection,
-    profile_id: i64,
-    form_id: Option<i64>,
-    traits: &[TraitDraft],
-) -> Result<()> {
+fn insert_traits(conn: &Connection, profile_id: i64, traits: &[TraitDraft]) -> Result<()> {
     for (index, trait_) in traits.iter().enumerate() {
         conn.execute(
             "
-            INSERT INTO tts_profile_traits (profile_id, form_id, kind, name, detail, sort_order)
-            VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+            INSERT INTO tts_profile_traits (profile_id, kind, name, detail, sort_order)
+            VALUES (?1, ?2, ?3, ?4, ?5)
             ",
             params![
                 profile_id,
-                form_id,
                 trait_.kind,
                 trait_.name,
                 trait_.detail,
@@ -2792,5 +2997,79 @@ mod tests {
         assert!(!profiles[0].traits.iter().any(|trait_| {
             trait_.kind == "skill" && trait_.name.eq_ignore_ascii_case("Commlink")
         }));
+    }
+
+    #[test]
+    fn lieutenant_shares_tts_loadout_with_sibling() {
+        let dir = std::env::temp_dir().join(format!(
+            "poissonnerie-lt-share-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let db = dir.join("test.db");
+        let conn = Connection::open(&db).unwrap();
+        migrate(&conn).unwrap();
+
+        let base = ProfileDraft {
+            unit_id: 1,
+            group_id: 1,
+            option_id: 1,
+            army_id: None,
+            faction_slug: Some("ariadna".into()),
+            faction_label: "Ariadna".into(),
+            isc: "NISSE".into(),
+            loadout: "Combi Rifle".into(),
+            nom_tts: "[FFFFFF]NISSE[-] Combi Rifle".into(),
+            description_tts: "Regular".into(),
+            silhouette_size: Some("2".into()),
+            silhouette_type: Some("normale".into()),
+            marker_name: None,
+            mesh_url: None,
+            marker_mesh_url: None,
+            traits: vec![TraitDraft {
+                kind: "char",
+                name: "Regular".into(),
+                detail: None,
+            }],
+            forms: Vec::new(),
+            sectorials: BTreeSet::new(),
+            peripherals: Vec::new(),
+            escape_pilot: false,
+            operator: false,
+        };
+        let mut lt = base.clone();
+        lt.option_id = 2;
+        lt.traits.push(TraitDraft {
+            kind: "char",
+            name: "Lieutenant".into(),
+            detail: None,
+        });
+        lt.description_tts = "Regular · Lieutenant".into();
+
+        let report = store_profiles(&conn, &[base, lt], &[]).unwrap();
+        assert_eq!(report.profiles, 2);
+
+        let loadout_ids: Vec<i64> = {
+            let mut stmt = conn
+                .prepare("SELECT tts_loadout_id FROM tts_profiles WHERE parent_profile_id IS NULL ORDER BY source_index")
+                .unwrap();
+            stmt.query_map([], |row| row.get(0))
+                .unwrap()
+                .map(|row| row.unwrap())
+                .collect()
+        };
+        assert_eq!(loadout_ids.len(), 2);
+        assert_eq!(loadout_ids[0], loadout_ids[1]);
+
+        let loadout_count: i64 = conn
+            .query_row("SELECT COUNT(*) FROM tts_loadouts", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(loadout_count, 1);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }
