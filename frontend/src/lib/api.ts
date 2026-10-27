@@ -12,6 +12,7 @@ import type {
   PaginatedMatches,
   PaginatedReports,
   PaginatedTtsFigurines,
+  PaginatedTtsProfiles,
   TtsFigurineMeta,
   Player,
   PlayerArmyStats,
@@ -49,7 +50,6 @@ import type {
   TtsProfileArmyCount,
   TtsProfileDetail,
   TtsProfileLabel,
-  TtsProfileSummary,
   TtsProfileUpdate,
   User,
 } from '@/types/elo'
@@ -260,16 +260,37 @@ export function fetchTtsFigurineObject(
   return request<unknown>(`/api/tts-figurines/${id}/object?${params}`)
 }
 
-export function fetchTtsProfiles(options: {
+export type FetchTtsProfilesOptions = {
   armyId?: number
   unassigned?: boolean
   includeFaction?: boolean
-}): Promise<TtsProfileSummary[]> {
+  q?: string
+  limit?: number
+  offset?: number
+  /** Catalogue complet (listes TTS). */
+  all?: boolean
+  includeTeamOps?: boolean
+  figs?: 'tous' | 'avec' | 'sans'
+}
+
+export function fetchTtsProfiles(
+  options: FetchTtsProfilesOptions = {},
+): Promise<PaginatedTtsProfiles> {
   const params = new URLSearchParams()
   if (options.unassigned) params.set('unassigned', 'true')
   if (options.armyId != null) params.set('army_id', String(options.armyId))
   if (options.includeFaction === false) params.set('include_faction', 'false')
-  return request<TtsProfileSummary[]>(`/api/tts-profiles?${params}`)
+  if (options.all) {
+    params.set('all', 'true')
+  } else {
+    params.set('limit', String(options.limit ?? 20))
+    params.set('offset', String(options.offset ?? 0))
+  }
+  const q = options.q?.trim()
+  if (q) params.set('q', q)
+  if (options.includeTeamOps) params.set('include_team_ops', 'true')
+  if (options.figs === 'avec' || options.figs === 'sans') params.set('figs', options.figs)
+  return request<PaginatedTtsProfiles>(`/api/tts-profiles?${params}`)
 }
 
 export function fetchTtsProfile(id: number): Promise<TtsProfileDetail> {

@@ -1,6 +1,6 @@
 //! Profils TTS lus dans la sauvegarde « Infinity the Game - Models ».
 
-use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::fs;
 use std::path::Path;
 use std::sync::Mutex;
@@ -1121,6 +1121,37 @@ pub struct ProfileListQuery {
     /// Catalogue de la faction parente, en plus de la sectorielle demandée.
     pub also_army_id: Option<i64>,
     pub unassigned: bool,
+    /// Recherche texte (nom, loadout, nom TTS, marqueur, différences).
+    pub q: Option<String>,
+    pub limit: u32,
+    pub offset: u32,
+    /// Inclut Spec-Ops / Team-Ops. Vrai par défaut pour les appels internes.
+    pub include_team_ops: bool,
+    /// `Some(true)` = avec figurine, `Some(false)` = sans ; nécessite `figurine_iscs`.
+    pub has_figurine: Option<bool>,
+}
+
+impl Default for ProfileListQuery {
+    fn default() -> Self {
+        Self {
+            army_id: None,
+            also_army_id: None,
+            unassigned: false,
+            q: None,
+            limit: u32::MAX,
+            offset: 0,
+            include_team_ops: true,
+            has_figurine: None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct ProfileListPage {
+    pub items: Vec<TtsProfileSummary>,
+    pub total: u64,
+    pub limit: u32,
+    pub offset: u32,
 }
 
 #[derive(Debug, Clone)]
@@ -1177,8 +1208,17 @@ impl TtsProfileStore {
     }
 
     pub fn list(&self, query: &ProfileListQuery) -> Result<Vec<TtsProfileSummary>> {
+        Ok(self.list_page(query, None)?.items)
+    }
+
+    /// Page de profils (filtres optionnels sectorielle / recherche / figurines).
+    pub fn list_page(
+        &self,
+        query: &ProfileListQuery,
+        figurine_iscs: Option<&HashSet<String>>,
+    ) -> Result<ProfileListPage> {
         let conn = self.conn.lock().unwrap();
-        list_profiles(&conn, query)
+        list_profiles_page(&conn, query, figurine_iscs)
     }
 
     pub fn army_counts(&self) -> Result<Vec<TtsProfileArmyCount>> {
@@ -1315,6 +1355,14 @@ pub fn list_profiles(
     conn: &Connection,
     query: &ProfileListQuery,
 ) -> Result<Vec<TtsProfileSummary>> {
+    Ok(list_profiles_page(conn, query, None)?.items)
+}
+
+fn list_profiles_page(
+    conn: &Connection,
+    query: &ProfileListQuery,
+    figurine_iscs: Option<&HashSet<String>>,
+) -> Result<ProfileListPage> {
     let mut stmt = conn.prepare(
         "
         SELECT
@@ -1333,7 +1381,10 @@ pub fn list_profiles(
           AND (
             (?3 = 1 AND p.army_id IS NULL)
             OR (
-                ?3 = 0 AND (
+                ?3 = 0 AND ?1 IS NULL
+            )
+            OR (
+                ?3 = 0 AND ?1 IS NOT NULL AND (
                     p.army_id = ?1
                     OR (?2 IS NOT NULL AND p.army_id = ?2)
                     OR EXISTS (
@@ -1361,7 +1412,54 @@ pub fn list_profiles(
         .collect::<std::result::Result<Vec<_>, _>>()
         .context("lecture des profils TTS")?;
     apply_description_differences(&mut listed);
-    Ok(listed.into_iter().map(|(summary, _)| summary).collect())
+
+    let mut matched: Vec<TtsProfileSummary> = listed
+        .into_iter()
+        .map(|(summary, _)| summary)
+        .filter(|summary| query.include_team_ops || !summary.team_ops)
+        .collect();
+
+    if let Some(want_figurine) = query.has_figurine {
+        let iscs = figurine_iscs.cloned().unwrap_or_default();
+        matched.retain(|summary| {
+            let has = iscs.contains(&summary.isc.trim().to_ascii_lowercase());
+            has == want_figurine
+        });
+    }
+
+    if let Some(needle) = query
+        .q
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(crate::tts_figurine::fold_search_text)
+    {
+        matched.retain(|summary| {
+            let haystack = crate::tts_figurine::fold_search_text(&format!(
+                "{} {} {} {} {}",
+                summary.isc,
+                summary.loadout,
+                summary.nom_tts,
+                summary.marker_name.as_deref().unwrap_or(""),
+                summary.differences,
+            ));
+            haystack.contains(&needle)
+        });
+    }
+
+    let total = matched.len() as u64;
+    let start = query.offset as usize;
+    let items = matched
+        .into_iter()
+        .skip(start)
+        .take(query.limit as usize)
+        .collect();
+    Ok(ProfileListPage {
+        items,
+        total,
+        limit: query.limit,
+        offset: query.offset,
+    })
 }
 
 /// True pour les troupes Spec-Ops / Team-Ops (compétence ou libellé ISC).
@@ -2768,6 +2866,7 @@ mod tests {
                 army_id: Some(103),
                 also_army_id: Some(101),
                 unassigned: false,
+                ..Default::default()
             },
         )
         .unwrap();
@@ -2780,6 +2879,7 @@ mod tests {
                 army_id: Some(103),
                 also_army_id: None,
                 unassigned: false,
+                ..Default::default()
             },
         )
         .unwrap();
@@ -2823,6 +2923,7 @@ mod tests {
                 army_id: Some(103),
                 also_army_id: None,
                 unassigned: false,
+                ..Default::default()
             },
         )
         .unwrap();
@@ -2894,6 +2995,7 @@ mod tests {
                 army_id: Some(101),
                 also_army_id: None,
                 unassigned: false,
+                ..Default::default()
             },
         )
         .unwrap();

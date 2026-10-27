@@ -664,6 +664,13 @@ export interface PaginatedTtsFigurines {
   offset: number
 }
 
+export interface PaginatedTtsProfiles {
+  items: TtsProfileSummary[]
+  total: number
+  limit: number
+  offset: number
+}
+
 export interface TtsFigurineMeta {
   painters: string[]
   noms: string[]

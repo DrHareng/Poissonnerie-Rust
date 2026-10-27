@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { RouterLink } from 'vue-router'
 import { Box } from '@lucide/vue'
 import { toast } from 'vue-sonner'
@@ -23,7 +23,6 @@ import { useAdminEditMode } from '@/composables/useAdminEditMode'
 import { useArmies } from '@/composables/useArmies'
 import { useAppSidePanel } from '@/composables/useAppSidePanel'
 import { silhouetteKind } from '@/lib/silhouetteKind'
-import { foldSearchText } from '@/lib/utils'
 import {
   fetchTtsProfile,
   fetchTtsProfileArmies,
@@ -32,6 +31,9 @@ import {
 } from '@/lib/api'
 import type { Army, TtsProfileDetail, TtsProfileForm, TtsProfileSummary } from '@/types/elo'
 import { isListableArmy } from '@/lib/army'
+
+const PAGE_SIZE = 20
+const SEARCH_DEBOUNCE_MS = 200
 
 type FigFilter = 'tous' | 'avec' | 'sans'
 
@@ -54,7 +56,9 @@ const { canEditContent } = useAdminEditMode()
 const showSpecialOps = ref(false)
 const search = defineModel<string>('search', { default: '' })
 const profiles = ref<TtsProfileSummary[]>([])
+const total = ref(0)
 const loading = ref(false)
+const loadingMore = ref(false)
 const loadError = ref('')
 const detail = ref<TtsProfileDetail | null>(null)
 const draft = ref<TtsProfileDetail | null>(null)
@@ -62,6 +66,13 @@ const draftSectorialIds = ref<number[]>([])
 const addArmyId = ref<string>()
 const saving = ref(false)
 const extraArmies = ref<Army[]>([])
+const scrollEl = ref<HTMLElement | null>(null)
+const loadMoreSentinel = ref<HTMLElement | null>(null)
+let searchDebounce: ReturnType<typeof setTimeout> | null = null
+let loadGeneration = 0
+let loadMoreObserver: IntersectionObserver | null = null
+
+const hasMore = computed(() => profiles.value.length < total.value)
 
 const pickerArmies = computed(() => {
   const known = new Set(armies.value.map((army) => army.id))
@@ -72,18 +83,6 @@ const pickerArmies = computed(() => {
 const figurineIscSet = computed(() =>
   new Set(props.figurineIscs.map((isc) => isc.trim().toLowerCase()).filter(Boolean)),
 )
-
-function isSpecialOps(profile: Pick<TtsProfileSummary, 'nom' | 'team_ops'>) {
-  if (profile.team_ops) return true
-  const name = profile.nom.toLowerCase()
-  return (
-    name.includes('team-ops') ||
-    name.includes('team ops') ||
-    name.includes('spec-ops') ||
-    name.includes('spec ops') ||
-    name.includes('specbot')
-  )
-}
 
 function hasFigurine(profile: { nom: string }) {
   return figurineIscSet.value.has(profile.nom.trim().toLowerCase())
@@ -96,21 +95,8 @@ function figurinesLink(profile: { nom: string }) {
   return { name: 'profils-figs-figs' as const, query }
 }
 
-const filteredProfiles = computed(() => {
-  const needle = foldSearchText(search.value.trim())
-  return profiles.value.filter((profile) => {
-    if (!showSpecialOps.value && isSpecialOps(profile)) return false
-    if (props.figFilter === 'avec' && !hasFigurine(profile)) return false
-    if (props.figFilter === 'sans' && hasFigurine(profile)) return false
-    if (!needle) return true
-    return foldSearchText(
-      [profile.nom, profile.loadout, profile.nom_tts, profile.marker_name ?? '', profile.differences].join(' '),
-    ).includes(needle)
-  })
-})
-
 const tableRows = computed(() => {
-  const rows = filteredProfiles.value.map((profile) => ({
+  const rows = profiles.value.map((profile) => ({
     profile,
     showIsc: true,
     iscSpan: 1,
@@ -150,31 +136,89 @@ onMounted(async () => {
   }
 })
 
-watch(() => props.armyId, () => {
-  void loadProfiles()
-}, { immediate: true })
+watch(
+  [() => props.armyId, () => props.figFilter, showSpecialOps],
+  () => {
+    void loadProfiles(true)
+  },
+  { immediate: true },
+)
 
-async function loadProfiles(keepId?: number) {
-  if (keepId == null) {
-    detail.value = null
-    draft.value = null
-  }
-  if (!props.armyId) {
+watch(search, () => {
+  scheduleReload()
+})
+
+watch(
+  [scrollEl, loadMoreSentinel, hasMore],
+  async () => {
+    await nextTick()
+    bindLoadMoreObserver()
+  },
+)
+
+function scheduleReload() {
+  if (searchDebounce != null) clearTimeout(searchDebounce)
+  searchDebounce = setTimeout(() => {
+    searchDebounce = null
+    void loadProfiles(true)
+  }, SEARCH_DEBOUNCE_MS)
+}
+
+function bindLoadMoreObserver() {
+  loadMoreObserver?.disconnect()
+  loadMoreObserver = null
+  const root = scrollEl.value
+  const target = loadMoreSentinel.value
+  if (!root || !target || typeof IntersectionObserver === 'undefined') return
+  loadMoreObserver = new IntersectionObserver(
+    (entries) => {
+      if (entries.some((entry) => entry.isIntersecting)) {
+        void loadProfiles(false)
+      }
+    },
+    { root, rootMargin: '200px 0px' },
+  )
+  loadMoreObserver.observe(target)
+}
+
+async function loadProfiles(reset = true, keepId?: number) {
+  const generation = reset ? ++loadGeneration : loadGeneration
+  if (reset) {
+    if (keepId == null) {
+      detail.value = null
+      draft.value = null
+    }
+    loading.value = true
+    loadError.value = ''
     profiles.value = []
-    return
+    total.value = 0
+  } else {
+    if (loadingMore.value || loading.value || !hasMore.value) return
+    loadingMore.value = true
   }
-  loading.value = true
-  loadError.value = ''
   try {
-    profiles.value = await fetchTtsProfiles({
-      armyId: Number(props.armyId),
+    const armyId = Number(props.armyId)
+    const page = await fetchTtsProfiles({
+      armyId: armyId > 0 ? armyId : undefined,
       includeFaction: false,
+      limit: PAGE_SIZE,
+      offset: reset ? 0 : profiles.value.length,
+      q: search.value,
+      includeTeamOps: showSpecialOps.value,
+      figs: props.figFilter,
     })
+    if (generation !== loadGeneration) return
+    total.value = page.total
+    profiles.value = reset ? page.items : [...profiles.value, ...page.items]
   } catch (error) {
-    profiles.value = []
+    if (generation !== loadGeneration) return
     loadError.value = error instanceof Error ? error.message : 'Impossible de charger les profils'
+    if (reset) profiles.value = []
   } finally {
-    loading.value = false
+    if (generation === loadGeneration) {
+      loading.value = false
+      loadingMore.value = false
+    }
   }
 }
 
@@ -227,7 +271,7 @@ async function saveProfile() {
     const updated = await updateTtsProfile(draft.value.id, payload)
     toast.success('Profil enregistré')
     draftSectorialIds.value = [...updated.sectorial_ids]
-    await loadProfiles(updated.id)
+    await loadProfiles(true, updated.id)
     if (profiles.value.some((profile) => profile.id === updated.id)) {
       detail.value = updated
       draft.value = structuredClone(updated)
@@ -270,7 +314,12 @@ function closeSheet() {
 }
 
 watch(detail, (profile) => setCustomSide(profile != null), { immediate: true })
-onBeforeUnmount(() => setCustomSide(false))
+onBeforeUnmount(() => {
+  if (searchDebounce != null) clearTimeout(searchDebounce)
+  loadMoreObserver?.disconnect()
+  loadMoreObserver = null
+  setCustomSide(false)
+})
 </script>
 
 <template>
@@ -309,10 +358,7 @@ onBeforeUnmount(() => setCustomSide(false))
     </Card>
   </Teleport>
   <div class="grid gap-4">
-    <label
-      v-if="armyId"
-      class="flex items-start gap-2 text-sm text-muted-foreground"
-    >
+    <label class="flex items-start gap-2 text-sm text-muted-foreground">
       <input v-model="showSpecialOps" type="checkbox" class="mt-1" />
       <span>Voir les team-ops/spec-ops</span>
     </label>
@@ -322,17 +368,18 @@ onBeforeUnmount(() => setCustomSide(false))
       <AlertDescription>{{ loadError }}</AlertDescription>
     </Alert>
 
-    <p v-else-if="!armyId" class="text-sm text-muted-foreground">
-      Choisis une sectorielle pour afficher ses profils.
-    </p>
     <p v-else-if="loading" class="text-sm text-muted-foreground">
       Chargement…
     </p>
-    <p v-else-if="filteredProfiles.length === 0" class="text-sm text-muted-foreground">
+    <p v-else-if="profiles.length === 0" class="text-sm text-muted-foreground">
       Aucun profil.
     </p>
 
-    <div v-else class="profile-table max-h-[32rem] overflow-auto rounded-lg border border-border">
+    <div
+      v-else
+      ref="scrollEl"
+      class="profile-table max-h-[32rem] overflow-auto rounded-lg border border-border"
+    >
       <Table class="table-fixed border-separate border-spacing-0">
         <colgroup>
           <col style="width: 25%" />
@@ -386,10 +433,16 @@ onBeforeUnmount(() => setCustomSide(false))
           </TableRow>
         </TableBody>
       </Table>
+      <div ref="loadMoreSentinel" class="flex h-10 items-center justify-center">
+        <p v-if="loadingMore" class="text-sm text-muted-foreground">Chargement…</p>
+        <p v-else-if="!hasMore && total > PAGE_SIZE" class="text-sm text-muted-foreground">
+          {{ total }} profil{{ total > 1 ? 's' : '' }}
+        </p>
+      </div>
     </div>
 
-    <p v-if="!loading && armyId" class="text-xs text-muted-foreground">
-      {{ filteredProfiles.length }} profil{{ filteredProfiles.length > 1 ? 's' : '' }}
+    <p v-if="!loading && profiles.length > 0 && total <= PAGE_SIZE" class="text-xs text-muted-foreground">
+      {{ total }} profil{{ total > 1 ? 's' : '' }}
     </p>
 
     <form

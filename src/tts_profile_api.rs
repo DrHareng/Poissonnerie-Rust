@@ -1,3 +1,5 @@
+use std::collections::HashSet;
+
 use axum::{
     extract::{Path, Query, State},
     routing::get,
@@ -10,11 +12,14 @@ use crate::{
     api::{ApiError, AppState},
     auth,
     tts_profile::{
-        ProfileFormUpdate, ProfileListQuery, ProfileUpdate, TtsProfileArmyCount, TtsProfileDetail,
-        TtsProfileLabel, TtsProfileSummary,
+        ProfileFormUpdate, ProfileListPage, ProfileListQuery, ProfileUpdate, TtsProfileArmyCount,
+        TtsProfileDetail, TtsProfileLabel,
     },
     User,
 };
+
+const PROFILE_PAGE_DEFAULT: u32 = 20;
+const PROFILE_PAGE_MAX: u32 = 100;
 
 pub fn tts_profile_routes() -> Router<AppState> {
     Router::new()
@@ -35,6 +40,16 @@ struct ListProfilesQuery {
     /// Inclut les profils encore rattachés à la faction parente. Vrai par défaut.
     #[serde(default = "default_true")]
     include_faction: bool,
+    q: Option<String>,
+    limit: Option<u32>,
+    offset: Option<u32>,
+    /// Catalogue complet (listes TTS) : ignore la pagination.
+    all: Option<bool>,
+    /// Inclut Spec-Ops / Team-Ops. Faux par défaut (UI profils).
+    #[serde(default)]
+    include_team_ops: bool,
+    /// `avec` | `sans` | absent.
+    figs: Option<String>,
 }
 
 fn default_true() -> bool {
@@ -111,11 +126,35 @@ async fn list_profile_labels(
 async fn list_profiles(
     State(state): State<AppState>,
     Query(query): Query<ListProfilesQuery>,
-) -> Result<Json<Vec<TtsProfileSummary>>, ApiError> {
-    let filter = profile_query(&state, &query)?;
+) -> Result<Json<ProfileListPage>, ApiError> {
+    let all = query.all.unwrap_or(false);
+    let limit = if all {
+        u32::MAX
+    } else {
+        query
+            .limit
+            .unwrap_or(PROFILE_PAGE_DEFAULT)
+            .clamp(1, PROFILE_PAGE_MAX)
+    };
+    let offset = if all { 0 } else { query.offset.unwrap_or(0) };
+    let has_figurine = match query.figs.as_deref().map(str::trim) {
+        Some("avec") => Some(true),
+        Some("sans") => Some(false),
+        _ => None,
+    };
+    let figurine_iscs = if has_figurine.is_some() {
+        let meta = state
+            .tts_figurines
+            .list_meta()
+            .map_err(|error| ApiError::bad_request(error.to_string()))?;
+        Some(meta.iscs.into_iter().collect::<HashSet<_>>())
+    } else {
+        None
+    };
+    let filter = profile_query(&state, &query, limit, offset, has_figurine)?;
     state
         .tts_profiles
-        .list(&filter)
+        .list_page(&filter, figurine_iscs.as_ref())
         .map(Json)
         .map_err(|error| ApiError::bad_request(error.to_string()))
 }
@@ -123,17 +162,34 @@ async fn list_profiles(
 fn profile_query(
     state: &AppState,
     query: &ListProfilesQuery,
+    limit: u32,
+    offset: u32,
+    has_figurine: Option<bool>,
 ) -> Result<ProfileListQuery, ApiError> {
     if query.unassigned {
         return Ok(ProfileListQuery {
             army_id: None,
             also_army_id: None,
             unassigned: true,
+            q: query.q.clone(),
+            limit,
+            offset,
+            include_team_ops: query.include_team_ops,
+            has_figurine,
         });
     }
-    let army_id = query
-        .army_id
-        .ok_or_else(|| ApiError::bad_request("indique une sectorielle"))?;
+    let Some(army_id) = query.army_id.filter(|id| *id > 0) else {
+        return Ok(ProfileListQuery {
+            army_id: None,
+            also_army_id: None,
+            unassigned: false,
+            q: query.q.clone(),
+            limit,
+            offset,
+            include_team_ops: query.include_team_ops,
+            has_figurine,
+        });
+    };
     let army = state
         .armies
         .get(army_id)
@@ -149,6 +205,11 @@ fn profile_query(
         army_id: Some(i64::from(army.id)),
         also_army_id,
         unassigned: false,
+        q: query.q.clone(),
+        limit,
+        offset,
+        include_team_ops: query.include_team_ops,
+        has_figurine,
     })
 }
 

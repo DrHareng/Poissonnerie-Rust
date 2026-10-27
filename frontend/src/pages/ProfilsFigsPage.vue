@@ -58,11 +58,7 @@ const isProfilesTab = computed(() => route.name === 'profils-figs-profils')
 const isFigsTab = computed(() => route.name === 'profils-figs-figs')
 const isListsTab = computed(() => route.name === 'profils-figs-listes')
 
-const showSearch = computed(() => {
-  if (isFigsTab.value) return true
-  if (isProfilesTab.value) return !!armyId.value
-  return false
-})
+const showSearch = computed(() => isFigsTab.value || isProfilesTab.value)
 
 const showSectorialBar = computed(() => !isListsTab.value)
 
@@ -315,7 +311,7 @@ onBeforeUnmount(() => {
           <SectorialPicker
             :model-value="armyId"
             :armies="pickerArmies"
-            :clearable="isFigsTab"
+            clearable
             placeholder="Choisir une sectorielle"
             @update:model-value="onSectorialChange"
           />
@@ -333,7 +329,7 @@ onBeforeUnmount(() => {
             @update:model-value="painterFilter = $event ?? ''"
           />
         </div>
-        <div v-if="isProfilesTab && armyId" class="grid min-w-36 gap-1.5">
+        <div v-if="isProfilesTab" class="grid min-w-36 gap-1.5">
           <Label>Figurines</Label>
           <Select :model-value="figFilter" @update:model-value="figFilter = ($event as FigFilter) ?? 'tous'">
             <SelectTrigger class="w-full min-w-36">

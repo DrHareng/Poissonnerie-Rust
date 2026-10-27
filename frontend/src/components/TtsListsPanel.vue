@@ -631,10 +631,13 @@ async function launch() {
     }
     picks.value = next
     if (expanded.entries.some((entry) => entry.holomask)) {
-      sectorProfiles.value = await fetchTtsProfiles({
+      const page = await fetchTtsProfiles({
         armyId: expanded.army_id,
         includeFaction: false,
+        all: true,
+        includeTeamOps: true,
       })
+      sectorProfiles.value = page.items
     }
     if (expanded.entries.length === 0) {
       toast.message('Liste vide')
