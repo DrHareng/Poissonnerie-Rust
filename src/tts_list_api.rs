@@ -85,7 +85,9 @@ struct BagBody {
     color_g1: Option<String>,
     #[serde(default)]
     color_g2: Option<String>,
-    army_id: i64,
+    /// Optionnel : si absent, pas de filtre sectorielle sur les profils.
+    #[serde(default)]
+    army_id: Option<i64>,
     picks: Vec<BagPick>,
 }
 
@@ -178,11 +180,15 @@ async fn build_bag(
     if body.picks.is_empty() {
         return Err(ApiError::bad_request("aucune figurine sélectionnée"));
     }
-    let army = load_army(&state, body.army_id)?;
-    let color_g1 = parse_pick_color(
-        body.color_g1.as_deref(),
-        &tts_object::sectorial_color_hex(&army.slug).unwrap_or_else(|| "FFFFFF".to_string()),
-    )?;
+    let army = match body.army_id {
+        Some(army_id) if army_id > 0 => Some(load_army(&state, army_id)?),
+        _ => None,
+    };
+    let default_hex = army
+        .as_ref()
+        .and_then(|army| tts_object::sectorial_color_hex(&army.slug))
+        .unwrap_or_else(|| "FFFFFF".to_string());
+    let color_g1 = parse_pick_color(body.color_g1.as_deref(), &default_hex)?;
     let color_g2 = parse_pick_color(body.color_g2.as_deref(), "FFFFFF")?;
     let all_figurines = state
         .tts_figurines
@@ -201,14 +207,16 @@ async fn build_bag(
                 figurine.isc
             )));
         }
-        let in_army = state
-            .tts_profiles
-            .profile_in_army(pick.profile_id, body.army_id)
-            .map_err(|error| ApiError::bad_request(error.to_string()))?;
-        if !in_army {
-            return Err(ApiError::bad_request(
-                "ce profil n'est pas dans cette sectorielle",
-            ));
+        if let Some(army_id) = body.army_id.filter(|id| *id > 0) {
+            let in_army = state
+                .tts_profiles
+                .profile_in_army(pick.profile_id, army_id)
+                .map_err(|error| ApiError::bad_request(error.to_string()))?;
+            if !in_army {
+                return Err(ApiError::bad_request(
+                    "ce profil n'est pas dans cette sectorielle",
+                ));
+            }
         }
         let color = if let Some(raw) = pick.color.as_deref() {
             parse_pick_color(Some(raw), "FFFFFF")?

@@ -97,6 +97,12 @@ struct ArmyQuery {
 }
 
 #[derive(Debug, Deserialize)]
+struct OptionalArmyQuery {
+    /// Absent = loadouts de toutes les sectorielles pour cet ISC.
+    army_id: Option<i64>,
+}
+
+#[derive(Debug, Deserialize)]
 struct FigurineListQuery {
     limit: Option<u32>,
     offset: Option<u32>,
@@ -200,9 +206,11 @@ async fn list_figurine_labels(
 async fn list_figurine_loadouts(
     State(state): State<AppState>,
     Path(id): Path<i64>,
-    Query(query): Query<ArmyQuery>,
+    Query(query): Query<OptionalArmyQuery>,
 ) -> Result<Json<Vec<TtsProfileLoadout>>, ApiError> {
-    require_army(&state, query.army_id)?;
+    if let Some(army_id) = query.army_id {
+        require_army(&state, army_id)?;
+    }
     let figurine = state
         .tts_figurines
         .get(id)

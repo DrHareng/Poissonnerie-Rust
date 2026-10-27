@@ -1186,12 +1186,16 @@ impl TtsProfileStore {
         army_counts(&conn)
     }
 
-    pub fn loadouts_for_isc(&self, isc: &str, army_id: i64) -> Result<Vec<TtsProfileLoadout>> {
+    pub fn loadouts_for_isc(
+        &self,
+        isc: &str,
+        army_id: Option<i64>,
+    ) -> Result<Vec<TtsProfileLoadout>> {
         let conn = self.conn.lock().unwrap();
-        let loadouts = list_loadouts(&conn, isc, Some(army_id))?;
+        let loadouts = list_loadouts(&conn, isc, army_id)?;
         if loadouts.is_empty() {
             // Périphériques (900) ou formes de transmute / sapper (ISC distinct).
-            list_form_loadouts(&conn, isc, Some(army_id))
+            list_form_loadouts(&conn, isc, army_id)
         } else {
             Ok(loadouts)
         }

@@ -176,7 +176,8 @@ export function buildTtsListBag(payload: {
   bag_name: string
   color_g1?: string
   color_g2?: string
-  army_id: number
+  /** Absent = pas de filtre sectorielle. */
+  army_id?: number
   picks: Array<{
     figurine_id: number
     profile_id: number
@@ -222,8 +223,17 @@ export function fetchTtsFigurineLabels(armyId: number): Promise<TtsFigurineLabel
   return request<TtsFigurineLabel[]>(`/api/tts-figurines/labels?army_id=${armyId}`)
 }
 
-export function fetchTtsFigurineLoadouts(id: number, armyId: number): Promise<TtsFigurineLoadout[]> {
-  return request<TtsFigurineLoadout[]>(`/api/tts-figurines/${id}/loadouts?army_id=${armyId}`)
+export function fetchTtsFigurineLoadouts(
+  id: number,
+  armyId?: number | null,
+): Promise<TtsFigurineLoadout[]> {
+  const params = new URLSearchParams()
+  const army = Number(armyId)
+  if (army > 0) params.set('army_id', String(army))
+  const query = params.toString()
+  return request<TtsFigurineLoadout[]>(
+    `/api/tts-figurines/${id}/loadouts${query ? `?${query}` : ''}`,
+  )
 }
 
 export function fetchTtsSectorialColor(armyId: number): Promise<string> {

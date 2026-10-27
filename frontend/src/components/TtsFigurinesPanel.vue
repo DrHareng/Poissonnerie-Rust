@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
-import { Download, ShoppingCart, Trash2, X } from '@lucide/vue'
+import { Download, Pencil, ShoppingCart, Trash2, X } from '@lucide/vue'
 import { toast } from 'vue-sonner'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
@@ -290,14 +290,18 @@ function openEdit(figurine: TtsFigurine) {
   panel.value = 'edit'
 }
 
-async function loadFigurineLoadouts(figurine: TtsFigurine, active: () => boolean) {
+async function loadFigurineLoadouts(
+  figurine: TtsFigurine,
+  active: () => boolean,
+  options: { allSectorials?: boolean } = {},
+) {
   loadouts.value = []
   loadoutsError.value = ''
   selectedLoadoutKey.value = ''
   loadoutsLoading.value = true
   try {
-    const armyId = Number(props.armyId)
-    if (!armyId) {
+    const armyId = options.allSectorials ? undefined : Number(props.armyId) || undefined
+    if (!options.allSectorials && !armyId) {
       loadoutsError.value = 'Choisis une sectorielle.'
       return
     }
@@ -322,17 +326,28 @@ async function openDownload(figurine: TtsFigurine) {
   await loadFigurineLoadouts(figurine, () => downloadTarget.value?.id === figurine.id)
 }
 
-async function openCartAdd(figurine: TtsFigurine) {
-  const armyId = Number(props.armyId)
-  if (!armyId) {
-    toast.error('Choisis une sectorielle pour ajouter au panier.')
-    return
-  }
+/** Clic sur une fig : fiche d’ajout au panier (loadouts toutes sectorielles). */
+async function openFigurine(figurine: TtsFigurine) {
   panel.value = null
   downloadTarget.value = null
   cartAddTarget.value = figurine
-  await loadFigurineLoadouts(figurine, () => cartAddTarget.value?.id === figurine.id)
+  await loadFigurineLoadouts(
+    figurine,
+    () => cartAddTarget.value?.id === figurine.id,
+    { allSectorials: true },
+  )
 }
+
+const cartLoadoutOptions = computed(() =>
+  loadouts.value.map((option) => {
+    const base = loadoutTitle(option)
+    const extra = option.differences.trim()
+    return {
+      value: loadoutKey(option),
+      label: extra ? `${base} · ${extra}` : base,
+    }
+  }),
+)
 
 function confirmCartAdd() {
   const figurine = cartAddTarget.value
@@ -358,11 +373,6 @@ function cancelCartAdd() {
 }
 
 async function downloadCartBag() {
-  const armyId = Number(props.armyId)
-  if (!armyId) {
-    toast.error('Choisis une sectorielle.')
-    return
-  }
   if (!cartItems.value.length || bagDownloading.value) return
   const missingBundle = cartItems.value.some((line) => !line.asset_bundle_url.trim())
   if (missingBundle) {
@@ -370,6 +380,7 @@ async function downloadCartBag() {
     return
   }
   bagDownloading.value = true
+  const armyId = Number(props.armyId) || undefined
   try {
     const object = await buildTtsListBag({
       bag_name: bagName.value.trim() || 'Panier Figs3D',
@@ -661,7 +672,7 @@ watch(() => props.armyId, () => {
   if (panel.value === 'download' && downloadTarget.value) {
     void openDownload(downloadTarget.value)
   } else if (cartAddTarget.value) {
-    void openCartAdd(cartAddTarget.value)
+    void openFigurine(cartAddTarget.value)
   }
 }, { immediate: true })
 
@@ -951,83 +962,61 @@ onBeforeUnmount(() => {
       class="neon-panel flex h-full max-h-full min-h-0 flex-col overflow-hidden"
     >
       <CardHeader class="shrink-0 pb-3">
-        <div class="flex items-start justify-between gap-2">
-          <div class="min-w-0">
-            <CardTitle class="flex items-center gap-2">
-              <ShoppingCart class="size-4 shrink-0" />
-              Ajouter au panier
-            </CardTitle>
-            <CardDescription>
-              {{ cartAddTarget.nom }} — choisis le loadout TTS.
-            </CardDescription>
-          </div>
-          <Button type="button" variant="ghost" size="sm" @click="cancelCartAdd">
-            Annuler
+        <div class="flex items-start justify-end">
+          <Button type="button" variant="ghost" size="icon-sm" aria-label="Fermer" @click="cancelCartAdd">
+            <X class="size-4" />
           </Button>
         </div>
       </CardHeader>
-      <CardContent class="min-h-0 flex-1 space-y-4 overflow-y-auto pt-0">
+      <CardContent class="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto pt-0">
+        <div class="space-y-1.5">
+          <Label>Nom</Label>
+          <p class="text-sm font-medium break-words">{{ cartAddTarget.nom }}</p>
+        </div>
         <Alert v-if="loadoutsError" variant="destructive">
           <AlertTitle>Loadouts indisponibles</AlertTitle>
           <AlertDescription>{{ loadoutsError }}</AlertDescription>
         </Alert>
-        <p v-else-if="loadoutsLoading" class="text-sm text-muted-foreground">
-          Chargement des loadouts…
-        </p>
-        <p v-else-if="!loadouts.length" class="text-sm text-muted-foreground">
-          Aucun loadout connu pour ce nom.
-        </p>
-        <form v-else class="space-y-4" @submit.prevent="confirmCartAdd">
-          <div class="space-y-2">
-            <div class="flex items-center justify-between gap-2">
-              <p class="text-sm font-medium">Couleur de socle</p>
-              <Button
-                v-if="color.toUpperCase() !== sectorialColor.toUpperCase()"
-                type="button"
-                variant="ghost"
-                size="sm"
-                @click="color = sectorialColor"
-              >
-                Couleur de la sectorielle
-              </Button>
-            </div>
-            <ColorPicker v-model="color" />
+        <div v-else class="space-y-1.5">
+          <Label>Loadout TTS</Label>
+          <p v-if="loadoutsLoading" class="text-sm text-muted-foreground">
+            Chargement…
+          </p>
+          <p v-else-if="!loadouts.length" class="text-sm text-muted-foreground">
+            Aucun loadout connu pour ce nom.
+          </p>
+          <PlayerPicker
+            v-else
+            :model-value="selectedLoadoutKey || undefined"
+            :options="cartLoadoutOptions"
+            placeholder="Choisir un loadout"
+            empty-message="Aucun loadout."
+            @update:model-value="selectedLoadoutKey = $event ?? ''"
+          />
+        </div>
+        <Button
+          type="button"
+          class="w-full"
+          :disabled="!selectedLoadoutKey || loadoutsLoading"
+          @click="confirmCartAdd"
+        >
+          <ShoppingCart class="size-4" />
+          Ajouter au panier
+        </Button>
+        <div class="bg-muted/30 min-h-48 flex-1 overflow-hidden rounded-lg">
+          <img
+            v-if="fullPhotoSrc(cartAddTarget)"
+            :src="fullPhotoSrc(cartAddTarget)"
+            :alt="cartAddTarget.nom"
+            class="size-full max-h-[min(28rem,50vh)] object-contain"
+          >
+          <div
+            v-else
+            class="text-muted-foreground flex min-h-48 items-center justify-center text-sm"
+          >
+            Sans photo
           </div>
-          <fieldset class="space-y-2">
-            <legend class="text-sm font-medium">Loadout TTS</legend>
-            <div class="max-h-[28rem] space-y-1 overflow-y-auto">
-              <label
-                v-for="option in loadouts"
-                :key="loadoutKey(option)"
-                class="flex cursor-pointer gap-2 rounded-md border px-2 py-1.5 text-sm"
-                :class="loadoutKey(option) === selectedLoadoutKey ? 'border-primary' : 'border-border'"
-              >
-                <input
-                  v-model="selectedLoadoutKey"
-                  class="mt-1"
-                  type="radio"
-                  name="cart-figurine-loadout"
-                  :value="loadoutKey(option)"
-                >
-                <span class="min-w-0">
-                  <span class="block break-words">{{ loadoutTitle(option) }}</span>
-                  <span class="block text-muted-foreground">
-                    {{ option.marker_name || '—' }}
-                  </span>
-                  <span
-                    v-if="option.differences"
-                    class="block break-words text-muted-foreground"
-                  >
-                    {{ option.differences }}
-                  </span>
-                </span>
-              </label>
-            </div>
-          </fieldset>
-          <Button type="submit" :disabled="!selectedLoadoutKey">
-            Ajouter au panier
-          </Button>
-        </form>
+        </div>
       </CardContent>
     </Card>
 
@@ -1179,7 +1168,7 @@ onBeforeUnmount(() => {
         class="neon-panel min-w-0 overflow-hidden"
       >
         <div class="relative">
-          <button type="button" class="block w-full" @click="openEdit(figurine)">
+          <button type="button" class="block w-full" @click="openFigurine(figurine)">
             <img
               v-if="figurine.photo_url"
               :src="photoSrc(figurine)"
@@ -1195,25 +1184,28 @@ onBeforeUnmount(() => {
               Sans photo
             </div>
           </button>
-          <button
-            type="button"
-            class="absolute top-2 left-2 flex size-8 items-center justify-center rounded-md bg-black text-white"
-            aria-label="Ajouter au panier"
-            title="Ajouter au panier"
-            @click="openCartAdd(figurine)"
-          >
-            <ShoppingCart class="size-4" />
-          </button>
-          <button
-            type="button"
-            class="absolute top-2 right-2 flex size-8 items-center justify-center rounded-md bg-black text-white"
-            aria-label="Télécharger"
-            @click="openDownload(figurine)"
-          >
-            <Download class="size-4" />
-          </button>
+          <div class="absolute top-2 right-2 flex gap-1">
+            <button
+              v-if="canEditContent"
+              type="button"
+              class="flex size-8 items-center justify-center rounded-md bg-black text-white"
+              aria-label="Modifier"
+              title="Modifier"
+              @click="openEdit(figurine)"
+            >
+              <Pencil class="size-4" />
+            </button>
+            <button
+              type="button"
+              class="flex size-8 items-center justify-center rounded-md bg-black text-white"
+              aria-label="Télécharger"
+              @click="openDownload(figurine)"
+            >
+              <Download class="size-4" />
+            </button>
+          </div>
         </div>
-        <button type="button" class="block w-full min-w-0 px-3 pt-2 pb-3 text-left" @click="openEdit(figurine)">
+        <button type="button" class="block w-full min-w-0 px-3 pt-2 pb-3 text-left" @click="openFigurine(figurine)">
           <div class="min-w-0 space-y-1">
             <div class="flex min-w-0 items-center gap-1.5">
               <p class="min-w-0 truncate font-medium" :title="figurine.nom">{{ figurine.nom }}</p>
