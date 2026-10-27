@@ -40,11 +40,31 @@ const query = ref('')
 
 const { top, left, width, height, update } = useElementBounding(trigger)
 
-const dropdownStyle = computed(() => ({
-  top: `${top.value + height.value + 4}px`,
-  left: `${left.value}px`,
-  width: `${width.value}px`,
-}))
+const dropdownStyle = computed(() => {
+  const margin = 8
+  const triggerWidth = Math.max(0, width.value)
+  const viewportMax = Math.max(triggerWidth, window.innerWidth - margin * 2)
+  let leftPos = left.value
+  leftPos = Math.min(leftPos, window.innerWidth - margin - triggerWidth)
+  leftPos = Math.max(margin, leftPos)
+  return {
+    top: `${top.value + height.value + 4}px`,
+    left: `${leftPos}px`,
+    minWidth: `${triggerWidth}px`,
+    width: 'max-content',
+    maxWidth: `${viewportMax}px`,
+  }
+})
+
+function clampDropdownInViewport() {
+  const el = dropdown.value
+  if (!el) return
+  const margin = 8
+  const rect = el.getBoundingClientRect()
+  if (rect.right <= window.innerWidth - margin) return
+  const shifted = Math.max(margin, window.innerWidth - margin - rect.width)
+  el.style.left = `${shifted}px`
+}
 
 const selectedArmy = computed(() =>
   props.armies.find((army) => String(army.id) === props.modelValue),
@@ -112,11 +132,15 @@ onClickOutside(
 )
 
 useEventListener('scroll', () => {
-  if (open.value) update()
+  if (!open.value) return
+  update()
+  void nextTick(() => clampDropdownInViewport())
 }, true)
 
 useEventListener('resize', () => {
-  if (open.value) update()
+  if (!open.value) return
+  update()
+  void nextTick(() => clampDropdownInViewport())
 })
 
 watch(
@@ -130,6 +154,8 @@ watch(open, async (isOpen) => {
   if (isOpen) {
     await nextTick()
     update()
+    await nextTick()
+    clampDropdownInViewport()
   }
 })
 
@@ -265,11 +291,11 @@ function clearSelection() {
           @click="selectItem(item)"
         >
           <template v-if="item.kind === 'empty'">
-            <span class="truncate text-muted-foreground">{{ emptyLabel }}</span>
+            <span class="text-muted-foreground">{{ emptyLabel }}</span>
           </template>
           <template v-else>
             <img :src="item.army.logo_url" :alt="item.army.name" class="army-logo shrink-0" />
-            <span class="truncate">{{ item.army.name }}</span>
+            <span>{{ item.army.name }}</span>
           </template>
         </button>
       </div>

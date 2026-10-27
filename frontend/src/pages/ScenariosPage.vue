@@ -582,10 +582,14 @@ watch(
                   :persist="savePreamble"
                 >
                   <div class="space-y-4">
-                    <MarkdownContent :source="preambleParts.before" />
+                    <MarkdownContent
+                      :source="preambleParts.before"
+                      :rules="commonRules"
+                    />
                     <MarkdownContent
                       v-if="preambleParts.after"
                       :source="preambleParts.after"
+                      :rules="commonRules"
                     />
                   </div>
                 </AdminContentEditor>

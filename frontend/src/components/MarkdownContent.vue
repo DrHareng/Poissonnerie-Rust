@@ -2,6 +2,7 @@
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import { X } from '@lucide/vue'
 import { renderMarkdown } from '@/lib/markdown'
+import { expandCommonRules } from '@/lib/scenarioDocument'
 import type { CommonRule } from '@/types/elo'
 import { splitRuleTitle } from '@/lib/ruleTitle'
 import ImageViewer, {
@@ -56,8 +57,39 @@ const tooltipBodyHtml = computed(() => {
   if (!activeRule.value) {
     return '<p class="md-note"><em>Règle introuvable sur ce scénario.</em></p>'
   }
-  return renderMarkdown(activeRule.value.body_md)
+  const ruleLabel = (slug: string) => rulesBySlug.value.get(slug)?.name ?? slug
+  // Inclut les règles citées (ex. Civils → Prise), comme pour l’export document.
+  const expanded = expandCommonRules(
+    [activeRule.value],
+    props.rules ?? [],
+    ruleLabel,
+  )
+  const rootSlug = activeRule.value.slug
+  return expanded
+    .map((rule) => {
+      const body = renderMarkdown(rule.body_md, { ruleLabel })
+      if (rule.slug === rootSlug) return body
+      const title = splitRuleTitle(rule.name)
+      const suffix = title.suffix
+        ? `<span class="text-foreground">${escapeHtml(title.suffix)}</span>`
+        : ''
+      return (
+        `<section class="md-rule-tooltip-related">` +
+        `<p class="md-rule-tooltip-related-title">` +
+        `<span class="text-primary">${escapeHtml(title.label)}</span>${suffix}` +
+        `</p>${body}</section>`
+      )
+    })
+    .join('')
 })
+
+function escapeHtml(text: string) {
+  return text
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+}
 
 const imageViewerOpen = ref(false)
 const imageViewerIndex = ref(0)

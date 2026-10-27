@@ -96,6 +96,9 @@ struct BagPick {
     #[serde(default)]
     form_id: Option<i64>,
     combat_group: u32,
+    /// Couleur de socle dédiée (sinon G1/G2 selon `combat_group`).
+    #[serde(default)]
+    color: Option<String>,
 }
 
 async fn expand_list(
@@ -207,7 +210,9 @@ async fn build_bag(
                 "ce profil n'est pas dans cette sectorielle",
             ));
         }
-        let color = if pick.combat_group <= 1 {
+        let color = if let Some(raw) = pick.color.as_deref() {
+            parse_pick_color(Some(raw), "FFFFFF")?
+        } else if pick.combat_group <= 1 {
             color_g1
         } else {
             color_g2

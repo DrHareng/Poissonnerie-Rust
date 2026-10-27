@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
-import { Download } from '@lucide/vue'
+import { Download, ShoppingCart, Trash2, X } from '@lucide/vue'
 import { toast } from 'vue-sonner'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
@@ -13,8 +13,10 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { useAdminEditMode } from '@/composables/useAdminEditMode'
 import { useAppSidePanel } from '@/composables/useAppSidePanel'
+import { useTtsFigurineCart } from '@/composables/useTtsFigurineCart'
 import { downloadBlob } from '@/lib/scenarioDocument'
 import {
+  buildTtsListBag,
   clearTtsFigurinePhoto,
   createTtsFigurine,
   deleteTtsFigurine,
@@ -60,6 +62,17 @@ const emit = defineEmits<{
 
 const { setCustomSide } = useAppSidePanel()
 const { canEditContent } = useAdminEditMode()
+const {
+  items: cartItems,
+  open: cartOpen,
+  count: cartCount,
+  closeCart,
+  addLine,
+  setLineColor,
+  applyColorToAll,
+  removeLine,
+  clearCart,
+} = useTtsFigurineCart()
 
 const figurines = ref<TtsFigurine[]>([])
 const labels = ref<FigurineLabel[]>([])
@@ -81,6 +94,8 @@ const editingId = ref<number | null>(null)
 /** Lien d'origine de la figurine en édition (conservé si nom/loadout ne changent pas). */
 const originalLink = ref<{ id: number | null; nom: string; loadout: string } | null>(null)
 const downloadTarget = ref<TtsFigurine | null>(null)
+/** Figurine en cours d’ajout au panier (choix du loadout TTS). */
+const cartAddTarget = ref<TtsFigurine | null>(null)
 const loadouts = ref<TtsFigurineLoadout[]>([])
 const loadoutsLoading = ref(false)
 const loadoutsError = ref('')
@@ -88,6 +103,8 @@ const selectedLoadoutKey = ref('')
 const color = ref('FFFFFF')
 const sectorialColor = ref('FFFFFF')
 const downloading = ref(false)
+const bagDownloading = ref(false)
+const bagName = ref('Panier Figs3D')
 const draft = ref<Draft>(emptyDraft())
 const photoFile = ref<File | null>(null)
 const photoPreview = ref('')
@@ -96,6 +113,9 @@ const removeExistingPhoto = ref(false)
 const fileInput = ref<HTMLInputElement | null>(null)
 
 const hasMore = computed(() => figurines.value.length < total.value)
+const sidePanelOpen = computed(
+  () => panel.value != null || cartAddTarget.value != null || cartOpen.value,
+)
 
 const painterOptions = computed(() => uniqueSorted(knownPainters.value))
 
@@ -113,7 +133,6 @@ const loadoutPickerOptions = computed(() => {
 })
 
 const previewSrc = computed(() => photoPreview.value || (!removeExistingPhoto.value ? existingPhoto.value : ''))
-const panelOpen = computed(() => panel.value != null)
 const selectedLoadout = computed(() =>
   loadouts.value.find((loadout) => loadoutKey(loadout) === selectedLoadoutKey.value),
 )
@@ -244,11 +263,13 @@ function downloadFilename(isc: string, loadout: string) {
 
 function openCreate() {
   if (!canEditContent.value) return
+  cartAddTarget.value = null
   resetCreateForm()
   panel.value = 'edit'
 }
 
 function openEdit(figurine: TtsFigurine) {
+  cartAddTarget.value = null
   editingId.value = figurine.id
   originalLink.value = {
     id: figurine.tts_loadout_id,
@@ -269,12 +290,10 @@ function openEdit(figurine: TtsFigurine) {
   panel.value = 'edit'
 }
 
-async function openDownload(figurine: TtsFigurine) {
-  downloadTarget.value = figurine
+async function loadFigurineLoadouts(figurine: TtsFigurine, active: () => boolean) {
   loadouts.value = []
   loadoutsError.value = ''
   selectedLoadoutKey.value = ''
-  panel.value = 'download'
   loadoutsLoading.value = true
   try {
     const armyId = Number(props.armyId)
@@ -283,16 +302,108 @@ async function openDownload(figurine: TtsFigurine) {
       return
     }
     const rows = await fetchTtsFigurineLoadouts(figurine.id, armyId)
-    if (downloadTarget.value?.id !== figurine.id) return
+    if (!active()) return
     loadouts.value = rows
     const match = rows.find((row) => sameText(row.loadout, figurine.loadout)) ?? rows[0]
     selectedLoadoutKey.value = match ? loadoutKey(match) : ''
   } catch (error) {
-    if (downloadTarget.value?.id !== figurine.id) return
-    loadoutsError.value = error instanceof Error ? error.message : 'Impossible de charger les loadouts'
+    if (!active()) return
+    loadoutsError.value =
+      error instanceof Error ? error.message : 'Impossible de charger les loadouts'
   } finally {
-    if (downloadTarget.value?.id === figurine.id) loadoutsLoading.value = false
+    if (active()) loadoutsLoading.value = false
   }
+}
+
+async function openDownload(figurine: TtsFigurine) {
+  cartAddTarget.value = null
+  downloadTarget.value = figurine
+  panel.value = 'download'
+  await loadFigurineLoadouts(figurine, () => downloadTarget.value?.id === figurine.id)
+}
+
+async function openCartAdd(figurine: TtsFigurine) {
+  const armyId = Number(props.armyId)
+  if (!armyId) {
+    toast.error('Choisis une sectorielle pour ajouter au panier.')
+    return
+  }
+  panel.value = null
+  downloadTarget.value = null
+  cartAddTarget.value = figurine
+  await loadFigurineLoadouts(figurine, () => cartAddTarget.value?.id === figurine.id)
+}
+
+function confirmCartAdd() {
+  const figurine = cartAddTarget.value
+  const option = selectedLoadout.value
+  if (!figurine || !option) return
+  addLine(figurine, option, color.value)
+  cartAddTarget.value = null
+  toast.success('Ajouté au panier')
+}
+
+function onCartLineColorInput(key: string, event: Event) {
+  const raw = (event.target as HTMLInputElement).value
+  setLineColor(key, raw)
+}
+
+function applyCartColorToAll() {
+  applyColorToAll(color.value)
+  toast.message('Couleur de socle appliquée à tout le panier')
+}
+
+function cancelCartAdd() {
+  cartAddTarget.value = null
+}
+
+async function downloadCartBag() {
+  const armyId = Number(props.armyId)
+  if (!armyId) {
+    toast.error('Choisis une sectorielle.')
+    return
+  }
+  if (!cartItems.value.length || bagDownloading.value) return
+  const missingBundle = cartItems.value.some((line) => !line.asset_bundle_url.trim())
+  if (missingBundle) {
+    toast.error('Une figurine du panier n’a pas d’asset bundle.')
+    return
+  }
+  bagDownloading.value = true
+  try {
+    const object = await buildTtsListBag({
+      bag_name: bagName.value.trim() || 'Panier Figs3D',
+      color_g1: color.value,
+      color_g2: color.value,
+      army_id: armyId,
+      picks: cartItems.value.map((line) => ({
+        figurine_id: line.figurine_id,
+        profile_id: line.profile_id,
+        form_id: line.form_id ?? undefined,
+        combat_group: 1,
+        color: line.color,
+      })),
+    })
+    downloadBlob(
+      new Blob([JSON.stringify(object, null, 2)], { type: 'application/json' }),
+      bagFilename(bagName.value),
+    )
+    toast.success('Panier TTS téléchargé')
+  } catch (error) {
+    toast.error(error instanceof Error ? error.message : 'Impossible de télécharger le panier')
+  } finally {
+    bagDownloading.value = false
+  }
+}
+
+function bagFilename(name: string) {
+  const safe = name.replace(/[\\/:*?"<>|]/g, ' ').replace(/\s+/g, ' ').trim()
+  return `${safe || 'panier-figs3d'}.json`
+}
+
+function cartLinePhoto(line: { photo_url: string | null; updated_at: number }) {
+  if (!line.photo_url) return ''
+  return withBase(`${line.photo_url}?thumb=1&v=${line.updated_at}`)
 }
 
 async function downloadFigurine() {
@@ -507,7 +618,7 @@ watch(
   },
 )
 
-watch(panelOpen, (open) => setCustomSide(open), { immediate: true })
+watch(sidePanelOpen, (open) => setCustomSide(open), { immediate: true })
 
 watch(canEditContent, (canEdit) => {
   if (!canEdit && panel.value === 'edit' && editingId.value == null) closePanel()
@@ -549,6 +660,8 @@ watch(() => props.armyId, () => {
   void loadPainterOptions()
   if (panel.value === 'download' && downloadTarget.value) {
     void openDownload(downloadTarget.value)
+  } else if (cartAddTarget.value) {
+    void openCartAdd(cartAddTarget.value)
   }
 }, { immediate: true })
 
@@ -832,6 +945,210 @@ onBeforeUnmount(() => {
         </form>
       </CardContent>
     </Card>
+
+    <Card
+      v-else-if="cartAddTarget"
+      class="neon-panel flex h-full max-h-full min-h-0 flex-col overflow-hidden"
+    >
+      <CardHeader class="shrink-0 pb-3">
+        <div class="flex items-start justify-between gap-2">
+          <div class="min-w-0">
+            <CardTitle class="flex items-center gap-2">
+              <ShoppingCart class="size-4 shrink-0" />
+              Ajouter au panier
+            </CardTitle>
+            <CardDescription>
+              {{ cartAddTarget.nom }} — choisis le loadout TTS.
+            </CardDescription>
+          </div>
+          <Button type="button" variant="ghost" size="sm" @click="cancelCartAdd">
+            Annuler
+          </Button>
+        </div>
+      </CardHeader>
+      <CardContent class="min-h-0 flex-1 space-y-4 overflow-y-auto pt-0">
+        <Alert v-if="loadoutsError" variant="destructive">
+          <AlertTitle>Loadouts indisponibles</AlertTitle>
+          <AlertDescription>{{ loadoutsError }}</AlertDescription>
+        </Alert>
+        <p v-else-if="loadoutsLoading" class="text-sm text-muted-foreground">
+          Chargement des loadouts…
+        </p>
+        <p v-else-if="!loadouts.length" class="text-sm text-muted-foreground">
+          Aucun loadout connu pour ce nom.
+        </p>
+        <form v-else class="space-y-4" @submit.prevent="confirmCartAdd">
+          <div class="space-y-2">
+            <div class="flex items-center justify-between gap-2">
+              <p class="text-sm font-medium">Couleur de socle</p>
+              <Button
+                v-if="color.toUpperCase() !== sectorialColor.toUpperCase()"
+                type="button"
+                variant="ghost"
+                size="sm"
+                @click="color = sectorialColor"
+              >
+                Couleur de la sectorielle
+              </Button>
+            </div>
+            <ColorPicker v-model="color" />
+          </div>
+          <fieldset class="space-y-2">
+            <legend class="text-sm font-medium">Loadout TTS</legend>
+            <div class="max-h-[28rem] space-y-1 overflow-y-auto">
+              <label
+                v-for="option in loadouts"
+                :key="loadoutKey(option)"
+                class="flex cursor-pointer gap-2 rounded-md border px-2 py-1.5 text-sm"
+                :class="loadoutKey(option) === selectedLoadoutKey ? 'border-primary' : 'border-border'"
+              >
+                <input
+                  v-model="selectedLoadoutKey"
+                  class="mt-1"
+                  type="radio"
+                  name="cart-figurine-loadout"
+                  :value="loadoutKey(option)"
+                >
+                <span class="min-w-0">
+                  <span class="block break-words">{{ loadoutTitle(option) }}</span>
+                  <span class="block text-muted-foreground">
+                    {{ option.marker_name || '—' }}
+                  </span>
+                  <span
+                    v-if="option.differences"
+                    class="block break-words text-muted-foreground"
+                  >
+                    {{ option.differences }}
+                  </span>
+                </span>
+              </label>
+            </div>
+          </fieldset>
+          <Button type="submit" :disabled="!selectedLoadoutKey">
+            Ajouter au panier
+          </Button>
+        </form>
+      </CardContent>
+    </Card>
+
+    <Card
+      v-else-if="cartOpen"
+      class="neon-panel flex h-full max-h-full min-h-0 flex-col overflow-hidden"
+    >
+      <CardHeader class="shrink-0 pb-3">
+        <div class="flex items-start justify-between gap-2">
+          <div class="min-w-0">
+            <CardTitle class="flex items-center gap-2">
+              <ShoppingCart class="size-4 shrink-0" />
+              Panier
+              <Badge variant="secondary">{{ cartCount }}</Badge>
+            </CardTitle>
+            <CardDescription>
+              Figurines choisies avec leur loadout TTS.
+            </CardDescription>
+          </div>
+          <Button type="button" variant="ghost" size="icon-sm" aria-label="Fermer le panier" @click="closeCart">
+            <X class="size-4" />
+          </Button>
+        </div>
+      </CardHeader>
+      <CardContent class="flex min-h-0 flex-1 flex-col gap-4 overflow-hidden pt-0">
+        <div class="min-h-0 flex-1 space-y-2 overflow-y-auto">
+          <p v-if="!cartItems.length" class="text-sm text-muted-foreground">
+            Panier vide.
+          </p>
+          <div
+            v-for="line in cartItems"
+            :key="line.key"
+            class="flex gap-2 rounded-md border border-border p-2"
+          >
+            <div class="bg-muted size-14 shrink-0 overflow-hidden rounded">
+              <img
+                v-if="cartLinePhoto(line)"
+                :src="cartLinePhoto(line)"
+                :alt="line.nom"
+                class="size-full object-contain"
+              >
+              <div
+                v-else
+                class="text-muted-foreground flex size-full items-center justify-center text-[10px]"
+              >
+                —
+              </div>
+            </div>
+            <div class="min-w-0 flex-1 space-y-1">
+              <p class="truncate text-sm font-medium" :title="line.nom">{{ line.nom }}</p>
+              <p class="text-muted-foreground truncate text-xs" :title="line.loadout">
+                {{ line.loadout || '—' }}
+              </p>
+              <p class="text-muted-foreground truncate text-[11px]">
+                {{ line.painter || 'Sans peintre' }}
+              </p>
+              <label class="flex items-center gap-1.5 text-[11px] text-muted-foreground">
+                <span class="shrink-0">Socle</span>
+                <input
+                  type="color"
+                  class="border-border h-6 w-8 cursor-pointer rounded border bg-transparent p-0"
+                  :value="`#${line.color}`"
+                  :title="`Couleur de socle #${line.color}`"
+                  :aria-label="`Couleur de socle pour ${line.nom}`"
+                  @input="onCartLineColorInput(line.key, $event)"
+                >
+                <span class="font-mono tabular-nums">#{{ line.color }}</span>
+              </label>
+            </div>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon-sm"
+              class="shrink-0"
+              aria-label="Retirer du panier"
+              @click="removeLine(line.key)"
+            >
+              <Trash2 class="size-3.5" />
+            </Button>
+          </div>
+        </div>
+        <div v-if="cartItems.length" class="shrink-0 space-y-3 border-t border-border pt-3">
+          <div class="space-y-1.5">
+            <Label for="cart-bag-name">Nom du sac</Label>
+            <Input id="cart-bag-name" v-model="bagName" maxlength="120" />
+          </div>
+          <div class="space-y-2">
+            <div class="flex items-center justify-between gap-2">
+              <p class="text-sm font-medium">Couleur de socle</p>
+              <div class="flex flex-wrap justify-end gap-1">
+                <Button
+                  v-if="color.toUpperCase() !== sectorialColor.toUpperCase()"
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  @click="color = sectorialColor"
+                >
+                  Sectorielle
+                </Button>
+                <Button type="button" variant="ghost" size="sm" @click="applyCartColorToAll">
+                  Appliquer à toutes
+                </Button>
+              </div>
+            </div>
+            <ColorPicker v-model="color" />
+          </div>
+          <div class="flex flex-wrap gap-2">
+            <Button
+              type="button"
+              :disabled="bagDownloading"
+              @click="downloadCartBag"
+            >
+              {{ bagDownloading ? 'Téléchargement…' : 'Télécharger le sac' }}
+            </Button>
+            <Button type="button" variant="outline" @click="clearCart">
+              Vider
+            </Button>
+          </div>
+        </div>
+      </CardContent>
+    </Card>
   </Teleport>
 
   <div class="flex min-h-0 flex-1 flex-col gap-4">
@@ -877,6 +1194,15 @@ onBeforeUnmount(() => {
             >
               Sans photo
             </div>
+          </button>
+          <button
+            type="button"
+            class="absolute top-2 left-2 flex size-8 items-center justify-center rounded-md bg-black text-white"
+            aria-label="Ajouter au panier"
+            title="Ajouter au panier"
+            @click="openCartAdd(figurine)"
+          >
+            <ShoppingCart class="size-4" />
           </button>
           <button
             type="button"

@@ -49,11 +49,31 @@ const query = ref('')
 
 const { top, left, width, height, update } = useElementBounding(trigger)
 
-const dropdownStyle = computed(() => ({
-  top: `${top.value + height.value + 4}px`,
-  left: `${left.value}px`,
-  width: `${width.value}px`,
-}))
+const dropdownStyle = computed(() => {
+  const margin = 8
+  const triggerWidth = Math.max(0, width.value)
+  const viewportMax = Math.max(triggerWidth, window.innerWidth - margin * 2)
+  let leftPos = left.value
+  leftPos = Math.min(leftPos, window.innerWidth - margin - triggerWidth)
+  leftPos = Math.max(margin, leftPos)
+  return {
+    top: `${top.value + height.value + 4}px`,
+    left: `${leftPos}px`,
+    minWidth: `${triggerWidth}px`,
+    width: 'max-content',
+    maxWidth: `${viewportMax}px`,
+  }
+})
+
+function clampDropdownInViewport() {
+  const el = dropdown.value
+  if (!el) return
+  const margin = 8
+  const rect = el.getBoundingClientRect()
+  if (rect.right <= window.innerWidth - margin) return
+  const shifted = Math.max(margin, window.innerWidth - margin - rect.width)
+  el.style.left = `${shifted}px`
+}
 
 const selectedOption = computed(() =>
   props.options.find((option) => option.value === props.modelValue),
@@ -131,11 +151,15 @@ onClickOutside(
 )
 
 useEventListener('scroll', () => {
-  if (open.value) update()
+  if (!open.value) return
+  update()
+  void nextTick(() => clampDropdownInViewport())
 }, true)
 
 useEventListener('resize', () => {
-  if (open.value) update()
+  if (!open.value) return
+  update()
+  void nextTick(() => clampDropdownInViewport())
 })
 
 watch(
@@ -156,6 +180,8 @@ watch(open, async (isOpen) => {
   if (isOpen) {
     await nextTick()
     update()
+    await nextTick()
+    clampDropdownInViewport()
   }
 })
 
@@ -313,10 +339,7 @@ function clearSelection() {
           }"
           @click="selectItem(item)"
         >
-          <span
-            class="truncate"
-            :class="{ 'text-muted-foreground': item.kind === 'empty' }"
-          >
+          <span :class="{ 'text-muted-foreground': item.kind === 'empty' }">
             {{ item.kind === 'empty' ? emptyLabel : item.option.label }}
           </span>
         </button>

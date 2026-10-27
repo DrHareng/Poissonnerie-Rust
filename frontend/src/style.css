@@ -1309,11 +1309,11 @@
   }
 
   .searchable-picker-dropdown {
-    @apply fixed z-50 max-h-64 overflow-y-auto rounded-md border border-border bg-popover p-1 shadow-lg;
+    @apply fixed z-50 max-h-64 overflow-x-hidden overflow-y-auto rounded-md border border-border bg-popover p-1 shadow-lg;
   }
 
   .searchable-picker-option {
-    @apply flex w-full items-center gap-2 rounded-sm px-2 py-2 text-left text-sm transition-colors hover:bg-accent hover:text-accent-foreground;
+    @apply flex w-full items-center gap-2 rounded-sm px-2 py-2 text-left text-sm whitespace-nowrap transition-colors hover:bg-accent hover:text-accent-foreground;
   }
 
   .searchable-picker-option-highlighted {
@@ -1833,6 +1833,14 @@
 
   .md-rule-tooltip-body {
     @apply text-sm;
+  }
+
+  .md-rule-tooltip-related {
+    @apply mt-3 border-t border-border/60 pt-3;
+  }
+
+  .md-rule-tooltip-related-title {
+    @apply mb-2 font-semibold;
   }
 
   .md-content ul {

@@ -1,13 +1,14 @@
 <script setup lang="ts">
 import { computed, onMounted, onBeforeUnmount, ref, watch } from 'vue'
 import { useRoute, useRouter, type LocationQuery, type LocationQueryRaw } from 'vue-router'
-import { X } from '@lucide/vue'
+import { ShoppingCart, X } from '@lucide/vue'
 import PageTitleTabs from '@/components/PageTitleTabs.vue'
 import PlayerPicker from '@/components/PlayerPicker.vue'
 import SectorialPicker from '@/components/SectorialPicker.vue'
 import TtsFigurinesPanel from '@/components/TtsFigurinesPanel.vue'
 import TtsListsPanel from '@/components/TtsListsPanel.vue'
 import TtsProfilesPanel from '@/components/TtsProfilesPanel.vue'
+import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -20,6 +21,7 @@ import {
 } from '@/components/ui/select'
 import { useAdminEditMode } from '@/composables/useAdminEditMode'
 import { useArmies } from '@/composables/useArmies'
+import { useTtsFigurineCart } from '@/composables/useTtsFigurineCart'
 import { useTtsSectorial } from '@/composables/useTtsSectorial'
 import { fetchTtsFigurineMeta, fetchTtsProfileArmies } from '@/lib/api'
 import { isListableArmy } from '@/lib/army'
@@ -39,6 +41,7 @@ const router = useRouter()
 const { armies, ensureLoaded } = useArmies()
 const { canEditContent } = useAdminEditMode()
 const { armyId, ensureLoaded: ensureSectorial, setArmyId } = useTtsSectorial()
+const { count: cartCount, reopenVisible: cartReopenVisible, openCart } = useTtsFigurineCart()
 const extraArmies = ref<Army[]>([])
 const pickerError = ref('')
 const painterOptions = ref<{ value: string; label: string }[]>([])
@@ -346,33 +349,50 @@ onBeforeUnmount(() => {
         <div v-if="showSearch" class="relative w-full max-w-xs">
           <Input
             v-model="searchDraft"
-            class="w-full pr-9"
+            class="w-full"
+            :class="isFigsTab && cartReopenVisible ? (searchDraft ? 'pr-16' : 'pr-9') : searchDraft ? 'pr-9' : undefined"
             :placeholder="isFigsTab ? 'Nom, loadout, peintre…' : 'Nom, loadout, nom TTS…'"
             autocomplete="off"
           />
-          <button
-            v-if="searchDraft"
-            type="button"
-            class="text-muted-foreground hover:text-foreground absolute top-1/2 right-2 -translate-y-1/2 rounded-sm p-0.5"
-            title="Effacer la recherche"
-            aria-label="Effacer la recherche"
-            @click="searchDraft = ''"
-          >
-            <X class="size-4 opacity-60" />
-          </button>
+          <div class="absolute top-1/2 right-1.5 flex -translate-y-1/2 items-center gap-0.5">
+            <button
+              v-if="searchDraft"
+              type="button"
+              class="text-muted-foreground hover:text-foreground rounded-sm p-0.5"
+              title="Effacer la recherche"
+              aria-label="Effacer la recherche"
+              @click="searchDraft = ''"
+            >
+              <X class="size-4 opacity-60" />
+            </button>
+            <button
+              v-if="isFigsTab && cartReopenVisible"
+              type="button"
+              class="text-muted-foreground hover:text-foreground relative rounded-sm p-0.5"
+              title="Rouvrir le panier"
+              aria-label="Rouvrir le panier"
+              @click="openCart"
+            >
+              <ShoppingCart class="size-4" />
+              <Badge
+                variant="default"
+                class="absolute -top-1.5 -right-1.5 h-4 min-w-4 justify-center px-1 text-[10px] leading-none"
+              >
+                {{ cartCount }}
+              </Badge>
+            </button>
+          </div>
         </div>
-        <label
-          v-if="isFigsTab && canEditContent"
-          class="flex items-center gap-2 pb-2 text-sm text-muted-foreground"
-        >
+      </div>
+      <div
+        v-if="isFigsTab && canEditContent"
+        class="flex flex-wrap items-center gap-3"
+      >
+        <label class="flex items-center gap-2 text-sm text-muted-foreground">
           <input v-model="incompleteOnly" type="checkbox" class="size-4" />
           <span>Informations manquantes</span>
         </label>
-        <Button
-          v-if="isFigsTab && canEditContent"
-          type="button"
-          @click="figsPanel?.openCreate()"
-        >
+        <Button type="button" @click="figsPanel?.openCreate()">
           Ajouter
         </Button>
       </div>

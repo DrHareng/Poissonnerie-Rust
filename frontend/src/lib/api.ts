@@ -182,6 +182,8 @@ export function buildTtsListBag(payload: {
     profile_id: number
     form_id?: number | null
     combat_group: number
+    /** Couleur de socle (#RRGGBB ou RRGGBB). */
+    color?: string
   }>
 }): Promise<unknown> {
   return request<unknown>('/api/tts-lists/bag', {
