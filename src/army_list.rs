@@ -118,9 +118,7 @@ fn decode_army_binary(data: &[u8]) -> Result<DecodedArmyList> {
 fn decode_army_binary_with(data: &[u8], with_mod_flag: bool) -> Result<DecodedArmyList> {
     let mut cur = Cursor::new(data);
     let sectoral_id = cur.read_vli().context("ID de sectorielle")?;
-    let sectoral_slug = cur
-        .read_length_string(64)
-        .context("slug de sectorielle")?;
+    let sectoral_slug = cur.read_length_string(64).context("slug de sectorielle")?;
     if !is_faction_slug(&sectoral_slug) {
         bail!("slug de sectorielle invalide");
     }

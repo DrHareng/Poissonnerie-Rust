@@ -133,14 +133,13 @@ pub fn best_asset_bundle_for_loadout(
                 }
             }
         }
-        if !loadout_key.is_empty()
-            && figurine.loadout.trim().to_ascii_lowercase() == loadout_key
-        {
+        if !loadout_key.is_empty() && figurine.loadout.trim().to_ascii_lowercase() == loadout_key {
             score += 100;
         }
-        if painter_key.as_ref().is_some_and(|painter| {
-            figurine.painter.trim().to_ascii_lowercase() == *painter
-        }) {
+        if painter_key
+            .as_ref()
+            .is_some_and(|painter| figurine.painter.trim().to_ascii_lowercase() == *painter)
+        {
             score += 10;
         }
         match best {
@@ -351,15 +350,13 @@ impl TtsFigurineStore {
             format!("WHERE {}", where_parts.join(" AND "))
         };
         let select_sql = figurine_select_sql();
-        let order_sql = format!(
-            "ORDER BY {nom_sql} COLLATE NOCASE, {loadout_sql} COLLATE NOCASE, f.id"
-        );
+        let order_sql =
+            format!("ORDER BY {nom_sql} COLLATE NOCASE, {loadout_sql} COLLATE NOCASE, f.id");
 
         // Recherche texte : filtre en Rust pour ignorer les accents (í→i…).
         if let Some(needle) = q.as_ref() {
-            let list_sql = format!(
-                "SELECT {select_sql} FROM tts_figurines f {where_sql} {order_sql}"
-            );
+            let list_sql =
+                format!("SELECT {select_sql} FROM tts_figurines f {where_sql} {order_sql}");
             let params_ref: Vec<&dyn rusqlite::types::ToSql> =
                 params_vec.iter().map(|p| p.as_ref()).collect();
             let mut stmt = conn.prepare(&list_sql)?;
@@ -372,10 +369,7 @@ impl TtsFigurineStore {
                 .filter(|figurine| {
                     let haystack = fold_search_text(&format!(
                         "{} {} {} {}",
-                        figurine.isc,
-                        figurine.loadout,
-                        figurine.painter,
-                        figurine.asset_bundle_url
+                        figurine.isc, figurine.loadout, figurine.painter, figurine.asset_bundle_url
                     ));
                     haystack.contains(needle)
                 })
@@ -934,12 +928,7 @@ mod tests {
 
     /// Crée unité + loadout TTS + profil (optionnellement rattaché à une sectorielle).
     /// Retourne `(tts_loadout_id, profile_id)`.
-    fn seed_loadout(
-        dir: &Path,
-        unit: &str,
-        loadout: &str,
-        army_id: Option<i64>,
-    ) -> (i64, i64) {
+    fn seed_loadout(dir: &Path, unit: &str, loadout: &str, army_id: Option<i64>) -> (i64, i64) {
         let conn = rusqlite::Connection::open(dir.join("test.db")).unwrap();
         if let Some(army_id) = army_id {
             conn.execute_batch(
@@ -963,7 +952,11 @@ mod tests {
         )
         .unwrap();
         let unit_id: i64 = conn
-            .query_row("SELECT id FROM tts_units WHERE nom = ?1", params![unit], |r| r.get(0))
+            .query_row(
+                "SELECT id FROM tts_units WHERE nom = ?1",
+                params![unit],
+                |r| r.get(0),
+            )
             .unwrap();
         conn.execute(
             "INSERT INTO tts_loadouts (nom_tts, description_tts) VALUES (?1, '')",
@@ -1151,7 +1144,8 @@ mod tests {
         // Les noms affichés suivent le profil, même si le legacy diverge.
         {
             let conn = rusqlite::Connection::open(dir.join("test.db")).unwrap();
-            conn.execute("UPDATE tts_units SET nom = 'Fusiliers V2'", []).unwrap();
+            conn.execute("UPDATE tts_units SET nom = 'Fusiliers V2'", [])
+                .unwrap();
         }
         assert_eq!(store.get(linked.id).unwrap().unwrap().isc, "Fusiliers V2");
 
@@ -1181,7 +1175,9 @@ mod tests {
                 ..orphan("", "", "Alex")
             })
             .unwrap();
-        let legacy = store.create(&orphan("FUSILIERS", "Whatever", "Alex")).unwrap();
+        let legacy = store
+            .create(&orphan("FUSILIERS", "Whatever", "Alex"))
+            .unwrap();
         store.create(&orphan("Nobody", "", "Alex")).unwrap();
 
         let page = store
@@ -1227,7 +1223,14 @@ mod tests {
         let _ = fs::remove_dir_all(&dir);
     }
 
-    fn fig(id: i64, loadout_id: Option<i64>, isc: &str, loadout: &str, painter: &str, url: &str) -> TtsFigurine {
+    fn fig(
+        id: i64,
+        loadout_id: Option<i64>,
+        isc: &str,
+        loadout: &str,
+        painter: &str,
+        url: &str,
+    ) -> TtsFigurine {
         TtsFigurine {
             id,
             tts_loadout_id: loadout_id,
@@ -1245,8 +1248,22 @@ mod tests {
     #[test]
     fn best_asset_prefers_painter_and_loadout() {
         let figurines = vec![
-            fig(1, None, "DOG-WARRIOR FORM", "Chain Rifle", "Alex", "https://a"),
-            fig(2, None, "DOG-WARRIOR FORM", "Chain Rifle", "Léa", "https://b"),
+            fig(
+                1,
+                None,
+                "DOG-WARRIOR FORM",
+                "Chain Rifle",
+                "Alex",
+                "https://a",
+            ),
+            fig(
+                2,
+                None,
+                "DOG-WARRIOR FORM",
+                "Chain Rifle",
+                "Léa",
+                "https://b",
+            ),
         ];
         assert_eq!(
             best_asset_bundle(&figurines, "dog-warrior form", "Chain Rifle", Some("Léa"))

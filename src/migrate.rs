@@ -1562,7 +1562,8 @@ fn backfill_units_loadouts_from_flat(conn: &Connection) -> Result<()> {
     }
 
     // Formes → profils enfants ; traits form_id → profile_id enfant
-    let mut form_id_to_child: std::collections::HashMap<i64, i64> = std::collections::HashMap::new();
+    let mut form_id_to_child: std::collections::HashMap<i64, i64> =
+        std::collections::HashMap::new();
     if table_has_rows_or_exists(&tx, "tts_profile_forms")? {
         let mut forms = tx.prepare(
             "

@@ -247,11 +247,7 @@ pub fn expand_echo_models(model: Value, description: &str) -> Vec<Value> {
         .collect()
 }
 
-pub fn saved_model(
-    asset_bundle_url: &str,
-    profile: &ModelProfile,
-    color: DiffuseColor,
-) -> Value {
+pub fn saved_model(asset_bundle_url: &str, profile: &ModelProfile, color: DiffuseColor) -> Value {
     saved_model_with_form_assets(asset_bundle_url, profile, color, &HashMap::new())
 }
 
@@ -289,10 +285,10 @@ pub fn saved_model_with_form_assets(
         items.push(StateItem::Body(body));
         push_form_silhouettes(&mut items, form, color);
     }
-    object
-        .as_object_mut()
-        .expect("objet TTS")
-        .insert("States".to_string(), Value::Object(states_from_items(items)));
+    object.as_object_mut().expect("objet TTS").insert(
+        "States".to_string(),
+        Value::Object(states_from_items(items)),
+    );
     object
 }
 
@@ -911,7 +907,13 @@ mod tests {
         let save = save_bag("Ma liste", vec![json!({"Name": "Custom_Assetbundle"})]);
         assert_eq!(save["ObjectStates"][0]["Name"], "Bag");
         assert_eq!(save["ObjectStates"][0]["Nickname"], "Ma liste");
-        assert_eq!(save["ObjectStates"][0]["ContainedObjects"].as_array().unwrap().len(), 1);
+        assert_eq!(
+            save["ObjectStates"][0]["ContainedObjects"]
+                .as_array()
+                .unwrap()
+                .len(),
+            1
+        );
         assert!(save["ObjectStates"][0].get("CustomMesh").is_none());
         assert_eq!(save["ObjectStates"][0]["Bag"]["Order"], 0);
     }
@@ -991,8 +993,12 @@ mod tests {
             })
             .collect();
         assert_eq!(silhouettes.len(), 2); // S2 + une seule S4
-        assert!(states.values().any(|state| state["Nickname"] == "Silhouette 2"));
-        assert!(states.values().any(|state| state["Nickname"] == "Silhouette 4"));
+        assert!(states
+            .values()
+            .any(|state| state["Nickname"] == "Silhouette 2"));
+        assert!(states
+            .values()
+            .any(|state| state["Nickname"] == "Silhouette 4"));
         // La S4 restante suit la dernière forme (sapper).
         let keys: Vec<_> = states.keys().cloned().collect();
         let idx_b = keys
@@ -1041,10 +1047,7 @@ mod tests {
     #[test]
     fn echo_letters_follow_holoprojector_and_decoy() {
         assert_eq!(echo_copy_count("[B]S[/B]: 2\n"), 1);
-        assert_eq!(
-            echo_copy_count("[B]Equipment[/B]\n● Holoprojector\n"),
-            3
-        );
+        assert_eq!(echo_copy_count("[B]Equipment[/B]\n● Holoprojector\n"), 3);
         assert_eq!(echo_copy_count("[B]Skills[/B]\n● Decoy (1)\n"), 2);
         assert_eq!(echo_copy_count("[B]Skills[/B]\n● Decoy (2)\n"), 3);
         assert_eq!(

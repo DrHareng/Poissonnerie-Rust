@@ -1913,16 +1913,19 @@ fn unit_option_includes(
         ",
     )?;
     let rows = stmt
-        .query_map(params![i64::from(unit_id), i64::from(unit_option_id)], |row| {
-            Ok(UnitOptionInclude {
-                unit_id: row.get(0)?,
-                unit_option_id: row.get(1)?,
-                sort_order: row.get(2)?,
-                group_id: row.get(3)?,
-                option_id: row.get(4)?,
-                quantity: row.get(5)?,
-            })
-        })?
+        .query_map(
+            params![i64::from(unit_id), i64::from(unit_option_id)],
+            |row| {
+                Ok(UnitOptionInclude {
+                    unit_id: row.get(0)?,
+                    unit_option_id: row.get(1)?,
+                    sort_order: row.get(2)?,
+                    group_id: row.get(3)?,
+                    option_id: row.get(4)?,
+                    quantity: row.get(5)?,
+                })
+            },
+        )?
         .collect::<std::result::Result<Vec<_>, _>>()
         .context("lecture des includes d'option d'unité")?;
     Ok(rows)

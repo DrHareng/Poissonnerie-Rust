@@ -74,7 +74,10 @@ fn plan_and_maybe_apply(conn: &Connection, apply: bool) -> Result<FigurineIscFix
             .collect();
 
         let (pool, reason_if_ambiguous) = if !loadout_hits.is_empty() {
-            (loadout_hits, "plusieurs unités partagent ce suffixe + loadout")
+            (
+                loadout_hits,
+                "plusieurs unités partagent ce suffixe + loadout",
+            )
         } else {
             (
                 matching_forms,
@@ -214,10 +217,7 @@ fn now_unix() -> i64 {
 
 /// Affichage console du rapport (dry-run ou apply).
 pub fn print_report(report: &FigurineIscFixReport, apply: bool) {
-    println!(
-        "Déjà OK (ISC connu)     : {}",
-        report.skipped_ok
-    );
+    println!("Déjà OK (ISC connu)     : {}", report.skipped_ok);
     println!("À corriger              : {}", report.fixes.len());
     println!("Conflits (manuel)       : {}", report.conflicts.len());
     if apply {
@@ -302,12 +302,17 @@ mod tests {
                           bag: &str,
                           parent_id: Option<i64>|
          -> i64 {
-            conn.execute("INSERT OR IGNORE INTO tts_units (nom) VALUES (?1)", params![isc])
-                .unwrap();
+            conn.execute(
+                "INSERT OR IGNORE INTO tts_units (nom) VALUES (?1)",
+                params![isc],
+            )
+            .unwrap();
             let unit_id: i64 = conn
-                .query_row("SELECT id FROM tts_units WHERE nom = ?1", params![isc], |row| {
-                    row.get(0)
-                })
+                .query_row(
+                    "SELECT id FROM tts_units WHERE nom = ?1",
+                    params![isc],
+                    |row| row.get(0),
+                )
                 .unwrap();
             conn.execute(
                 "INSERT INTO tts_loadouts (nom_tts, description_tts) VALUES ('X', '')",
@@ -406,9 +411,10 @@ mod tests {
         assert_eq!(dry.skipped_ok, 1);
         assert_eq!(dry.fixes.len(), 2);
         assert_eq!(dry.conflicts.len(), 1);
-        assert!(dry.fixes.iter().any(|fix| {
-            fix.id == dog && fix.to_isc == "Dog-Warriors DOG-WARRIOR FORM"
-        }));
+        assert!(dry
+            .fixes
+            .iter()
+            .any(|fix| { fix.id == dog && fix.to_isc == "Dog-Warriors DOG-WARRIOR FORM" }));
         assert!(dry.fixes.iter().any(|fix| {
             fix.id == su && fix.to_isc == "Sù-Jiàn Immediate Action Unit COMBAT FORM"
         }));
@@ -418,9 +424,11 @@ mod tests {
         let applied = plan_and_maybe_apply(&conn, true).unwrap();
         assert_eq!(applied.applied, 2);
         let dog_isc: String = conn
-            .query_row("SELECT isc FROM tts_figurines WHERE id = ?1", params![dog], |row| {
-                row.get(0)
-            })
+            .query_row(
+                "SELECT isc FROM tts_figurines WHERE id = ?1",
+                params![dog],
+                |row| row.get(0),
+            )
             .unwrap();
         assert_eq!(dog_isc, "Dog-Warriors DOG-WARRIOR FORM");
     }

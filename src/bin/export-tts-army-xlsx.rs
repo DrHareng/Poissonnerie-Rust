@@ -51,7 +51,13 @@ fn main() -> Result<()> {
 
     write_factions_from_metadata(&metadata, &mut workbook, &header)?;
     write_catalog(&metadata, "skills", "CatalogSkills", &mut workbook, &header)?;
-    write_catalog(&metadata, "weapons", "CatalogWeapons", &mut workbook, &header)?;
+    write_catalog(
+        &metadata,
+        "weapons",
+        "CatalogWeapons",
+        &mut workbook,
+        &header,
+    )?;
     write_catalog(&metadata, "equips", "CatalogEquips", &mut workbook, &header)?;
 
     let mut filter_catalog: BTreeMap<(String, i64), String> = BTreeMap::new();

@@ -219,11 +219,7 @@ fn parse_unit_option_includes(
         .filter_map(|(sort_order, include)| {
             let group_id = include.get("group").and_then(Value::as_i64)?;
             let option_id = include.get("option").and_then(Value::as_i64)?;
-            let quantity = include
-                .get("q")
-                .and_then(Value::as_i64)
-                .unwrap_or(1)
-                .max(1);
+            let quantity = include.get("q").and_then(Value::as_i64).unwrap_or(1).max(1);
             Some(UnitOptionInclude {
                 unit_id,
                 unit_option_id,
@@ -236,10 +232,7 @@ fn parse_unit_option_includes(
         .collect()
 }
 
-fn absorb_unit_includes(
-    dest: &mut BTreeMap<(i64, i64), Vec<UnitOptionInclude>>,
-    document: &Value,
-) {
+fn absorb_unit_includes(dest: &mut BTreeMap<(i64, i64), Vec<UnitOptionInclude>>, document: &Value) {
     let Some(units) = document.get("units").and_then(Value::as_array) else {
         return;
     };
@@ -265,8 +258,7 @@ fn absorb_unit_includes(
             if includes.is_empty() {
                 continue;
             }
-            dest.entry((unit_id, unit_option_id))
-                .or_insert(includes);
+            dest.entry((unit_id, unit_option_id)).or_insert(includes);
         }
     }
 }
@@ -939,8 +931,7 @@ pub(crate) fn qualify_form_isc(parent_isc: &str, form_name: &str) -> String {
     }
     let parent_lower = parent.to_ascii_lowercase();
     let form_lower = form.to_ascii_lowercase();
-    if form_lower.starts_with(&parent_lower)
-        || form_lower.starts_with(&format!("{parent_lower} "))
+    if form_lower.starts_with(&parent_lower) || form_lower.starts_with(&format!("{parent_lower} "))
     {
         return form.to_string();
     }
@@ -1481,9 +1472,7 @@ fn attach_ai_motorcycle_forms(
     for includes in unit_includes.values_mut() {
         includes.retain(|include| {
             let key = (include.unit_id, include.group_id, include.option_id);
-            index_by_key
-                .get(&key)
-                .is_none_or(|&index| !consumed[index])
+            index_by_key.get(&key).is_none_or(|&index| !consumed[index])
         });
         for (sort_order, include) in includes.iter_mut().enumerate() {
             include.sort_order = sort_order as i64;
@@ -2765,9 +2754,10 @@ mod tests {
         let profile = drafts.values().next().expect("profil");
         assert_eq!(profile.isc, "CHERNOBOG");
         assert!(
-            profile.forms.iter().any(|form| {
-                form.state_index == 1 && form.isc == "CHERNOBOG BATTLE RAVAGED"
-            }),
+            profile
+                .forms
+                .iter()
+                .any(|form| { form.state_index == 1 && form.isc == "CHERNOBOG BATTLE RAVAGED" }),
             "forms = {:?}",
             profile
                 .forms
@@ -3107,15 +3097,11 @@ mod tests {
         assert!(!is_hidden_tts_skill_name("Hacker"));
 
         assert_eq!(
-            strip_hidden_skills_from_loadout(
-                "Combi Rifle, Drop Bears (Chain of Command)"
-            ),
+            strip_hidden_skills_from_loadout("Combi Rifle, Drop Bears (Chain of Command)"),
             "Combi Rifle, Drop Bears"
         );
         assert_eq!(
-            strip_hidden_skills_from_loadout(
-                "MULTI Rifle (Lieutenant, X Visor)"
-            ),
+            strip_hidden_skills_from_loadout("MULTI Rifle (Lieutenant, X Visor)"),
             "MULTI Rifle (X Visor)"
         );
         assert_eq!(

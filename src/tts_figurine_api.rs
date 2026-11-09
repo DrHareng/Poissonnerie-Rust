@@ -268,11 +268,7 @@ async fn figurine_object(
                 "ce loadout ne correspond pas à ce nom",
             ));
         }
-        tts_object::saved_model(
-            &figurine.asset_bundle_url,
-            &model_from_form(&form),
-            color,
-        )
+        tts_object::saved_model(&figurine.asset_bundle_url, &model_from_form(&form), color)
     } else {
         let profile_id = query
             .profile_id

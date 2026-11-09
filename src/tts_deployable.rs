@@ -65,9 +65,7 @@ fn keys_for_trait(trait_: &TtsProfileTrait) -> Vec<&'static str> {
         return vec!["Disco Ball"];
     }
     if name == "minedispenser" {
-        return mine_from_dispenser_detail(&detail)
-            .into_iter()
-            .collect();
+        return mine_from_dispenser_detail(&detail).into_iter().collect();
     }
     if let Some(mine) = mine_from_weapon_name(&name) {
         return vec![mine];
@@ -190,7 +188,10 @@ mod tests {
         assert!(!templates.contains_key("Speedball A"));
         assert!(!templates.contains_key("Speedball B"));
         // Nouveau Repeater (avec état silhouette), pas l'ancien du sac Deployables.
-        assert!(templates["Repeater"].get("States").and_then(Value::as_object).is_some());
+        assert!(templates["Repeater"]
+            .get("States")
+            .and_then(Value::as_object)
+            .is_some());
     }
 
     #[test]
@@ -220,28 +221,25 @@ mod tests {
 
     #[test]
     fn only_pitcher_or_deployable_repeater_add_a_repeater() {
-        assert!(deployable_keys_from_traits(&[trait_("weapon", "Pitcher", None)])
-            .contains("Repeater"));
-        assert!(deployable_keys_from_traits(&[trait_(
-            "equipment",
-            "Deployable Repeater",
-            None
-        )])
-        .contains("Repeater"));
-        assert!(!deployable_keys_from_traits(&[trait_("equipment", "Repeater", None)])
-            .contains("Repeater"));
-        assert!(!deployable_keys_from_traits(&[trait_(
-            "equipment",
-            "KISS! (Repeater)",
-            None
-        )])
-        .contains("Repeater"));
-        assert!(!deployable_keys_from_traits(&[trait_(
-            "equipment",
-            "Tinbot (Repeater)",
-            None
-        )])
-        .contains("Repeater"));
+        assert!(
+            deployable_keys_from_traits(&[trait_("weapon", "Pitcher", None)]).contains("Repeater")
+        );
+        assert!(
+            deployable_keys_from_traits(&[trait_("equipment", "Deployable Repeater", None)])
+                .contains("Repeater")
+        );
+        assert!(
+            !deployable_keys_from_traits(&[trait_("equipment", "Repeater", None)])
+                .contains("Repeater")
+        );
+        assert!(
+            !deployable_keys_from_traits(&[trait_("equipment", "KISS! (Repeater)", None)])
+                .contains("Repeater")
+        );
+        assert!(
+            !deployable_keys_from_traits(&[trait_("equipment", "Tinbot (Repeater)", None)])
+                .contains("Repeater")
+        );
     }
 
     #[test]

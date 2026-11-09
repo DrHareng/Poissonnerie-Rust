@@ -206,55 +206,52 @@ pub struct ForfeitRequest {
     pub forfeit_player: String,
 }
 
-fn registration_list_for_slot(
+fn registration_list_pair(
     registration: &TournamentRegistration,
-    phase: TournamentPhase,
-    slot: u8,
-) -> Result<String> {
-    let (list1, list2) = if phase == TournamentPhase::Pool {
-        (
-            registration.army_list_1.as_deref(),
-            registration.army_list_2.as_deref(),
-        )
-    } else {
+    use_final_lists: bool,
+) -> (Option<&str>, Option<&str>) {
+    if use_final_lists {
         (
             registration.bracket_list_1.as_deref(),
             registration.bracket_list_2.as_deref(),
         )
-    };
+    } else {
+        (
+            registration.army_list_1.as_deref(),
+            registration.army_list_2.as_deref(),
+        )
+    }
+}
+
+fn registration_list_for_slot(
+    registration: &TournamentRegistration,
+    use_final_lists: bool,
+    slot: u8,
+) -> Result<String> {
+    let (list1, list2) = registration_list_pair(registration, use_final_lists);
     let code = match slot {
         1 => list1.filter(|s| !s.is_empty()),
         2 => list2.filter(|s| !s.is_empty()),
         _ => None,
     }
-    .context(if phase == TournamentPhase::Pool {
-        "choisissez la liste 1 ou 2 d'inscription"
-    } else {
+    .context(if use_final_lists {
         "choisissez la liste 1 ou 2 d'arbre"
+    } else {
+        "choisissez la liste 1 ou 2 d'inscription"
     })?;
     Ok(code.to_string())
 }
 
 fn infer_registration_list_slot(
     registration: &TournamentRegistration,
-    phase: TournamentPhase,
+    use_final_lists: bool,
     code: Option<&str>,
 ) -> Option<u8> {
     let code = code?.trim();
     if code.is_empty() {
         return None;
     }
-    let (list1, list2) = if phase == TournamentPhase::Pool {
-        (
-            registration.army_list_1.as_deref(),
-            registration.army_list_2.as_deref(),
-        )
-    } else {
-        (
-            registration.bracket_list_1.as_deref(),
-            registration.bracket_list_2.as_deref(),
-        )
-    };
+    let (list1, list2) = registration_list_pair(registration, use_final_lists);
     if list1.is_some_and(|c| c.trim() == code) {
         return Some(1);
     }
@@ -262,6 +259,19 @@ fn infer_registration_list_slot(
         return Some(2);
     }
     None
+}
+
+fn require_final_phase_lists(
+    reg1: &TournamentRegistration,
+    reg2: &TournamentRegistration,
+) -> Result<()> {
+    if !registration_has_bracket_lists(reg1) {
+        bail!("le joueur 1 doit saisir sa liste d'arbre avant de jouer");
+    }
+    if !registration_has_bracket_lists(reg2) {
+        bail!("le joueur 2 doit saisir sa liste d'arbre avant de jouer");
+    }
+    Ok(())
 }
 
 fn registration_has_bracket_lists(registration: &TournamentRegistration) -> bool {
@@ -2031,7 +2041,8 @@ impl TournamentStore {
                 .context("poule finale introuvable")?;
             let n = final_pool.players.len().max(2);
             let expected = pool_scenario_slot_letters(n).len();
-            let final_scenarios = self.list_scenarios_in_conn(&conn, tournament_id, "final_pool")?;
+            let final_scenarios =
+                self.list_scenarios_in_conn(&conn, tournament_id, "final_pool")?;
             if final_scenarios.len() < expected {
                 bail!(
                     "définissez les {expected} scénarios de poule finale avant de générer les matchs"
@@ -2217,17 +2228,13 @@ impl TournamentStore {
             .registration_for_player_in_conn(&conn, tm.tournament_id, &normalize_name(p2))?
             .context("inscription du joueur 2 introuvable")?;
 
-        if tm.phase != TournamentPhase::Pool {
-            if !registration_has_bracket_lists(&reg1) {
-                bail!("le joueur 1 doit saisir sa liste d'arbre avant de jouer");
-            }
-            if !registration_has_bracket_lists(&reg2) {
-                bail!("le joueur 2 doit saisir sa liste d'arbre avant de jouer");
-            }
+        let use_final_lists = match_uses_final_phase_lists_in_conn(&conn, &tm)?;
+        if use_final_lists {
+            require_final_phase_lists(&reg1, &reg2)?;
         }
 
-        let code1 = registration_list_for_slot(&reg1, tm.phase, player1_list_slot)?;
-        let code2 = registration_list_for_slot(&reg2, tm.phase, player2_list_slot)?;
+        let code1 = registration_list_for_slot(&reg1, use_final_lists, player1_list_slot)?;
+        let code2 = registration_list_for_slot(&reg2, use_final_lists, player2_list_slot)?;
         let id1 = get_or_create_in_conn(&conn, &code1)?.id;
         let id2 = get_or_create_in_conn(&conn, &code2)?.id;
 
@@ -2319,19 +2326,15 @@ impl TournamentStore {
             .registration_for_player_in_conn(&conn, tm.tournament_id, &normalize_name(&p2))?
             .context("inscription du joueur 2 introuvable")?;
 
+        let use_final_lists = match_uses_final_phase_lists_in_conn(&conn, &tm)?;
         let (list1, list2) = match (request.player1_list_slot, request.player2_list_slot) {
             (Some(slot1), Some(slot2)) => {
-                if tm.phase != TournamentPhase::Pool {
-                    if !registration_has_bracket_lists(&reg1) {
-                        bail!("le joueur 1 doit saisir sa liste d'arbre avant de jouer");
-                    }
-                    if !registration_has_bracket_lists(&reg2) {
-                        bail!("le joueur 2 doit saisir sa liste d'arbre avant de jouer");
-                    }
+                if use_final_lists {
+                    require_final_phase_lists(&reg1, &reg2)?;
                 }
                 (
-                    Some(registration_list_for_slot(&reg1, tm.phase, slot1)?),
-                    Some(registration_list_for_slot(&reg2, tm.phase, slot2)?),
+                    Some(registration_list_for_slot(&reg1, use_final_lists, slot1)?),
+                    Some(registration_list_for_slot(&reg2, use_final_lists, slot2)?),
                 )
             }
             (None, None) if is_admin => (None, None),
@@ -2859,16 +2862,12 @@ impl TournamentStore {
                 let reg2 = self
                     .registration_for_player_in_conn(&conn, old.tournament_id, &normalize_name(p2))?
                     .context("inscription du joueur 2 introuvable")?;
-                if old.phase != TournamentPhase::Pool {
-                    if !registration_has_bracket_lists(&reg1) {
-                        bail!("le joueur 1 doit saisir sa liste d'arbre avant de jouer");
-                    }
-                    if !registration_has_bracket_lists(&reg2) {
-                        bail!("le joueur 2 doit saisir sa liste d'arbre avant de jouer");
-                    }
+                let use_final_lists = match_uses_final_phase_lists_in_conn(&conn, &old)?;
+                if use_final_lists {
+                    require_final_phase_lists(&reg1, &reg2)?;
                 }
-                let code1 = registration_list_for_slot(&reg1, old.phase, slot1)?;
-                let code2 = registration_list_for_slot(&reg2, old.phase, slot2)?;
+                let code1 = registration_list_for_slot(&reg1, use_final_lists, slot1)?;
+                let code2 = registration_list_for_slot(&reg2, use_final_lists, slot2)?;
                 let id1 = get_or_create_in_conn(&conn, &code1)?.id;
                 let id2 = get_or_create_in_conn(&conn, &code2)?.id;
                 Some((code1, code2, id1, id2))
@@ -4903,13 +4902,14 @@ impl TournamentStore {
         conn: &Connection,
         tm: &mut TournamentMatch,
     ) -> Result<()> {
+        let use_final_lists = match_uses_final_phase_lists_in_conn(conn, tm)?;
         if let Some(name) = tm.player1.as_deref() {
             if let Some(reg) =
                 self.registration_for_player_in_conn(conn, tm.tournament_id, &normalize_name(name))?
             {
                 tm.player1_list_slot = infer_registration_list_slot(
                     &reg,
-                    tm.phase,
+                    use_final_lists,
                     tm.player1_army_list_code.as_deref(),
                 );
             }
@@ -4920,7 +4920,7 @@ impl TournamentStore {
             {
                 tm.player2_list_slot = infer_registration_list_slot(
                     &reg,
-                    tm.phase,
+                    use_final_lists,
                     tm.player2_army_list_code.as_deref(),
                 );
             }
@@ -5172,12 +5172,34 @@ fn scenario_letter_map(scenarios: &[TournamentScenarioSlot]) -> HashMap<char, i6
         .collect()
 }
 
+/// Listes de phase finale (arbre, ou poule finale) plutôt que listes de poule.
+fn match_uses_final_phase_lists_in_conn(conn: &Connection, tm: &TournamentMatch) -> Result<bool> {
+    if tm.phase != TournamentPhase::Pool {
+        return Ok(true);
+    }
+    let Some(pool_id) = tm.pool_id else {
+        return Ok(false);
+    };
+    let found = conn
+        .query_row(
+            "
+            SELECT 1
+            FROM tournaments t
+            JOIN pools p ON p.tournament_id = t.id
+            WHERE t.id = ?1
+              AND p.id = ?2
+              AND t.structure = 'pools_final'
+              AND p.position > t.pool_count
+            ",
+            params![tm.tournament_id, pool_id],
+            |_| Ok(()),
+        )
+        .optional()?;
+    Ok(found.is_some())
+}
+
 /// Match de poule appartenant à la poule finale (pas une poule de groupe).
-pub fn match_is_final_pool(
-    tournament: &Tournament,
-    pools: &[Pool],
-    tm: &TournamentMatch,
-) -> bool {
+pub fn match_is_final_pool(tournament: &Tournament, pools: &[Pool], tm: &TournamentMatch) -> bool {
     if tm.phase != TournamentPhase::Pool {
         return false;
     }
@@ -5252,11 +5274,7 @@ fn player_has_started_pool_ids_match_in_conn(
     if pool_ids.is_empty() {
         return Ok(false);
     }
-    let placeholders = pool_ids
-        .iter()
-        .map(|_| "?")
-        .collect::<Vec<_>>()
-        .join(", ");
+    let placeholders = pool_ids.iter().map(|_| "?").collect::<Vec<_>>().join(", ");
     let sql = format!(
         "
         SELECT 1 FROM tournament_matches
@@ -5285,9 +5303,8 @@ fn player_has_started_pool_ids_match_in_conn(
 }
 
 fn list_pool_positions_in_conn(conn: &Connection, tournament_id: i64) -> Result<Vec<(i64, u8)>> {
-    let mut stmt = conn.prepare(
-        "SELECT id, position FROM pools WHERE tournament_id = ?1 ORDER BY position",
-    )?;
+    let mut stmt =
+        conn.prepare("SELECT id, position FROM pools WHERE tournament_id = ?1 ORDER BY position")?;
     let rows = stmt.query_map(params![tournament_id], |row| {
         Ok((row.get::<_, i64>(0)?, row.get::<_, u8>(1)?))
     })?;
@@ -5545,6 +5562,75 @@ mod tests {
     use super::*;
     use std::fs;
     use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn registration_with_lists(
+        pool_1: &str,
+        pool_2: &str,
+        final_1: &str,
+        final_2: &str,
+    ) -> TournamentRegistration {
+        TournamentRegistration {
+            id: 1,
+            tournament_id: 1,
+            player_name: "Joueur".into(),
+            player_display_name: None,
+            user_id: None,
+            status: RegistrationStatus::Approved,
+            waitlist_position: None,
+            requested_at: 0,
+            reviewed_at: None,
+            reviewed_by: None,
+            army_id: None,
+            army_list_1: Some(pool_1.into()),
+            army_list_2: Some(pool_2.into()),
+            army_list_1_id: None,
+            army_list_2_id: None,
+            bracket_list_1: Some(final_1.into()),
+            bracket_list_2: Some(final_2.into()),
+            bracket_list_1_id: None,
+            bracket_list_2_id: None,
+            has_army_lists: true,
+            has_bracket_lists: true,
+            has_army_list_2: true,
+            has_bracket_list_2: true,
+            army_list_1_validated: true,
+            army_list_2_validated: true,
+        }
+    }
+
+    #[test]
+    fn final_phase_slot_uses_bracket_lists() {
+        let registration = registration_with_lists("POOL1", "POOL2", "FINAL1", "FINAL2");
+
+        assert_eq!(
+            registration_list_for_slot(&registration, false, 1).unwrap(),
+            "POOL1"
+        );
+        assert_eq!(
+            registration_list_for_slot(&registration, false, 2).unwrap(),
+            "POOL2"
+        );
+        assert_eq!(
+            registration_list_for_slot(&registration, true, 1).unwrap(),
+            "FINAL1"
+        );
+        assert_eq!(
+            registration_list_for_slot(&registration, true, 2).unwrap(),
+            "FINAL2"
+        );
+        assert_eq!(
+            infer_registration_list_slot(&registration, true, Some("FINAL2")),
+            Some(2)
+        );
+        assert_eq!(
+            infer_registration_list_slot(&registration, false, Some("POOL1")),
+            Some(1)
+        );
+        assert_eq!(
+            infer_registration_list_slot(&registration, true, Some("POOL1")),
+            None
+        );
+    }
 
     fn temp_copy_of_db() -> (std::path::PathBuf, TournamentStore) {
         let src = Path::new("data/poissonnerie.db");

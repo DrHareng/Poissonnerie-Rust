@@ -158,8 +158,8 @@ async fn expand_list(
         }
     }
 
-    let default_color = tts_object::sectorial_color_hex(&army.slug)
-        .unwrap_or_else(|| "FFFFFF".to_string());
+    let default_color =
+        tts_object::sectorial_color_hex(&army.slug).unwrap_or_else(|| "FFFFFF".to_string());
 
     Ok(Json(ExpandResponse {
         code: army_list::normalize_army_list_code(&body.code).unwrap_or_default(),
@@ -238,11 +238,7 @@ async fn build_bag(
             }
             let description = form.description_tts.clone();
             (
-                tts_object::saved_model(
-                    &figurine.asset_bundle_url,
-                    &model_from_form(&form),
-                    color,
-                ),
+                tts_object::saved_model(&figurine.asset_bundle_url, &model_from_form(&form), color),
                 description,
                 // Périphérique : pas de déployables (évite le doublon avec le profil parent).
                 None,
@@ -554,7 +550,10 @@ fn quantity_from_labeled_text(text: &str, name: &str) -> Option<usize> {
         if after.starts_with('x')
             || after.starts_with('X')
             || after.starts_with('×')
-            || after.chars().next().is_some_and(|char| char.is_ascii_digit())
+            || after
+                .chars()
+                .next()
+                .is_some_and(|char| char.is_ascii_digit())
         {
             return Some(parse_x_quantity(Some(after)));
         }
@@ -563,10 +562,7 @@ fn quantity_from_labeled_text(text: &str, name: &str) -> Option<usize> {
     None
 }
 
-fn summary_from_peripheral(
-    parent: &TtsProfileSummary,
-    form: &TtsProfileForm,
-) -> TtsProfileSummary {
+fn summary_from_peripheral(parent: &TtsProfileSummary, form: &TtsProfileForm) -> TtsProfileSummary {
     TtsProfileSummary {
         id: parent.id,
         army_id: parent.army_id,
@@ -738,6 +734,9 @@ fn parse_pick_color(
     raw: Option<&str>,
     fallback: &str,
 ) -> Result<tts_object::DiffuseColor, ApiError> {
-    let value = raw.map(str::trim).filter(|value| !value.is_empty()).unwrap_or(fallback);
+    let value = raw
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or(fallback);
     tts_object::parse_color(value).ok_or_else(|| ApiError::bad_request("couleur invalide"))
 }

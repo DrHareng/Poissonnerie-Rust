@@ -25,10 +25,9 @@ use crate::{
     scenario::ScenarioStore,
     session_store::SqliteSessionStore,
     tournament_api, tts_figurine_api, tts_list_api, tts_map_api, tts_profile_api, ArmyListStore,
-    ArmyStore,
-    ContentUpdateStore, DauphineStore, Leaderboard, MatchOutcome, MatchRecord, MatchScores, Player,
-    ReportStatus, ReportTemplateStore, SiteContentStore, TournamentStore, TtsMapStore, User,
-    UserStore, DEFAULT_K_FACTOR, RESSOURCES_KEY,
+    ArmyStore, ContentUpdateStore, DauphineStore, Leaderboard, MatchOutcome, MatchRecord,
+    MatchScores, Player, ReportStatus, ReportTemplateStore, SiteContentStore, TournamentStore,
+    TtsMapStore, User, UserStore, DEFAULT_K_FACTOR, RESSOURCES_KEY,
 };
 
 const SESSION_INACTIVITY_DAYS: i64 = 30;

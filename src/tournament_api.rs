@@ -23,8 +23,8 @@ use crate::tournament_store::{
     AdminRegisterRequest, CompleteRegistrationListsRequest, CreateTournamentRequest,
     ForfeitRequest, MatchActor, RegisterRequest, RerollScenarioRequest,
     SetBracketScenarioPoolRequest, SetFinalPoolScenariosRequest, SetPoolScenariosRequest,
-    SetupPoolsRequest, SubmitMatchRequest,
-    UpdateBracketListsRequest, UpdateTournamentDetailsRequest, UpdateTournamentFormatRequest,
+    SetupPoolsRequest, SubmitMatchRequest, UpdateBracketListsRequest,
+    UpdateTournamentDetailsRequest, UpdateTournamentFormatRequest,
 };
 
 #[derive(Debug, Serialize)]
