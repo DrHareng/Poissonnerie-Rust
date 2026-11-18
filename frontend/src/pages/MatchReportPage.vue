@@ -18,7 +18,7 @@ import MatchResultBadges from '@/components/MatchResultBadges.vue'
 import PlayerLink from '@/components/PlayerLink.vue'
 import PageTitleTabs from '@/components/PageTitleTabs.vue'
 import { useAuth } from '@/composables/useAuth'
-import { matchsTabs } from '@/lib/pageTitleTabs'
+import { jeuTabs } from '@/lib/pageTitleTabs'
 import {
   applyReportTemplate,
   BUILTIN_REPORT_TEMPLATES,
@@ -286,8 +286,8 @@ async function removeTemplate() {
 <template>
   <div class="page-stack">
     <PageTitleTabs
-      :tabs="matchsTabs"
-      ariaLabel="Sections des matchs"
+      :tabs="jeuTabs"
+      ariaLabel="Sections du jeu"
       :current="{ label: 'Rapport' }"
     />
 

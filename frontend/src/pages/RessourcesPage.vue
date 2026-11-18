@@ -1,13 +1,15 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
-import { RouterLink, useRoute, useRouter } from 'vue-router'
+import { useRoute } from 'vue-router'
 import { BookOpen } from '@lucide/vue'
 import { toast } from 'vue-sonner'
 import { fetchRessources, updateRessources } from '@/lib/api'
 import { pageTitle } from '@/lib/pageTitle'
+import { autreTabs, ttsTabs } from '@/lib/pageTitleTabs'
 import AdminContentEditor from '@/components/AdminContentEditor.vue'
 import MarkdownContent from '@/components/MarkdownContent.vue'
 import ContentUpdates from '@/components/ContentUpdates.vue'
+import PageTitleTabs from '@/components/PageTitleTabs.vue'
 import RecentMapUpdates from '@/components/RecentMapUpdates.vue'
 import TtsMapsTab from '@/components/TtsMapsTab.vue'
 import { useAdminEditMode } from '@/composables/useAdminEditMode'
@@ -24,12 +26,6 @@ type MapsLinksTabId = 'maps' | 'liens' | 'applis'
 
 const organisateurApkUrl = `${import.meta.env.BASE_URL}organisateur.apk`
 
-const tabs = [
-  { id: 'maps' as const, label: 'Map TTS', routeName: 'maps' as const },
-  { id: 'liens' as const, label: 'Liens', routeName: 'links' as const },
-  { id: 'applis' as const, label: 'Applications', routeName: 'applis' as const },
-]
-
 const androidApps = [
   {
     name: 'Gestion de tournoi Infinity',
@@ -41,13 +37,12 @@ const androidApps = [
 ]
 
 const tabTitles: Record<MapsLinksTabId, string> = {
-  maps: 'Map TTS',
+  maps: 'Maps',
   liens: 'Liens',
   applis: 'Applications',
 }
 
 const route = useRoute()
-const router = useRouter()
 const { canEditContent } = useAdminEditMode()
 
 const bodyMd = ref('')
@@ -64,21 +59,23 @@ const activeTab = computed<MapsLinksTabId>(() => {
   return 'maps'
 })
 
-const activeTabLabel = computed(() => {
-  if (activeTab.value === 'maps' && currentMap.value) {
-    return currentMap.value.name
-  }
-  return tabs.find((tab) => tab.id === activeTab.value)?.label ?? 'Map TTS'
-})
+const pageTabs = computed(() =>
+  activeTab.value === 'maps' ? ttsTabs : autreTabs,
+)
 
-function setActiveTab(tab: MapsLinksTabId) {
-  if (tab === 'maps') {
-    router.replace({ name: 'maps', query: {} })
-    return
-  }
-  currentMap.value = null
-  router.replace({ name: tab === 'applis' ? 'applis' : 'links' })
-}
+const pageTabsAria = computed(() =>
+  activeTab.value === 'maps' ? 'TTS' : 'Autre',
+)
+
+const mapCurrent = computed(() =>
+  activeTab.value === 'maps' && currentMap.value
+    ? {
+        label: currentMap.value.name,
+        title: currentMap.value.name,
+        to: { name: 'maps' as const, query: { map: currentMap.value.slug } },
+      }
+    : null,
+)
 
 async function loadLiens() {
   if (liensLoaded.value) return
@@ -114,6 +111,9 @@ onMounted(() => {
 
 watch(activeTab, (tab) => {
   document.title = pageTitle(tabTitles[tab])
+  if (tab !== 'maps') {
+    currentMap.value = null
+  }
   if (tab === 'liens') {
     void loadLiens()
   }
@@ -122,58 +122,30 @@ watch(activeTab, (tab) => {
 
 <template>
   <div class="page-stack">
-    <nav
-      class="page-title-tabs shrink-0"
+    <PageTitleTabs
+      class="shrink-0"
       :class="{ 'page-title-tabs--with-meta': updatesVisible && activeTab === 'maps' }"
-      aria-label="Maps, liens et applications"
+      :tabs="pageTabs"
+      :ariaLabel="pageTabsAria"
+      :current="mapCurrent"
     >
-      <div class="page-title-tabs-list">
-        <h1 class="sr-only">{{ activeTabLabel }}</h1>
-        <button
-          v-for="tab in tabs"
-          :key="tab.id"
-          type="button"
-          class="page-title-tab"
-          :class="{
-            'page-title-tab--active':
-              !currentMap && activeTab === tab.id,
-          }"
-          :aria-current="
-            !currentMap && activeTab === tab.id ? 'page' : undefined
-          "
-          @click="setActiveTab(tab.id)"
-        >
-          {{ tab.label }}
-        </button>
-        <RouterLink
-          v-if="currentMap"
-          :to="{ name: 'maps', query: { map: currentMap.slug } }"
-          class="page-title-tab page-title-tab--detail page-title-tab--active"
-          aria-current="page"
-          :title="currentMap.name"
-        >
-          <span class="page-title-tab-detail">> {{ currentMap.name }}</span>
-        </RouterLink>
-      </div>
-      <div
-        v-if="activeTab === 'maps'"
-        v-show="updatesVisible"
-        class="page-title-tabs-actions"
-      >
-        <RecentMapUpdates
-          v-if="!currentMap"
-          :refresh-key="updatesRefresh"
-          @visible="updatesVisible = $event"
-        />
-        <ContentUpdates
-          v-else
-          kind="map"
-          :map-id="currentMap.id"
-          :refresh-key="updatesRefresh"
-          @visible="updatesVisible = $event"
-        />
-      </div>
-    </nav>
+      <template v-if="activeTab === 'maps'" #actions>
+        <div v-show="updatesVisible">
+          <RecentMapUpdates
+            v-if="!currentMap"
+            :refresh-key="updatesRefresh"
+            @visible="updatesVisible = $event"
+          />
+          <ContentUpdates
+            v-else
+            kind="map"
+            :map-id="currentMap.id"
+            :refresh-key="updatesRefresh"
+            @visible="updatesVisible = $event"
+          />
+        </div>
+      </template>
+    </PageTitleTabs>
 
     <Alert v-if="!apiOnline && activeTab === 'liens'" variant="destructive" class="neon-panel-accent shrink-0">
       <AlertTitle>API indisponible</AlertTitle>

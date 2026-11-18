@@ -9,6 +9,7 @@ use serde_json::Value;
 use crate::{
     api::{ApiError, AppState},
     army_list::{self, parse_army_list, ArmyListMember},
+    tts_distance::{self, DistanceUnit},
     tts_figurine::{self, TtsFigurine},
     tts_object::{self, ModelForm, ModelProfile},
     tts_profile::{TtsProfileDetail, TtsProfileForm, TtsProfileSummary},
@@ -85,6 +86,9 @@ struct BagBody {
     color_g1: Option<String>,
     #[serde(default)]
     color_g2: Option<String>,
+    /// Unité de distance dans les descriptions TTS : `cm` (défaut) ou `inch`.
+    #[serde(default)]
+    distance_unit: Option<String>,
     /// Optionnel : si absent, pas de filtre sectorielle sur les profils.
     #[serde(default)]
     army_id: Option<i64>,
@@ -180,6 +184,8 @@ async fn build_bag(
     if body.picks.is_empty() {
         return Err(ApiError::bad_request("aucune figurine sélectionnée"));
     }
+    let distance_unit = DistanceUnit::parse(body.distance_unit.as_deref())
+        .map_err(ApiError::bad_request)?;
     let army = match body.army_id {
         Some(army_id) if army_id > 0 => Some(load_army(&state, army_id)?),
         _ => None,
@@ -236,9 +242,11 @@ async fn build_bag(
                     "périphérique incohérent avec le profil parent",
                 ));
             }
-            let description = form.description_tts.clone();
+            let mut model_profile = model_from_form(&form);
+            apply_distance_unit_to_profile(&mut model_profile, distance_unit);
+            let description = model_profile.description_tts.clone();
             (
-                tts_object::saved_model(&figurine.asset_bundle_url, &model_from_form(&form), color),
+                tts_object::saved_model(&figurine.asset_bundle_url, &model_profile, color),
                 description,
                 // Périphérique : pas de déployables (évite le doublon avec le profil parent).
                 None,
@@ -249,17 +257,19 @@ async fn build_bag(
                 .get(pick.profile_id)
                 .map_err(|error| ApiError::bad_request(error.to_string()))?
                 .ok_or_else(|| ApiError::bad_request("profil introuvable"))?;
-            let description = profile.description_tts.clone();
             let traits = profile.traits.clone();
             let form_assets = form_asset_bundles_from_profile(
                 &profile,
                 &all_figurines,
                 Some(figurine.painter.as_str()),
             );
+            let mut model_profile = model_from_detail(&profile);
+            apply_distance_unit_to_profile(&mut model_profile, distance_unit);
+            let description = model_profile.description_tts.clone();
             (
                 tts_object::saved_model_with_form_assets(
                     &figurine.asset_bundle_url,
-                    &model_from_detail(&profile),
+                    &model_profile,
                     color,
                     &form_assets,
                 ),
@@ -276,6 +286,13 @@ async fn build_bag(
     }
 
     Ok(Json(tts_object::save_bag(&body.bag_name, models)))
+}
+
+fn apply_distance_unit_to_profile(profile: &mut ModelProfile, unit: DistanceUnit) {
+    profile.description_tts = tts_distance::apply_distance_unit(&profile.description_tts, unit);
+    for form in &mut profile.forms {
+        form.description_tts = tts_distance::apply_distance_unit(&form.description_tts, unit);
+    }
 }
 
 fn expand_member(

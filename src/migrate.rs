@@ -157,12 +157,19 @@ pub fn migrate(conn: &Connection) -> Result<()> {
             played_at INTEGER
         );
 
-        CREATE INDEX IF NOT EXISTS idx_tournament_matches_tournament
-            ON tournament_matches(tournament_id);
-        CREATE INDEX IF NOT EXISTS idx_tournament_registrations_tournament
-            ON tournament_registrations(tournament_id);
         ",
     )?;
+
+    if relation_is_table(conn, "tournament_matches")? {
+        conn.execute_batch(
+            "
+            CREATE INDEX IF NOT EXISTS idx_tournament_matches_tournament
+                ON tournament_matches(tournament_id);
+            CREATE INDEX IF NOT EXISTS idx_tournament_registrations_tournament
+                ON tournament_registrations(tournament_id);
+            ",
+        )?;
+    }
 
     if column_exists(conn, "players", "discord_id")?
         && !column_exists(conn, "players", "discord_username")?
@@ -715,7 +722,20 @@ pub fn migrate(conn: &Connection) -> Result<()> {
         ",
     )?;
 
+    crate::schema_rework::rework(conn)?;
+
     Ok(())
+}
+
+fn relation_is_table(conn: &Connection, name: &str) -> Result<bool> {
+    let kind: Option<String> = conn
+        .query_row(
+            "SELECT type FROM sqlite_master WHERE name = ?1",
+            rusqlite::params![name],
+            |row| row.get(0),
+        )
+        .optional()?;
+    Ok(kind.as_deref() == Some("table"))
 }
 
 fn backfill_matches_from_tournaments(conn: &Connection) -> Result<()> {
@@ -1107,6 +1127,9 @@ fn migrate_site_content(conn: &Connection) -> Result<()> {
 fn migrate_tts_profiles(conn: &Connection) -> Result<()> {
     // Schéma déjà découpé (unités / loadouts) : ne pas recréer les index sur `isc`.
     if column_exists(conn, "tts_profiles", "tts_loadout_id")? {
+        if !relation_is_table(conn, "tts_profiles")? {
+            return Ok(());
+        }
         conn.execute_batch(
             "
             CREATE INDEX IF NOT EXISTS idx_tts_profiles_unit
@@ -1254,8 +1277,6 @@ fn migrate_tts_figurines(conn: &Connection) -> Result<()> {
             created_at INTEGER NOT NULL,
             updated_at INTEGER NOT NULL
         );
-        CREATE INDEX IF NOT EXISTS idx_tts_figurines_isc
-            ON tts_figurines(isc, loadout);
 
         -- Choix de figurine mémorisé par utilisateur pour une paire ISC + loadout (profil).
         CREATE TABLE IF NOT EXISTS tts_figurine_pick_prefs (
@@ -1270,11 +1291,24 @@ fn migrate_tts_figurines(conn: &Connection) -> Result<()> {
             ON tts_figurine_pick_prefs(figurine_id);
         ",
     )?;
+    if relation_is_table(conn, "tts_figurines")? {
+        conn.execute_batch(
+            "
+            CREATE INDEX IF NOT EXISTS idx_tts_figurines_isc
+                ON tts_figurines(isc, loadout);
+            ",
+        )?;
+    }
     Ok(())
 }
 
 /// Unités + loadouts TTS + formes en profils enfants + FK figurines.
 fn migrate_tts_units_loadouts_split(conn: &Connection) -> Result<()> {
+    if column_exists(conn, "tts_profiles", "tts_loadout_id")?
+        && !relation_is_table(conn, "tts_profiles")?
+    {
+        return Ok(());
+    }
     if column_exists(conn, "tts_profiles", "tts_loadout_id")?
         && table_has_rows_or_exists(conn, "tts_units")?
     {
@@ -1364,12 +1398,14 @@ fn ensure_figurine_loadout_columns(conn: &Connection) -> Result<()> {
             [],
         )?;
     }
-    conn.execute_batch(
-        "
-        CREATE INDEX IF NOT EXISTS idx_tts_figurines_loadout
-            ON tts_figurines(tts_loadout_id);
-        ",
-    )?;
+    if relation_is_table(conn, "tts_figurines")? {
+        conn.execute_batch(
+            "
+            CREATE INDEX IF NOT EXISTS idx_tts_figurines_loadout
+                ON tts_figurines(tts_loadout_id);
+            ",
+        )?;
+    }
     Ok(())
 }
 
@@ -1871,7 +1907,7 @@ fn normalize_stored_army_list_urls(conn: &Connection) -> Result<()> {
     ];
 
     for &(table, column) in targets {
-        if !column_exists(conn, table, column)? {
+        if !relation_is_table(conn, table)? || !column_exists(conn, table, column)? {
             continue;
         }
         let sql = format!(

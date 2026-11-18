@@ -86,7 +86,7 @@ import {
 } from '@/lib/tournamentDisplay'
 import { formatMatchDate } from '@/lib/tournamentMatchDisplay'
 import { phaseLabels } from '@/lib/tournamentPhase'
-import { tournoisTabs } from '@/lib/pageTitleTabs'
+import { jeuTabs } from '@/lib/pageTitleTabs'
 import { normalizeArmyListCode } from '@/lib/armyList'
 import PageTitleTabs from '@/components/PageTitleTabs.vue'
 import { Alert, AlertDescription } from '@/components/ui/alert'
@@ -1957,8 +1957,8 @@ onMounted(refresh)
 
     <template v-else-if="detail">
       <PageTitleTabs
-        :tabs="tournoisTabs"
-        ariaLabel="Sections des tournois"
+        :tabs="jeuTabs"
+        ariaLabel="Sections du jeu"
         :current="{ label: detail.name }"
       />
 

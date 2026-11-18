@@ -3,7 +3,7 @@ use std::fs;
 use std::path::Path;
 
 use anyhow::{bail, Context, Result};
-use rusqlite::{params, Connection};
+use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 
 use crate::match_record::{
@@ -187,6 +187,7 @@ impl Leaderboard {
                 LEFT JOIN tournaments t ON t.id = m.tournament_id
                 LEFT JOIN tournament_matches tm ON tm.elo_match_id = m.id
                 LEFT JOIN pools p ON p.id = tm.pool_id
+                WHERE COALESCE(m.status, '') != 'to_be_played'
                 ORDER BY m.recorded_at DESC, m.id DESC
                 ",
             )?;
@@ -259,15 +260,49 @@ impl Leaderboard {
         };
 
         tx.execute("DELETE FROM match_reports", [])?;
-        tx.execute("DELETE FROM matches", [])?;
-        tx.execute("DELETE FROM players", [])?;
+        tx.execute(
+            "DELETE FROM matches WHERE COALESCE(status, '') != 'to_be_played'",
+            [],
+        )?;
+        let players_have_id: bool = tx
+            .query_row(
+                "SELECT 1 FROM pragma_table_info('players') WHERE name = 'id'",
+                [],
+                |_| Ok(true),
+            )
+            .optional()?
+            .unwrap_or(false);
+        if !players_have_id {
+            tx.execute("DELETE FROM players", [])?;
+        }
 
+        let player_sql = if players_have_id {
+            "
+            INSERT INTO players (name_key, name, rating, wins, draws, losses, discord_username)
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+            ON CONFLICT(name_key) DO UPDATE SET
+                name = excluded.name,
+                rating = excluded.rating,
+                wins = excluded.wins,
+                draws = excluded.draws,
+                losses = excluded.losses,
+                discord_username = excluded.discord_username
+            "
+        } else {
+            "
+            INSERT INTO players (name_key, name, rating, wins, draws, losses, discord_username)
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+            "
+        };
+        if players_have_id {
+            tx.execute(
+                "CREATE TEMP TABLE players_kept (name_key TEXT PRIMARY KEY)",
+                [],
+            )?;
+        }
         for (key, player) in &self.players {
             tx.execute(
-                "
-                INSERT INTO players (name_key, name, rating, wins, draws, losses, discord_username)
-                VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
-                ",
+                player_sql,
                 params![
                     key,
                     player.name,
@@ -278,6 +313,25 @@ impl Leaderboard {
                     player.discord_username,
                 ],
             )?;
+            if players_have_id {
+                tx.execute(
+                    "INSERT OR IGNORE INTO players_kept (name_key) VALUES (?1)",
+                    params![key],
+                )?;
+            }
+        }
+        if players_have_id {
+            tx.execute(
+                "
+                DELETE FROM players
+                WHERE name_key NOT IN (SELECT name_key FROM players_kept)
+                  AND id NOT IN (SELECT player_id FROM tournament_registration_rows)
+                  AND id NOT IN (SELECT player_id FROM tournament_player_rows)
+                  AND id NOT IN (SELECT player_id FROM pool_player_rows)
+                ",
+                [],
+            )?;
+            tx.execute("DROP TABLE players_kept", [])?;
         }
 
         for record in &self.matches {

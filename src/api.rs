@@ -8,7 +8,7 @@ use axum::{
     http::{header, HeaderValue, Method, StatusCode},
     middleware::{self, Next},
     response::{Html, IntoResponse, Redirect, Response},
-    routing::{delete, get, patch, post},
+    routing::{delete, get, patch, post, put},
     Json, Router,
 };
 use serde::{Deserialize, Serialize};
@@ -441,6 +441,23 @@ pub fn router(state: AppState) -> Result<Router> {
         .route("/api/players", post(add_player))
         .route("/api/players/me", post(claim_player))
         .route("/api/admin/accounts", get(admin_accounts))
+        .route("/api/admin/units", get(admin_list_units))
+        .route("/api/admin/units/{id}", get(admin_unit_detail))
+        .route("/api/admin/unit-profiles/{id}", put(admin_assign_profile))
+        .route(
+            "/api/admin/figurines/{id}/loadout",
+            put(admin_assign_figurine_loadout),
+        )
+        .route(
+            "/api/admin/unit-tts/{id}",
+            put(admin_update_tts).delete(admin_delete_tts),
+        )
+        .route("/api/admin/unit-tts", post(admin_create_tts))
+        .route(
+            "/api/admin/unit-loadouts/{id}",
+            delete(admin_delete_loadout),
+        )
+        .route("/api/admin/unit-loadouts", post(admin_create_loadout))
         .route("/api/admin/player-link", post(link_player_account))
         .route("/api/admin/players/merge", post(merge_player_accounts))
         .route(
@@ -1647,6 +1664,170 @@ async fn admin_accounts(
     require_admin(&state, &session).await?;
     let board = state.board.lock().unwrap();
     Ok(Json(current_admin_accounts(&state, &board)?))
+}
+
+#[derive(Deserialize)]
+struct AdminUnitQuery {
+    #[serde(default)]
+    q: String,
+    #[serde(default)]
+    unit_id: Option<i64>,
+    #[serde(default)]
+    army_id: Option<i64>,
+    #[serde(default = "default_admin_units_limit")]
+    limit: u32,
+    #[serde(default)]
+    offset: u32,
+}
+
+fn default_admin_units_limit() -> u32 {
+    40
+}
+
+async fn admin_list_units(
+    State(state): State<AppState>,
+    session: Session,
+    Query(query): Query<AdminUnitQuery>,
+) -> Result<Json<crate::unit_admin::AdminUnitPage>, ApiError> {
+    require_admin(&state, &session).await?;
+    let conn = state.tts_profiles.lock();
+    crate::unit_admin::list_units(
+        &conn,
+        &query.q,
+        query.army_id.filter(|id| *id > 0),
+        query.limit,
+        query.offset,
+    )
+    .map(Json)
+    .map_err(|error| ApiError::bad_request(error.to_string()))
+}
+
+async fn admin_unit_detail(
+    State(state): State<AppState>,
+    session: Session,
+    Path(id): Path<i64>,
+) -> Result<Json<crate::unit_admin::AdminUnitDetail>, ApiError> {
+    require_admin(&state, &session).await?;
+    let conn = state.tts_profiles.lock();
+    crate::unit_admin::unit_detail(&conn, id)
+        .map(Json)
+        .map_err(|error| ApiError::bad_request(error.to_string()))
+}
+
+async fn admin_assign_profile(
+    State(state): State<AppState>,
+    session: Session,
+    Path(id): Path<i64>,
+    Json(body): Json<crate::unit_admin::AssignProfileRequest>,
+) -> Result<Json<crate::unit_admin::AdminUnitDetail>, ApiError> {
+    require_admin(&state, &session).await?;
+    let conn = state.tts_profiles.lock();
+    crate::unit_admin::assign_profile(&conn, id, &body)
+        .map_err(|error| ApiError::bad_request(error.to_string()))?;
+    let unit_id: i64 = conn
+        .query_row(
+            "SELECT unit_id FROM unit_profiles WHERE id = ?1",
+            rusqlite::params![id],
+            |row| row.get(0),
+        )
+        .map_err(|error| ApiError::bad_request(error.to_string()))?;
+    crate::unit_admin::unit_detail(&conn, unit_id)
+        .map(Json)
+        .map_err(|error| ApiError::bad_request(error.to_string()))
+}
+
+async fn admin_assign_figurine_loadout(
+    State(state): State<AppState>,
+    session: Session,
+    Path(id): Path<i64>,
+    Json(body): Json<crate::unit_admin::AssignFigurineLoadoutRequest>,
+) -> Result<Json<crate::unit_admin::AdminUnitDetail>, ApiError> {
+    require_admin(&state, &session).await?;
+    let conn = state.tts_profiles.lock();
+    let unit_id = crate::unit_admin::assign_figurine_loadout(&conn, id, &body)
+        .map_err(|error| ApiError::bad_request(error.to_string()))?;
+    crate::unit_admin::unit_detail(&conn, unit_id)
+        .map(Json)
+        .map_err(|error| ApiError::bad_request(error.to_string()))
+}
+
+async fn admin_create_tts(
+    State(state): State<AppState>,
+    session: Session,
+    Json(body): Json<crate::unit_admin::CreateTtsRequest>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    require_admin(&state, &session).await?;
+    let conn = state.tts_profiles.lock();
+    let id = crate::unit_admin::create_tts(&conn, &body)
+        .map_err(|error| ApiError::bad_request(error.to_string()))?;
+    Ok(Json(serde_json::json!({ "id": id })))
+}
+
+async fn admin_update_tts(
+    State(state): State<AppState>,
+    session: Session,
+    Path(id): Path<i64>,
+    Query(query): Query<AdminUnitQuery>,
+    Json(body): Json<crate::unit_admin::UpdateTtsRequest>,
+) -> Result<Json<crate::unit_admin::AdminUnitDetail>, ApiError> {
+    require_admin(&state, &session).await?;
+    let unit_id = query
+        .unit_id
+        .ok_or_else(|| ApiError::bad_request("unit_id requis"))?;
+    let conn = state.tts_profiles.lock();
+    crate::unit_admin::update_tts(&conn, id, &body)
+        .map_err(|error| ApiError::bad_request(error.to_string()))?;
+    crate::unit_admin::unit_detail(&conn, unit_id)
+        .map(Json)
+        .map_err(|error| ApiError::bad_request(error.to_string()))
+}
+
+async fn admin_delete_tts(
+    State(state): State<AppState>,
+    session: Session,
+    Path(id): Path<i64>,
+    Query(query): Query<AdminUnitQuery>,
+) -> Result<Json<crate::unit_admin::AdminUnitDetail>, ApiError> {
+    require_admin(&state, &session).await?;
+    let unit_id = query
+        .unit_id
+        .ok_or_else(|| ApiError::bad_request("unit_id requis"))?;
+    let conn = state.tts_profiles.lock();
+    crate::unit_admin::delete_tts(&conn, id)
+        .map_err(|error| ApiError::bad_request(error.to_string()))?;
+    crate::unit_admin::unit_detail(&conn, unit_id)
+        .map(Json)
+        .map_err(|error| ApiError::bad_request(error.to_string()))
+}
+
+async fn admin_create_loadout(
+    State(state): State<AppState>,
+    session: Session,
+    Json(body): Json<crate::unit_admin::CreateLoadoutRequest>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    require_admin(&state, &session).await?;
+    let conn = state.tts_profiles.lock();
+    let id = crate::unit_admin::create_loadout(&conn, &body)
+        .map_err(|error| ApiError::bad_request(error.to_string()))?;
+    Ok(Json(serde_json::json!({ "id": id })))
+}
+
+async fn admin_delete_loadout(
+    State(state): State<AppState>,
+    session: Session,
+    Path(id): Path<i64>,
+    Query(query): Query<AdminUnitQuery>,
+) -> Result<Json<crate::unit_admin::AdminUnitDetail>, ApiError> {
+    require_admin(&state, &session).await?;
+    let unit_id = query
+        .unit_id
+        .ok_or_else(|| ApiError::bad_request("unit_id requis"))?;
+    let conn = state.tts_profiles.lock();
+    crate::unit_admin::delete_loadout(&conn, id)
+        .map_err(|error| ApiError::bad_request(error.to_string()))?;
+    crate::unit_admin::unit_detail(&conn, unit_id)
+        .map(Json)
+        .map_err(|error| ApiError::bad_request(error.to_string()))
 }
 
 async fn link_player_account(

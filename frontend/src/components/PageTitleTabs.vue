@@ -50,11 +50,14 @@ const activeLabel = computed(() => {
   )
 })
 
-function isActive(tab: DisplayTab) {
-  if (props.current?.label?.trim()) {
-    return Boolean(tab.isCurrent)
-  }
+function isSectionActive(tab: DisplayTab) {
+  if (tab.isCurrent) return false
   return typeof route.name === 'string' && tab.activeNames.includes(route.name)
+}
+
+function isActive(tab: DisplayTab) {
+  // Le détail courant reste actif, et la section parente aussi.
+  return Boolean(tab.isCurrent) || isSectionActive(tab)
 }
 </script>
 
@@ -71,7 +74,7 @@ function isActive(tab: DisplayTab) {
           'page-title-tab--active': isActive(tab),
           'page-title-tab--detail': tab.isCurrent,
         }"
-        :aria-current="isActive(tab) ? 'page' : undefined"
+        :aria-current="tab.isCurrent || (!props.current && isSectionActive(tab)) ? 'page' : undefined"
         :title="tab.title ?? tab.detailLabel"
       >
         <template v-if="tab.isCurrent && tab.detailLabel">

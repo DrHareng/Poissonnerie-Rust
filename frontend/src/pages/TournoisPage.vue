@@ -42,7 +42,7 @@ import {
 } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { tournoisTabs } from '@/lib/pageTitleTabs'
+import { jeuTabs } from '@/lib/pageTitleTabs'
 
 const router = useRouter()
 const route = useRoute()
@@ -57,14 +57,18 @@ const newName = ref('')
 const creating = ref(false)
 const completedViewMode = ref<TournamentCompletedViewMode>('compressed')
 
-const isCompletedTab = computed(() => route.name === 'tournois-termines')
+const showCompleted = computed(() => {
+  const raw = route.query.termines
+  const value = Array.isArray(raw) ? raw[0] : raw
+  return value === '1' || value === 'true' || value === 'yes'
+})
 const isCompressedCompletedView = computed(
-  () => isCompletedTab.value && completedViewMode.value === 'compressed',
+  () => showCompleted.value && completedViewMode.value === 'compressed',
 )
 
 const filteredTournaments = computed(() =>
   tournaments.value.filter((tournament) =>
-    isCompletedTab.value
+    showCompleted.value
       ? isTournamentCompleted(tournament.status)
       : !isTournamentCompleted(tournament.status),
   ),
@@ -84,14 +88,31 @@ const showMyTournamentsSide = computed(
 )
 
 const listTitle = computed(() =>
-  isCompletedTab.value ? 'Tournois terminés' : 'Tournois en cours',
+  showCompleted.value ? 'Tournois terminés' : 'Tournois en cours',
 )
 
 const emptyMessage = computed(() =>
-  isCompletedTab.value
+  showCompleted.value
     ? 'Aucun tournoi terminé pour l’instant.'
     : 'Aucun tournoi en cours pour l’instant.',
 )
+
+function setShowCompleted(value: boolean) {
+  if (value === showCompleted.value) return
+  const query = { ...route.query }
+  if (value) {
+    query.termines = '1'
+  } else {
+    delete query.termines
+  }
+  void router.replace({ name: 'tournois', query })
+}
+
+function statusToggleClass(completed: boolean) {
+  return showCompleted.value === completed
+    ? 'border-primary bg-primary! text-primary-foreground hover:bg-primary/90'
+    : 'border-border bg-black text-white hover:text-primary'
+}
 
 function viewToggleClass(mode: TournamentCompletedViewMode) {
   return completedViewMode.value === mode
@@ -186,8 +207,8 @@ onMounted(() => {
 <template>
   <div class="page-stack">
     <PageTitleTabs
-      :tabs="tournoisTabs"
-      ariaLabel="Sections des tournois"
+      :tabs="jeuTabs"
+      ariaLabel="Sections du jeu"
     />
 
     <Teleport defer to="#app-side-panel">
@@ -216,7 +237,7 @@ onMounted(() => {
       />
     </div>
 
-    <Card v-if="isAdmin && showCreate && !isCompletedTab" class="neon-panel">
+    <Card v-if="isAdmin && showCreate && !showCompleted" class="neon-panel">
       <CardHeader>
         <CardTitle>Créer un tournoi</CardTitle>
       </CardHeader>
@@ -244,40 +265,82 @@ onMounted(() => {
             <Trophy class="size-5 text-primary" />
             {{ listTitle }}
           </div>
-          <div class="flex flex-wrap items-center gap-2 self-start lg:self-auto">
-            <template v-if="isCompletedTab">
-              <span class="text-sm font-medium text-muted-foreground">Affichage :</span>
-              <div class="flex items-center gap-0">
+          <div class="flex h-8 items-center gap-2 self-start lg:self-auto">
+            <div
+              class="flex items-center gap-0"
+              role="group"
+              aria-label="Statut des tournois"
+            >
+              <Button
+                type="button"
+                size="xs"
+                variant="outline"
+                class="rounded-r-none"
+                :class="statusToggleClass(false)"
+                :aria-pressed="!showCompleted"
+                @click="setShowCompleted(false)"
+              >
+                En cours
+              </Button>
+              <Button
+                type="button"
+                size="xs"
+                variant="outline"
+                class="rounded-l-none border-l-0"
+                :class="statusToggleClass(true)"
+                :aria-pressed="showCompleted"
+                @click="setShowCompleted(true)"
+              >
+                Terminé
+              </Button>
+            </div>
+            <div class="relative flex h-8 min-w-[14.5rem] items-center justify-end">
+              <div
+                class="absolute inset-y-0 right-0 flex items-center gap-2"
+                :class="showCompleted ? undefined : 'invisible pointer-events-none'"
+                :aria-hidden="!showCompleted"
+              >
+                <span class="text-sm font-medium text-muted-foreground">Affichage :</span>
+                <div class="flex items-center gap-0">
+                  <Button
+                    type="button"
+                    size="xs"
+                    variant="outline"
+                    class="rounded-r-none"
+                    :class="viewToggleClass('detailed')"
+                    :tabindex="showCompleted ? undefined : -1"
+                    @click="setCompletedViewMode('detailed')"
+                  >
+                    Détaillé
+                  </Button>
+                  <Button
+                    type="button"
+                    size="xs"
+                    variant="outline"
+                    class="rounded-l-none border-l-0"
+                    :class="viewToggleClass('compressed')"
+                    :tabindex="showCompleted ? undefined : -1"
+                    @click="setCompletedViewMode('compressed')"
+                  >
+                    Comprimé
+                  </Button>
+                </div>
+              </div>
+              <div
+                class="absolute inset-y-0 right-0 flex items-center"
+                :class="isAdmin && !showCreate && !showCompleted ? undefined : 'invisible pointer-events-none'"
+                :aria-hidden="!(isAdmin && !showCreate && !showCompleted)"
+              >
                 <Button
-                  type="button"
-                  size="xs"
-                  variant="outline"
-                  class="rounded-r-none"
-                  :class="viewToggleClass('detailed')"
-                  @click="setCompletedViewMode('detailed')"
+                  class="shrink-0"
+                  :tabindex="isAdmin && !showCreate && !showCompleted ? undefined : -1"
+                  @click="showCreate = true"
                 >
-                  Détaillé
-                </Button>
-                <Button
-                  type="button"
-                  size="xs"
-                  variant="outline"
-                  class="rounded-l-none border-l-0"
-                  :class="viewToggleClass('compressed')"
-                  @click="setCompletedViewMode('compressed')"
-                >
-                  Comprimé
+                  <Plus class="size-4" />
+                  Nouveau tournoi
                 </Button>
               </div>
-            </template>
-            <Button
-              v-if="isAdmin && !showCreate && !isCompletedTab"
-              class="shrink-0"
-              @click="showCreate = true"
-            >
-              <Plus class="size-4" />
-              Nouveau tournoi
-            </Button>
+            </div>
           </div>
         </CardTitle>
       </CardHeader>

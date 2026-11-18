@@ -105,6 +105,7 @@ const sectorialColor = ref('FFFFFF')
 const downloading = ref(false)
 const bagDownloading = ref(false)
 const bagName = ref('Panier Figs3D')
+const distanceUnit = ref<'cm' | 'inch'>('cm')
 const draft = ref<Draft>(emptyDraft())
 const photoFile = ref<File | null>(null)
 const photoPreview = ref('')
@@ -386,6 +387,7 @@ async function downloadCartBag() {
       bag_name: bagName.value.trim() || 'Panier Figs3D',
       color_g1: color.value,
       color_g2: color.value,
+      distance_unit: distanceUnit.value,
       army_id: armyId,
       picks: cartItems.value.map((line) => ({
         figurine_id: line.figurine_id,
@@ -978,7 +980,7 @@ onBeforeUnmount(() => {
           <AlertDescription>{{ loadoutsError }}</AlertDescription>
         </Alert>
         <div v-else class="space-y-1.5">
-          <Label>Loadout TTS</Label>
+          <Label>Loadout</Label>
           <p v-if="loadoutsLoading" class="text-sm text-muted-foreground">
             Chargement…
           </p>
@@ -1122,6 +1124,27 @@ onBeforeUnmount(() => {
               </div>
             </div>
             <ColorPicker v-model="color" />
+          </div>
+          <div class="space-y-1.5">
+            <p class="text-sm font-medium">Unités de distance</p>
+            <div class="flex gap-2">
+              <Button
+                type="button"
+                class="flex-1"
+                :variant="distanceUnit === 'cm' ? 'default' : 'outline'"
+                @click="distanceUnit = 'cm'"
+              >
+                cm
+              </Button>
+              <Button
+                type="button"
+                class="flex-1"
+                :variant="distanceUnit === 'inch' ? 'default' : 'outline'"
+                @click="distanceUnit = 'inch'"
+              >
+                inches (″)
+              </Button>
+            </div>
           </div>
           <div class="flex flex-wrap gap-2">
             <Button

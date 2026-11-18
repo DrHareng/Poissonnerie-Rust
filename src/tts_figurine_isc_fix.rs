@@ -319,7 +319,7 @@ mod tests {
                 [],
             )
             .unwrap();
-            let loadout_id = conn.last_insert_rowid();
+            let loadout_id = crate::schema_rework::echoed_id(conn).unwrap();
             conn.execute(
                 "INSERT INTO tts_profiles (
                     faction_label, unit_id, tts_loadout_id, parent_profile_id,
@@ -335,7 +335,7 @@ mod tests {
                 ],
             )
             .unwrap();
-            conn.last_insert_rowid()
+            crate::schema_rework::echoed_id(conn).unwrap()
         };
         let insert_profile = |conn: &Connection, isc: &str, loadout: &str, bag: &str| -> i64 {
             insert_row(conn, isc, loadout, bag, None)
@@ -383,7 +383,7 @@ mod tests {
             params![isc, loadout, now],
         )
         .unwrap();
-        conn.last_insert_rowid()
+        crate::schema_rework::echoed_id(conn).unwrap()
     }
 
     #[test]

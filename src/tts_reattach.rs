@@ -200,7 +200,7 @@ fn normalize_plural(value: &str) -> String {
 fn table_exists(conn: &Connection, table: &str) -> Result<bool> {
     let found: Option<i64> = conn
         .query_row(
-            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?1",
+            "SELECT 1 FROM sqlite_master WHERE type IN ('table', 'view') AND name = ?1",
             params![table],
             |row| row.get(0),
         )
@@ -251,13 +251,17 @@ mod tests {
 
         conn.execute("INSERT INTO tts_units (nom) VALUES ('NISSE')", [])
             .unwrap();
-        let unit_id = conn.last_insert_rowid();
+        let unit_id: i64 = conn
+            .query_row("SELECT id FROM tts_units WHERE nom = 'NISSE'", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
         conn.execute(
             "INSERT INTO tts_loadouts (nom_tts, description_tts) VALUES ('n', 'd')",
             [],
         )
         .unwrap();
-        let loadout_id = conn.last_insert_rowid();
+        let loadout_id = crate::schema_rework::echoed_id(&conn).unwrap();
         conn.execute(
             "
             INSERT INTO tts_profiles (

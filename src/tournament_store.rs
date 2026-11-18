@@ -936,7 +936,7 @@ impl TournamentStore {
                 now,
             ],
         )?;
-        let reg_id = conn.last_insert_rowid();
+        let reg_id = crate::schema_rework::echoed_id(&conn)?;
         self.get_registration_in_conn(&conn, reg_id)?
             .context("inscription introuvable")
     }
@@ -1153,7 +1153,7 @@ impl TournamentStore {
                 i64::from(list2.is_some()),
             ],
         )?;
-        let reg_id = conn.last_insert_rowid();
+        let reg_id = crate::schema_rework::echoed_id(&conn)?;
         let registration = self
             .get_registration_in_conn(&conn, reg_id)?
             .context("inscription introuvable")?;
@@ -1249,11 +1249,11 @@ impl TournamentStore {
                 i64::from(list2.is_some()),
             ],
         )?;
-        let reg_id = tx.last_insert_rowid();
+        let reg_id = crate::schema_rework::echoed_id(&tx)?;
 
         tx.execute(
             "
-            INSERT OR REPLACE INTO tournament_players
+            INSERT INTO tournament_players
                 (tournament_id, player_name_key, player_name, start_rating, bracket_rating)
             VALUES (?1, ?2, ?3, ?4, ?4)
             ",
@@ -1605,7 +1605,7 @@ impl TournamentStore {
 
             tx.execute(
                 "
-                INSERT OR REPLACE INTO tournament_players
+                INSERT INTO tournament_players
                     (tournament_id, player_name_key, player_name, start_rating, bracket_rating)
                 VALUES (?1, ?2, ?3, ?4, ?4)
                 ",
@@ -2697,7 +2697,7 @@ impl TournamentStore {
                 player1_objectives = 0, player2_objectives = 0,
                 player1_survivors = 0, player2_survivors = 0,
                 player1_tournament_points = 0, player2_tournament_points = 0,
-                outcome = NULL, is_forfeit = 0, forfeit_player = NULL,
+                outcome = '', is_forfeit = 0, forfeit_player = NULL,
                 player1_elo_delta = 0, player2_elo_delta = 0,
                 player1_rating_used = NULL, player2_rating_used = NULL,
                 elo_applied_at = NULL,
@@ -2738,7 +2738,7 @@ impl TournamentStore {
                 player1_objectives = 0, player2_objectives = 0,
                 player1_survivors = 0, player2_survivors = 0,
                 player1_tournament_points = 0, player2_tournament_points = 0,
-                outcome = NULL, is_forfeit = 0, is_unplayed = 0, forfeit_player = NULL,
+                outcome = '', is_forfeit = 0, is_unplayed = 0, forfeit_player = NULL,
                 player1_elo_delta = 0, player2_elo_delta = 0,
                 player1_rating_used = NULL, player2_rating_used = NULL,
                 elo_applied_at = NULL,
@@ -2789,7 +2789,7 @@ impl TournamentStore {
                 player1_objectives = 0, player2_objectives = 0,
                 player1_survivors = 0, player2_survivors = 0,
                 player1_tournament_points = 0, player2_tournament_points = 0,
-                outcome = NULL, is_forfeit = 0, is_unplayed = 1, forfeit_player = NULL,
+                outcome = '', is_forfeit = 0, is_unplayed = 1, forfeit_player = NULL,
                 player1_elo_delta = 0, player2_elo_delta = 0,
                 status = ?1, confirmed_by_user_id = ?2, confirmed_at = ?3,
                 player1_army_id = ?4, player2_army_id = ?5,
@@ -5728,7 +5728,7 @@ mod tests {
                 player1_objectives = 0, player2_objectives = 0,
                 player1_survivors = 0, player2_survivors = 0,
                 player1_tournament_points = 0, player2_tournament_points = 0,
-                outcome = NULL, is_forfeit = 0, is_unplayed = 1,
+                outcome = '', is_forfeit = 0, is_unplayed = 1,
                 forfeit_player = NULL, status = 'confirmed'
             WHERE id = 1
             ",
@@ -5771,7 +5771,7 @@ mod tests {
                 player1_objectives = 0, player2_objectives = 0,
                 player1_survivors = 0, player2_survivors = 0,
                 player1_tournament_points = 0, player2_tournament_points = 0,
-                outcome = NULL, is_forfeit = 0, is_unplayed = 1,
+                outcome = '', is_forfeit = 0, is_unplayed = 1,
                 forfeit_player = NULL, status = 'confirmed',
                 confirmed_by_user_id = 1, confirmed_at = 10, played_at = 10
             WHERE id = 1

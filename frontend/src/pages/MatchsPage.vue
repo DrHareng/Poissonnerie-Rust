@@ -24,7 +24,7 @@ import { useArmies } from '@/composables/useArmies'
 import { useListPage } from '@/composables/useListPage'
 import { useMyInProgressMatches, inProgressMenuLabel } from '@/composables/useMyInProgressMatches'
 import { PARTIE_STEP_LABELS, type PartieStep } from '@/composables/usePartieFlow'
-import { matchsTabs } from '@/lib/pageTitleTabs'
+import { jeuTabs } from '@/lib/pageTitleTabs'
 import { isListableArmy } from '@/lib/army'
 import { formatMatchRecordedDate } from '@/lib/tournamentMatchDisplay'
 import { partieResumeParam } from '@/lib/partieOffline'
@@ -395,8 +395,8 @@ onMounted(async () => {
 <template>
   <div class="page-stack">
     <PageTitleTabs
-      :tabs="matchsTabs"
-      ariaLabel="Sections des matchs"
+      :tabs="jeuTabs"
+      ariaLabel="Sections du jeu"
     />
 
     <Alert v-if="!apiOnline" variant="destructive" class="neon-panel-accent">

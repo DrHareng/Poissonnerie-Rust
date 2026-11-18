@@ -7,33 +7,22 @@ import PlayerPicker from '@/components/PlayerPicker.vue'
 import SectorialPicker from '@/components/SectorialPicker.vue'
 import TtsFigurinesPanel from '@/components/TtsFigurinesPanel.vue'
 import TtsListsPanel from '@/components/TtsListsPanel.vue'
-import TtsProfilesPanel from '@/components/TtsProfilesPanel.vue'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select'
 import { useAdminEditMode } from '@/composables/useAdminEditMode'
 import { useArmies } from '@/composables/useArmies'
 import { useTtsFigurineCart } from '@/composables/useTtsFigurineCart'
 import { useTtsSectorial } from '@/composables/useTtsSectorial'
 import { fetchTtsFigurineMeta, fetchTtsProfileArmies } from '@/lib/api'
 import { isListableArmy } from '@/lib/army'
-import { profilsFigsTabs, type PageTitleTab } from '@/lib/pageTitleTabs'
+import { ttsTabs, type PageTitleTab } from '@/lib/pageTitleTabs'
 import type { Army } from '@/types/elo'
-
-type FigFilter = 'tous' | 'avec' | 'sans'
 
 const QUERY_SECTORIELLE = 'sectorielle'
 const QUERY_PEINTRE = 'peintre'
 const QUERY_RECHERCHE = 'recherche'
-const QUERY_FIGS = 'figs'
 const QUERY_MANQUANT = 'manquant'
 
 const route = useRoute()
@@ -45,7 +34,6 @@ const { count: cartCount, reopenVisible: cartReopenVisible, openCart } = useTtsF
 const extraArmies = ref<Army[]>([])
 const pickerError = ref('')
 const painterOptions = ref<{ value: string; label: string }[]>([])
-const figurineIscs = ref<string[]>([])
 const figsPanel = ref<{ openCreate: () => void } | null>(null)
 
 /** Champ contrôlé localement ; l’URL est mise à jour (replace) à chaque changement. */
@@ -54,11 +42,8 @@ const filtersReady = ref(false)
 let searchSyncTimer: ReturnType<typeof setTimeout> | null = null
 let writingQuery = false
 
-const isProfilesTab = computed(() => route.name === 'profils-figs-profils')
 const isFigsTab = computed(() => route.name === 'profils-figs-figs')
 const isListsTab = computed(() => route.name === 'profils-figs-listes')
-
-const showSearch = computed(() => isFigsTab.value || isProfilesTab.value)
 
 const showSectorialBar = computed(() => !isListsTab.value)
 
@@ -78,7 +63,6 @@ function queryFromRoute(query: LocationQuery = route.query) {
     sectorielle: firstQueryValue(query[QUERY_SECTORIELLE]),
     peintre: firstQueryValue(query[QUERY_PEINTRE]),
     recherche: firstQueryValue(query[QUERY_RECHERCHE]),
-    figs: parseFigFilter(firstQueryValue(query[QUERY_FIGS])),
     manquant: parseFlag(firstQueryValue(query[QUERY_MANQUANT])),
   }
 }
@@ -87,30 +71,22 @@ function parseFlag(raw: string): boolean {
   return raw === '1' || raw === 'true' || raw === 'yes'
 }
 
-function parseFigFilter(raw: string): FigFilter {
-  if (raw === 'avec' || raw === 'sans') return raw
-  return 'tous'
-}
-
 function buildFilterQuery(overrides: {
   sectorielle?: string
   peintre?: string
   recherche?: string
-  figs?: FigFilter
   manquant?: boolean
 } = {}): LocationQueryRaw {
   const current = queryFromRoute()
   const sectorielle = (overrides.sectorielle ?? armyId.value ?? current.sectorielle).trim()
   const peintre = (overrides.peintre ?? painterFilter.value ?? current.peintre).trim()
   const recherche = (overrides.recherche ?? searchDraft.value ?? current.recherche).trim()
-  const figs = overrides.figs ?? figFilter.value ?? current.figs
   const manquant = overrides.manquant ?? incompleteOnly.value ?? current.manquant
 
   const query: LocationQueryRaw = {}
   if (sectorielle) query[QUERY_SECTORIELLE] = sectorielle
   if (peintre) query[QUERY_PEINTRE] = peintre
   if (recherche) query[QUERY_RECHERCHE] = recherche
-  if (figs !== 'tous') query[QUERY_FIGS] = figs
   if (manquant && canEditContent.value) query[QUERY_MANQUANT] = '1'
   return query
 }
@@ -119,13 +95,6 @@ const painterFilter = computed({
   get: () => queryFromRoute().peintre,
   set: (value: string) => {
     void writeFilters({ peintre: value.trim() }, 'push')
-  },
-})
-
-const figFilter = computed({
-  get: () => queryFromRoute().figs,
-  set: (value: FigFilter) => {
-    void writeFilters({ figs: value }, 'push')
   },
 })
 
@@ -146,26 +115,25 @@ const filterQuery = computed(() => {
 })
 
 const tabs = computed((): PageTitleTab[] =>
-  profilsFigsTabs.map((tab) => {
+  ttsTabs.map((tab) => {
     const base = typeof tab.to === 'object' ? tab.to : { path: String(tab.to) }
-    return {
-      ...tab,
-      to: {
-        ...base,
-        query: { ...filterQuery.value },
-      },
+    const name = typeof base === 'object' && 'name' in base ? base.name : undefined
+    // Les filtres figurines ne s’appliquent qu’aux onglets Figurines / Listes TTS.
+    if (name === 'profils-figs-figs' || name === 'profils-figs-listes') {
+      return {
+        ...tab,
+        to: {
+          ...base,
+          query: { ...filterQuery.value },
+        },
+      }
     }
+    return tab
   }),
 )
 
 function sameFilterQuery(left: LocationQueryRaw, right: LocationQuery) {
-  const keys = [
-    QUERY_SECTORIELLE,
-    QUERY_PEINTRE,
-    QUERY_RECHERCHE,
-    QUERY_FIGS,
-    QUERY_MANQUANT,
-  ]
+  const keys = [QUERY_SECTORIELLE, QUERY_PEINTRE, QUERY_RECHERCHE, QUERY_MANQUANT]
   for (const key of keys) {
     const a = firstQueryValue(left[key])
     const b = firstQueryValue(right[key])
@@ -228,10 +196,8 @@ async function refreshPainterOptions() {
       value: painter,
       label: painter,
     }))
-    figurineIscs.value = meta.noms
   } catch {
     painterOptions.value = []
-    figurineIscs.value = []
   }
 }
 
@@ -295,7 +261,7 @@ onBeforeUnmount(() => {
   >
     <div :class="isFigsTab ? 'shrink-0' : undefined" @click.capture="flushSearchToUrl">
       <PageTitleTabs
-        ariaLabel="Profils et figurines"
+        ariaLabel="TTS"
         :tabs="tabs"
       />
     </div>
@@ -329,25 +295,12 @@ onBeforeUnmount(() => {
             @update:model-value="painterFilter = $event ?? ''"
           />
         </div>
-        <div v-if="isProfilesTab" class="grid min-w-36 gap-1.5">
-          <Label>Figurines</Label>
-          <Select :model-value="figFilter" @update:model-value="figFilter = ($event as FigFilter) ?? 'tous'">
-            <SelectTrigger class="w-full min-w-36">
-              <SelectValue placeholder="Figurines" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="tous">Tous</SelectItem>
-              <SelectItem value="avec">Avec fig</SelectItem>
-              <SelectItem value="sans">Sans fig</SelectItem>
-            </SelectContent>
-          </Select>
-        </div>
-        <div v-if="showSearch" class="relative w-full max-w-xs">
+        <div v-if="isFigsTab" class="relative w-full max-w-xs">
           <Input
             v-model="searchDraft"
             class="w-full"
-            :class="isFigsTab && cartReopenVisible ? (searchDraft ? 'pr-16' : 'pr-9') : searchDraft ? 'pr-9' : undefined"
-            :placeholder="isFigsTab ? 'Nom, loadout, peintre…' : 'Nom, loadout, nom TTS…'"
+            :class="cartReopenVisible ? (searchDraft ? 'pr-16' : 'pr-9') : searchDraft ? 'pr-9' : undefined"
+            placeholder="Nom, loadout, peintre…"
             autocomplete="off"
           />
           <div class="absolute top-1/2 right-1.5 flex -translate-y-1/2 items-center gap-0.5">
@@ -362,7 +315,7 @@ onBeforeUnmount(() => {
               <X class="size-4 opacity-60" />
             </button>
             <button
-              v-if="isFigsTab && cartReopenVisible"
+              v-if="cartReopenVisible"
               type="button"
               class="text-muted-foreground hover:text-foreground relative rounded-sm p-0.5"
               title="Rouvrir le panier"
@@ -395,16 +348,7 @@ onBeforeUnmount(() => {
       <p v-if="pickerError" class="text-sm text-destructive">{{ pickerError }}</p>
     </div>
 
-    <TtsProfilesPanel
-      v-if="isProfilesTab"
-      v-model:search="searchDraft"
-      :army-id="armyId"
-      :fig-filter="figFilter"
-      :figurine-iscs="figurineIscs"
-      :filter-query="filterQuery"
-    />
-
-    <div v-else-if="isFigsTab" class="flex min-h-0 flex-1 flex-col overflow-hidden">
+    <div v-if="isFigsTab" class="flex min-h-0 flex-1 flex-col overflow-hidden">
       <TtsFigurinesPanel
         ref="figsPanel"
         v-model:search="searchDraft"

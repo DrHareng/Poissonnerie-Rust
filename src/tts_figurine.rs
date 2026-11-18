@@ -483,7 +483,7 @@ impl TtsFigurineStore {
                 now
             ],
         )?;
-        let id = conn.last_insert_rowid();
+        let id = crate::schema_rework::echoed_id(&conn)?;
         get_in_conn(&conn, id)?.context("figurine introuvable après création")
     }
 
@@ -491,7 +491,15 @@ impl TtsFigurineStore {
         let now = now_unix();
         let conn = self.conn.lock().unwrap();
         let input = resolve_write(&conn, input)?;
-        let changed = conn.execute(
+        let exists: bool = conn.query_row(
+            "SELECT EXISTS(SELECT 1 FROM tts_figurines WHERE id = ?1)",
+            params![id],
+            |row| row.get(0),
+        )?;
+        if !exists {
+            bail!("figurine introuvable");
+        }
+        conn.execute(
             "
             UPDATE tts_figurines
             SET isc = ?1, loadout = ?2, legacy_nom = ?1, legacy_loadout = ?2,
@@ -508,19 +516,21 @@ impl TtsFigurineStore {
                 id
             ],
         )?;
-        if changed == 0 {
-            bail!("figurine introuvable");
-        }
         get_in_conn(&conn, id)?.context("figurine introuvable après mise à jour")
     }
 
     pub fn delete(&self, id: i64) -> Result<()> {
         let conn = self.conn.lock().unwrap();
-        let changed = conn.execute("DELETE FROM tts_figurines WHERE id = ?1", params![id])?;
-        drop(conn);
-        if changed == 0 {
+        let exists: bool = conn.query_row(
+            "SELECT EXISTS(SELECT 1 FROM tts_figurines WHERE id = ?1)",
+            params![id],
+            |row| row.get(0),
+        )?;
+        if !exists {
             bail!("figurine introuvable");
         }
+        conn.execute("DELETE FROM tts_figurines WHERE id = ?1", params![id])?;
+        drop(conn);
         let _ = fs::remove_dir_all(self.dir(id));
         Ok(())
     }
@@ -639,14 +649,19 @@ impl TtsFigurineStore {
     pub fn clear_photo(&self, id: i64) -> Result<TtsFigurine> {
         let now = now_unix();
         let conn = self.conn.lock().unwrap();
-        let changed = conn.execute(
+        let exists: bool = conn.query_row(
+            "SELECT EXISTS(SELECT 1 FROM tts_figurines WHERE id = ?1)",
+            params![id],
+            |row| row.get(0),
+        )?;
+        if !exists {
+            bail!("figurine introuvable");
+        }
+        conn.execute(
             "UPDATE tts_figurines SET photo_filename = NULL, updated_at = ?1 WHERE id = ?2",
             params![now, id],
         )?;
         drop(conn);
-        if changed == 0 {
-            bail!("figurine introuvable");
-        }
         let _ = fs::remove_dir_all(self.dir(id));
         self.get(id)?
             .context("figurine introuvable après retrait de la photo")
@@ -963,7 +978,7 @@ mod tests {
             params![unit],
         )
         .unwrap();
-        let loadout_id = conn.last_insert_rowid();
+        let loadout_id = crate::schema_rework::echoed_id(&conn).unwrap();
         conn.execute(
             "INSERT INTO tts_profiles (
                 army_id, faction_label, unit_id, tts_loadout_id, parent_profile_id,
@@ -972,7 +987,7 @@ mod tests {
             params![army_id, unit_id, loadout_id, loadout],
         )
         .unwrap();
-        (loadout_id, conn.last_insert_rowid())
+        (loadout_id, crate::schema_rework::echoed_id(&conn).unwrap())
     }
 
     fn png_bytes() -> Vec<u8> {

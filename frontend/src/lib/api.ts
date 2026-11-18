@@ -176,6 +176,8 @@ export function buildTtsListBag(payload: {
   bag_name: string
   color_g1?: string
   color_g2?: string
+  /** Unité de distance dans les descriptions : `cm` (défaut) ou `inch`. */
+  distance_unit?: 'cm' | 'inch'
   /** Absent = pas de filtre sectorielle. */
   army_id?: number
   picks: Array<{
@@ -557,6 +559,171 @@ export async function createTtsMapReport(
 
 export function fetchTtsMapReports(): Promise<TtsMapReport[]> {
   return request('/api/tts-map-reports')
+}
+
+export interface AdminUnitSummary {
+  id: number
+  nom: string
+  profile_count: number
+}
+
+export interface AdminUnitProfile {
+  id: number
+  loadout: string
+  faction_label: string
+  parent_profile_id: number | null
+  state_index: number
+  tts_id: number
+  nom_tts: string
+  description_tts: string
+  loadout_id: number
+  loadout_nom: string
+  figurine_count: number
+}
+
+export interface AdminTtsChoice {
+  id: number
+  nom_tts: string
+  description_tts: string
+  profile_count: number
+}
+
+export interface AdminLoadoutChoice {
+  id: number
+  nom: string
+  silhouette_size: string | null
+  silhouette_type: string | null
+  marker_name: string | null
+  profile_count: number
+  figurine_count: number
+}
+
+export interface AdminFigurine {
+  id: number
+  painter: string
+  photo_filename: string | null
+  loadout_id: number
+  loadout_nom: string
+}
+
+export interface AdminUnitDetail {
+  unit: AdminUnitSummary
+  profiles: AdminUnitProfile[]
+  tts_profiles: AdminTtsChoice[]
+  loadouts: AdminLoadoutChoice[]
+  figurines: AdminFigurine[]
+}
+
+export interface AdminUnitPage {
+  items: AdminUnitSummary[]
+  total: number
+  limit: number
+  offset: number
+}
+
+export async function fetchAdminUnits(options: {
+  query?: string
+  armyId?: number | null
+  limit?: number
+  offset?: number
+}): Promise<AdminUnitPage> {
+  const params = new URLSearchParams()
+  const q = options.query?.trim() ?? ''
+  if (q) params.set('q', q)
+  if (options.armyId != null && options.armyId > 0) {
+    params.set('army_id', String(options.armyId))
+  }
+  if (options.limit != null) params.set('limit', String(options.limit))
+  if (options.offset != null) params.set('offset', String(options.offset))
+  const suffix = params.toString() ? `?${params}` : ''
+  const payload = await request<AdminUnitPage | AdminUnitSummary[]>(
+    `/api/admin/units${suffix}`,
+  )
+  if (Array.isArray(payload)) {
+    return {
+      items: payload,
+      total: payload.length,
+      limit: options.limit ?? payload.length,
+      offset: options.offset ?? 0,
+    }
+  }
+  return {
+    items: Array.isArray(payload.items) ? payload.items : [],
+    total: Number(payload.total) || 0,
+    limit: Number(payload.limit) || options.limit || 0,
+    offset: Number(payload.offset) || options.offset || 0,
+  }
+}
+
+export function fetchAdminUnit(id: number): Promise<AdminUnitDetail> {
+  return request(`/api/admin/units/${id}`)
+}
+
+export function assignAdminUnitProfile(
+  profileId: number,
+  ttsId: number,
+  loadoutId: number,
+): Promise<AdminUnitDetail> {
+  return request(`/api/admin/unit-profiles/${profileId}`, {
+    method: 'PUT',
+    body: JSON.stringify({ tts_id: ttsId, loadout_id: loadoutId }),
+  })
+}
+
+export function assignAdminFigurineLoadout(
+  figurineId: number,
+  loadoutId: number,
+): Promise<AdminUnitDetail> {
+  return request(`/api/admin/figurines/${figurineId}/loadout`, {
+    method: 'PUT',
+    body: JSON.stringify({ loadout_id: loadoutId }),
+  })
+}
+
+export function createAdminTts(
+  nom: string,
+  description: string,
+): Promise<{ id: number }> {
+  return request('/api/admin/unit-tts', {
+    method: 'POST',
+    body: JSON.stringify({ nom_tts: nom, description_tts: description }),
+  })
+}
+
+export function updateAdminTts(
+  ttsId: number,
+  unitId: number,
+  payload: { nom_tts: string; description_tts: string },
+): Promise<AdminUnitDetail> {
+  return request(`/api/admin/unit-tts/${ttsId}?unit_id=${unitId}`, {
+    method: 'PUT',
+    body: JSON.stringify(payload),
+  })
+}
+
+export function createAdminLoadout(nom: string): Promise<{ id: number }> {
+  return request('/api/admin/unit-loadouts', {
+    method: 'POST',
+    body: JSON.stringify({ nom }),
+  })
+}
+
+export function deleteAdminTts(
+  ttsId: number,
+  unitId: number,
+): Promise<AdminUnitDetail> {
+  return request(`/api/admin/unit-tts/${ttsId}?unit_id=${unitId}`, {
+    method: 'DELETE',
+  })
+}
+
+export function deleteAdminLoadout(
+  loadoutId: number,
+  unitId: number,
+): Promise<AdminUnitDetail> {
+  return request(`/api/admin/unit-loadouts/${loadoutId}?unit_id=${unitId}`, {
+    method: 'DELETE',
+  })
 }
 
 export function fetchTtsMapReportCount(): Promise<{ count: number }> {

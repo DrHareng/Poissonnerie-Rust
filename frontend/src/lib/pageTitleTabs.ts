@@ -20,11 +20,17 @@ export const classementTabs: PageTitleTab[] = [
   },
 ]
 
-export const matchsTabs: PageTitleTab[] = [
+/** Tournois / parties / listes / rapports. */
+export const jeuTabs: PageTitleTab[] = [
+  {
+    to: { name: 'tournois' },
+    label: 'Tournois',
+    activeNames: ['tournois', 'tournoi'],
+  },
   {
     to: { name: 'matchs' },
-    label: 'Matchs',
-    activeNames: ['matchs'],
+    label: 'Parties',
+    activeNames: ['matchs', 'match'],
   },
   {
     to: { name: 'matchs-listes' },
@@ -34,38 +40,38 @@ export const matchsTabs: PageTitleTab[] = [
   {
     to: { name: 'matchs-cr' },
     label: 'Rapports',
-    activeNames: ['matchs-cr'],
+    activeNames: ['matchs-cr', 'match-cr'],
   },
 ]
 
-export const tournoisTabs: PageTitleTab[] = [
+export const ttsTabs: PageTitleTab[] = [
   {
-    to: { name: 'tournois' },
-    label: 'En cours',
-    activeNames: ['tournois'],
-  },
-  {
-    to: { name: 'tournois-termines' },
-    label: 'Terminés',
-    activeNames: ['tournois-termines'],
-  },
-]
-
-export const profilsFigsTabs: PageTitleTab[] = [
-  {
-    to: { name: 'profils-figs-profils' },
-    label: 'Profils',
-    activeNames: ['profils-figs-profils'],
+    to: { name: 'maps' },
+    label: 'Maps',
+    activeNames: ['maps'],
   },
   {
     to: { name: 'profils-figs-figs' },
-    label: 'Figs 3D',
+    label: 'Figurines',
     activeNames: ['profils-figs-figs'],
   },
   {
     to: { name: 'profils-figs-listes' },
-    label: 'Listes TTS',
+    label: 'Listes',
     activeNames: ['profils-figs-listes'],
+  },
+]
+
+export const autreTabs: PageTitleTab[] = [
+  {
+    to: { name: 'links' },
+    label: 'Liens',
+    activeNames: ['links'],
+  },
+  {
+    to: { name: 'applis' },
+    label: 'Applications',
+    activeNames: ['applis'],
   },
 ]
 
@@ -84,5 +90,10 @@ export const adminTabs: PageTitleTab[] = [
     to: { name: 'admin-tts-reports' },
     label: 'Signalements TTS',
     activeNames: ['admin-tts-reports'],
+  },
+  {
+    to: { name: 'admin-unit-profiles' },
+    label: 'Profils TTS',
+    activeNames: ['admin-unit-profiles'],
   },
 ]

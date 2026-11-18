@@ -216,6 +216,11 @@
     @apply flex h-full min-h-0 w-full flex-col overflow-y-auto;
   }
 
+  /* Panneau custom : le contenu gère son propre scroll (listes paginées, etc.). */
+  .poissonnerie-side-panel--custom .poissonnerie-side-slot {
+    @apply overflow-hidden;
+  }
+
   .poissonnerie-side-image {
     @apply block h-full w-full min-h-0 min-w-0 max-w-full rounded-xl object-contain object-top;
     filter: saturate(1.05) contrast(1.02);
@@ -261,10 +266,6 @@
 
   .topbar-link {
     @apply inline-flex items-center gap-2 rounded-md border border-transparent px-4 py-2 text-sm font-medium text-muted-foreground no-underline transition-colors;
-  }
-
-  .topbar-link-icon {
-    @apply px-2.5;
   }
 
   .topbar-link:hover {
@@ -513,7 +514,7 @@
 
   .page-title-tab {
     @apply relative shrink-0 border-l border-border/45 px-3 pb-1.5 font-display text-lg font-bold tracking-wide uppercase transition md:text-xl;
-    @apply text-muted-foreground/40 hover:text-muted-foreground;
+    @apply text-muted-foreground hover:text-foreground;
   }
 
   .page-title-tab:last-child {
@@ -534,7 +535,7 @@
     text-transform: none;
   }
 
-  .page-title-tab--active::after {
+  .page-title-tab--active:not(.page-title-tab--detail)::after {
     content: '';
     @apply absolute right-0 bottom-0 left-0 h-0.5 rounded-full bg-primary;
     box-shadow: 0 0 10px oklch(0.8 0.14 195 / 55%);

@@ -67,6 +67,7 @@ const pickPrefsLoaded = ref(false)
 const bagName = ref('')
 const colorG1 = ref('FFFFFF')
 const colorG2 = ref('FFFFFF')
+const distanceUnit = ref<'cm' | 'inch'>('cm')
 const downloading = ref(false)
 
 const catalog = ref<TtsFigurine[]>([])
@@ -589,6 +590,7 @@ async function downloadBag() {
       bag_name: bagName.value.trim() || result.value.name || 'Liste TTS',
       color_g1: colorG1.value,
       color_g2: colorG2.value,
+      distance_unit: distanceUnit.value,
       army_id: result.value.army_id,
       picks: bagPicks,
     })
@@ -887,6 +889,27 @@ async function launch() {
           <div class="space-y-2">
             <p class="text-sm font-medium">Couleur G2</p>
             <ColorPicker v-model="colorG2" />
+          </div>
+          <div class="space-y-1.5">
+            <p class="text-sm font-medium">Unités de distance</p>
+            <div class="flex gap-2">
+              <Button
+                type="button"
+                class="flex-1"
+                :variant="distanceUnit === 'cm' ? 'default' : 'outline'"
+                @click="distanceUnit = 'cm'"
+              >
+                cm
+              </Button>
+              <Button
+                type="button"
+                class="flex-1"
+                :variant="distanceUnit === 'inch' ? 'default' : 'outline'"
+                @click="distanceUnit = 'inch'"
+              >
+                inches (″)
+              </Button>
+            </div>
           </div>
           <Button
             type="button"

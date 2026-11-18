@@ -36,7 +36,7 @@ import { casualMatchContextLabel, matchCountsForElo } from '@/lib/matchElo'
 import { canResumePartie } from '@/lib/matchParticipant'
 import { formatMatchRecordedDate } from '@/lib/tournamentMatchDisplay'
 import { tournamentPhaseDisplay } from '@/lib/tournamentPhase'
-import { matchsTabs } from '@/lib/pageTitleTabs'
+import { jeuTabs } from '@/lib/pageTitleTabs'
 import { externalHref } from '@/lib/utils'
 import PageTitleTabs from '@/components/PageTitleTabs.vue'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
@@ -464,8 +464,8 @@ onMounted(loadMatch)
 <template>
   <div class="page-stack">
     <PageTitleTabs
-      :tabs="matchsTabs"
-      ariaLabel="Sections des matchs"
+      :tabs="jeuTabs"
+      ariaLabel="Sections du jeu"
       :current="{ label: `Match #${matchId}` }"
     />
 

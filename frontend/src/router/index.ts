@@ -15,6 +15,7 @@ import RessourcesPage from '@/pages/RessourcesPage.vue'
 import AdminPage from '@/pages/AdminPage.vue'
 import AdminPackPage from '@/pages/AdminPackPage.vue'
 import TtsMapReportsPage from '@/pages/TtsMapReportsPage.vue'
+import AdminUnitProfilesPage from '@/pages/AdminUnitProfilesPage.vue'
 import ProfilsFigsPage from '@/pages/ProfilsFigsPage.vue'
 import NotFoundPage from '@/pages/NotFoundPage.vue'
 import { pageTitle } from '@/lib/pageTitle'
@@ -105,7 +106,7 @@ export const router = createRouter({
       path: '/matchs',
       name: 'matchs',
       component: MatchsPage,
-      meta: { title: 'Matchs' },
+      meta: { title: 'Parties' },
     },
     {
       path: '/matchs/listes',
@@ -117,7 +118,7 @@ export const router = createRouter({
       path: '/matchs/cr',
       name: 'matchs-cr',
       component: MatchsPage,
-      meta: { title: 'Rapport' },
+      meta: { title: 'Rapports' },
     },
     {
       path: '/matchs/:id',
@@ -147,13 +148,11 @@ export const router = createRouter({
       path: '/tournois',
       name: 'tournois',
       component: TournoisPage,
-      meta: { title: 'Tournois en cours' },
+      meta: { title: 'Tournois' },
     },
     {
       path: '/tournois/termines',
-      name: 'tournois-termines',
-      component: TournoisPage,
-      meta: { title: 'Tournois terminés' },
+      redirect: { name: 'tournois', query: { termines: '1' } },
     },
     {
       path: '/tournoi/:id',
@@ -181,20 +180,24 @@ export const router = createRouter({
       meta: { title: 'Signalements TTS' },
     },
     {
+      path: '/admin/profils',
+      name: 'admin-unit-profiles',
+      component: AdminUnitProfilesPage,
+      meta: { title: 'Profils TTS' },
+    },
+    {
       path: '/profils-figs',
-      redirect: { name: 'profils-figs-profils' },
+      redirect: { name: 'profils-figs-figs' },
     },
     {
       path: '/profils-figs/profils',
-      name: 'profils-figs-profils',
-      component: ProfilsFigsPage,
-      meta: { title: 'Profils' },
+      redirect: { name: 'profils-figs-figs' },
     },
     {
       path: '/profils-figs/figs',
       name: 'profils-figs-figs',
       component: ProfilsFigsPage,
-      meta: { title: 'Figs 3D' },
+      meta: { title: 'Figurines' },
     },
     {
       path: '/profils-figs/listes',

@@ -773,6 +773,8 @@ export interface TtsListBagRequest {
   bag_name: string
   color_g1?: string
   color_g2?: string
+  /** Unité de distance dans les descriptions TTS : `cm` ou `inch`. */
+  distance_unit?: 'cm' | 'inch'
   army_id: number
   picks: TtsListBagPick[]
 }

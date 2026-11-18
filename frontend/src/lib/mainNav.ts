@@ -2,11 +2,10 @@ import type { Component } from 'vue'
 import type { RouteLocationRaw } from 'vue-router'
 import {
   BookOpen,
-  Boxes,
+  Laptop,
   Map,
   Podium,
   Swords,
-  Trophy,
 } from '@lucide/vue'
 
 export type MainNavChild = {
@@ -39,22 +38,14 @@ export const mainNavLinks: MainNavLink[] = [
     ],
   },
   {
-    to: '/matchs',
-    label: 'Matchs',
+    to: '/tournois',
+    label: 'Jeu',
     icon: Swords,
     children: [
-      { to: { name: 'matchs' }, label: 'Matchs' },
+      { to: { name: 'tournois' }, label: 'Tournois' },
+      { to: { name: 'matchs' }, label: 'Parties' },
       { to: { name: 'matchs-listes' }, label: 'Listes' },
       { to: { name: 'matchs-cr' }, label: 'Rapports' },
-    ],
-  },
-  {
-    to: '/tournois',
-    label: 'Tournois',
-    icon: Trophy,
-    children: [
-      { to: { name: 'tournois' }, label: 'En cours' },
-      { to: { name: 'tournois-termines' }, label: 'Terminés' },
     ],
   },
   {
@@ -68,22 +59,21 @@ export const mainNavLinks: MainNavLink[] = [
   },
   {
     to: '/maps',
-    label: 'Maps & liens',
-    icon: BookOpen,
+    label: 'TTS',
+    icon: Laptop,
     children: [
-      { to: { name: 'maps' }, label: 'Map TTS' },
-      { to: { name: 'links' }, label: 'Liens' },
-      { to: { name: 'applis' }, label: 'Applications' },
+      { to: { name: 'maps' }, label: 'Maps' },
+      { to: { name: 'profils-figs-figs' }, label: 'Figurines' },
+      { to: { name: 'profils-figs-listes' }, label: 'Listes' },
     ],
   },
   {
-    to: '/profils-figs/profils',
-    label: 'Profils & figs',
-    icon: Boxes,
+    to: '/links',
+    label: 'Autre',
+    icon: BookOpen,
     children: [
-      { to: { name: 'profils-figs-profils' }, label: 'Profils' },
-      { to: { name: 'profils-figs-figs' }, label: 'Figs 3D' },
-      { to: { name: 'profils-figs-listes' }, label: 'Listes TTS' },
+      { to: { name: 'links' }, label: 'Liens' },
+      { to: { name: 'applis' }, label: 'Applications' },
     ],
   },
 ]
@@ -100,24 +90,17 @@ export function isMainNavLinkActive(path: string, to: string) {
       path.startsWith('/joueur')
     )
   }
-  if (to === '/matchs') {
-    return path.startsWith('/matchs')
-  }
   if (to === '/tournois') {
-    return path.startsWith('/tournoi')
+    return path.startsWith('/tournoi') || path.startsWith('/matchs')
   }
   if (to === '/scenarios') {
     return path.startsWith('/scenarios')
   }
   if (to === '/maps') {
-    return (
-      path.startsWith('/maps') ||
-      path.startsWith('/links') ||
-      path.startsWith('/applis')
-    )
+    return path.startsWith('/maps') || path.startsWith('/profils-figs')
   }
-  if (to === '/profils-figs/profils') {
-    return path.startsWith('/profils-figs')
+  if (to === '/links') {
+    return path.startsWith('/links') || path.startsWith('/applis')
   }
   return path === to
 }

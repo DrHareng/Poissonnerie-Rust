@@ -1329,12 +1329,13 @@ fn attach_sapper_forms(profiles: &mut [ProfileDraft]) {
         if !sapper {
             continue;
         }
+        // Sapper : S1/S2/S3 → S3 ; S4+ inchangé.
         let size = profile
             .silhouette_size
             .as_deref()
             .and_then(|value| value.parse::<u32>().ok())
             .unwrap_or(2)
-            .max(4)
+            .max(3)
             .to_string();
         let mut traits = profile.traits.clone();
         for trait_ in &mut traits {
@@ -1853,10 +1854,9 @@ fn snapshot_colors(conn: &Connection) -> Result<HashMap<String, String>> {
     let mut colors = HashMap::new();
     let mut stmt = conn.prepare(
         "
-        SELECT p.faction_slug, l.nom_tts
+        SELECT p.faction_slug, p.nom_tts
         FROM tts_profiles p
-        JOIN tts_loadouts l ON l.id = p.tts_loadout_id
-        WHERE p.faction_slug IS NOT NULL AND l.nom_tts LIKE '[______]%'
+        WHERE p.faction_slug IS NOT NULL AND p.nom_tts LIKE '[______]%'
           AND p.parent_profile_id IS NULL
         ",
     )?;
@@ -1955,7 +1955,12 @@ fn ensure_unit(conn: &Connection, nom: &str) -> Result<i64> {
         return Ok(id);
     }
     conn.execute("INSERT INTO tts_units (nom) VALUES (?1)", params![nom])?;
-    Ok(conn.last_insert_rowid())
+    conn.query_row(
+        "SELECT id FROM tts_units WHERE nom = ?1",
+        params![nom],
+        |row| row.get(0),
+    )
+    .context("lecture de l'unité TTS")
 }
 
 fn insert_loadout(
@@ -1985,7 +1990,7 @@ fn insert_loadout(
             marker_mesh_url,
         ],
     )?;
-    Ok(conn.last_insert_rowid())
+    crate::schema_rework::echoed_id(conn)
 }
 
 fn store_profiles(
@@ -2092,7 +2097,7 @@ fn store_profiles(
                 profile.option_id,
             ],
         )?;
-        let profile_id = tx.last_insert_rowid();
+        let profile_id = crate::schema_rework::echoed_id(&tx)?;
         insert_traits(&tx, profile_id, &profile.traits)?;
 
         for form in &profile.forms {
@@ -2129,7 +2134,7 @@ fn store_profiles(
                     form.loadout,
                 ],
             )?;
-            let child_id = tx.last_insert_rowid();
+            let child_id = crate::schema_rework::echoed_id(&tx)?;
             insert_traits(&tx, child_id, &form.traits)?;
             forms += 1;
         }
@@ -2435,8 +2440,8 @@ mod tests {
             .traits
             .iter()
             .any(|trait_| trait_.kind == "equipment" && trait_.name == "TURTLEMEK"));
-        assert_eq!(sapper.silhouette_size.as_deref(), Some("4"));
-        assert!(sapper.description_tts.contains("[B]S[/B]: 4"));
+        assert_eq!(sapper.silhouette_size.as_deref(), Some("3"));
+        assert!(sapper.description_tts.contains("[B]S[/B]: 3"));
         let knight = profiles
             .iter()
             .find(|profile| profile.isc == "KNIGHT")

@@ -271,7 +271,8 @@ fn sapper_silhouette_size(base: &Option<String>) -> String {
         .as_deref()
         .and_then(|value| value.parse::<u32>().ok())
         .unwrap_or(0);
-    size.max(4).to_string()
+    // Sapper : S1/S2/S3 → S3 ; S4+ inchangé.
+    size.max(3).to_string()
 }
 
 fn sapper_description(description: &str) -> String {
@@ -287,10 +288,10 @@ fn sapper_description(description: &str) -> String {
                 .chars()
                 .take_while(|c| c.is_ascii_digit())
                 .collect();
-            if digits == "1" || digits == "2" || digits == "3" {
+            if digits == "1" || digits == "2" {
                 rebuilt.push_str(tag);
                 rebuilt.push(' ');
-                rebuilt.push('4');
+                rebuilt.push('3');
                 rest = &after[space + digits.len()..];
             } else {
                 rebuilt.push_str(tag);
@@ -379,8 +380,8 @@ fn at_least_sapper_size(nom_tts: &str, size: Option<String>) -> Option<String> {
         .as_deref()
         .and_then(|value| value.parse::<u32>().ok())
         .unwrap_or(0);
-    if parsed < 4 {
-        Some("4".to_string())
+    if parsed < 3 {
+        Some("3".to_string())
     } else {
         size
     }
@@ -909,7 +910,7 @@ fn replace_profiles(conn: &Connection, profiles: &[ParsedProfile]) -> Result<Imp
                 profile.source_index,
             ],
         )?;
-        let profile_id = tx.last_insert_rowid();
+        let profile_id = crate::schema_rework::echoed_id(&tx)?;
         for form in &profile.forms {
             let form_unit_id = get_or_create_unit(&tx, &form.isc)?;
             let form_loadout_id = insert_loadout(
@@ -999,7 +1000,7 @@ fn insert_loadout(
             marker_mesh_url,
         ],
     )?;
-    Ok(conn.last_insert_rowid())
+    crate::schema_rework::echoed_id(conn)
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
@@ -1194,6 +1195,12 @@ pub struct TtsProfileStore {
 }
 
 impl TtsProfileStore {
+    pub(crate) fn lock(&self) -> std::sync::MutexGuard<'_, Connection> {
+        self.conn.lock().unwrap()
+    }
+}
+
+impl TtsProfileStore {
     pub fn open(path: &Path) -> Result<Self> {
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)
@@ -1366,14 +1373,14 @@ fn list_profiles_page(
     let mut stmt = conn.prepare(
         "
         SELECT
-            p.id, p.army_id, p.faction_label, u.nom, p.loadout, p.tts_loadout_id, l.nom_tts,
+            p.id, p.army_id, p.faction_label, u.nom, p.loadout, p.tts_loadout_id, p.nom_tts,
             l.silhouette_size, l.silhouette_type, l.marker_name,
             (SELECT COUNT(*) FROM tts_profiles c WHERE c.parent_profile_id = p.id),
             EXISTS (
                 SELECT 1 FROM tts_profile_sectorials s
                 WHERE s.profile_id = p.id AND s.army_id = ?1
             ),
-            l.description_tts
+            p.description_tts
         FROM tts_profiles p
         JOIN tts_units u ON u.id = p.unit_id
         JOIN tts_loadouts l ON l.id = p.tts_loadout_id
@@ -1556,7 +1563,7 @@ fn list_loadouts(
         "
         SELECT
             p.id, p.loadout, p.faction_label, l.marker_name, l.silhouette_size,
-            l.silhouette_type, l.description_tts,
+            l.silhouette_type, p.description_tts,
             (
                 SELECT COUNT(*)
                 FROM tts_profiles c
@@ -1631,7 +1638,7 @@ fn list_form_loadouts(
             "
             SELECT
                 p.id, f.id, u.nom, f.loadout, p.faction_label, l.marker_name, l.silhouette_size,
-                l.silhouette_type, l.description_tts
+                l.silhouette_type, f.description_tts
             FROM tts_profiles f
             JOIN tts_profiles p ON p.id = f.parent_profile_id
             JOIN tts_units u ON u.id = f.unit_id
@@ -1655,7 +1662,7 @@ fn list_form_loadouts(
             "
             SELECT
                 p.id, f.id, u.nom, f.loadout, p.faction_label, l.marker_name, l.silhouette_size,
-                l.silhouette_type, l.description_tts
+                l.silhouette_type, f.description_tts
             FROM tts_profiles f
             JOIN tts_profiles p ON p.id = f.parent_profile_id
             JOIN tts_units u ON u.id = f.unit_id
@@ -1749,7 +1756,7 @@ fn get_form(
     let mut stmt = conn.prepare(
         "
         SELECT
-            f.id, f.state_index, u.nom, f.loadout, l.nom_tts, l.description_tts,
+            f.id, f.state_index, u.nom, f.loadout, f.nom_tts, f.description_tts,
             l.silhouette_size, l.silhouette_type, l.marker_name, l.mesh_url,
             l.marker_mesh_url, f.parent_profile_id, f.tts_loadout_id
         FROM tts_profiles f
@@ -1862,7 +1869,7 @@ fn find_by_army_source(
     let mut stmt = conn.prepare(
         "
         SELECT
-            p.id, p.army_id, p.faction_label, u.nom, p.loadout, p.tts_loadout_id, l.nom_tts,
+            p.id, p.army_id, p.faction_label, u.nom, p.loadout, p.tts_loadout_id, p.nom_tts,
             l.silhouette_size, l.silhouette_type, l.marker_name,
             (SELECT COUNT(*) FROM tts_profiles c WHERE c.parent_profile_id = p.id),
             0,
@@ -2009,7 +2016,7 @@ fn get_profile(conn: &Connection, id: i64) -> Result<Option<TtsProfileDetail>> {
         "
         SELECT
             p.id, p.army_id, p.faction_slug, p.faction_label, u.nom, p.loadout,
-            p.tts_loadout_id, l.nom_tts, l.description_tts, l.silhouette_size, l.silhouette_type,
+            p.tts_loadout_id, p.nom_tts, p.description_tts, l.silhouette_size, l.silhouette_type,
             l.marker_name, l.mesh_url, l.marker_mesh_url
         FROM tts_profiles p
         JOIN tts_units u ON u.id = p.unit_id
@@ -2103,7 +2110,7 @@ fn list_forms(conn: &Connection, profile_id: i64) -> Result<Vec<TtsProfileForm>>
     let mut stmt = conn.prepare(
         "
         SELECT
-            p.id, p.state_index, u.nom, p.loadout, p.tts_loadout_id, l.nom_tts, l.description_tts,
+            p.id, p.state_index, u.nom, p.loadout, p.tts_loadout_id, p.nom_tts, p.description_tts,
             l.silhouette_size, l.silhouette_type, l.marker_name, l.mesh_url, l.marker_mesh_url
         FROM tts_profiles p
         JOIN tts_units u ON u.id = p.unit_id
@@ -2150,7 +2157,15 @@ fn update_profile(conn: &Connection, id: i64, update: &ProfileUpdate) -> Result<
         }
     }
     let tx = conn.unchecked_transaction()?;
-    let changed = tx.execute(
+    let exists: bool = tx.query_row(
+        "SELECT EXISTS(SELECT 1 FROM tts_profiles WHERE id = ?1 AND parent_profile_id IS NULL)",
+        params![id],
+        |row| row.get(0),
+    )?;
+    if !exists {
+        bail!("profil introuvable");
+    }
+    tx.execute(
         "
         UPDATE tts_profiles
         SET army_id = ?2,
@@ -2159,9 +2174,6 @@ fn update_profile(conn: &Connection, id: i64, update: &ProfileUpdate) -> Result<
         ",
         params![id, update.army_id, loadout],
     )?;
-    if changed == 0 {
-        bail!("profil introuvable");
-    }
     update_unit_and_loadout(
         &tx,
         id,
@@ -2187,7 +2199,19 @@ fn update_profile(conn: &Connection, id: i64, update: &ProfileUpdate) -> Result<
         }
         let form_kind = silhouette_kind(&form_description);
         let form_size = at_least_sapper_size(&form_nom, blank(form.silhouette_size.as_deref()));
-        let changed = tx.execute(
+        let form_exists: bool = tx.query_row(
+            "
+            SELECT EXISTS(
+                SELECT 1 FROM tts_profiles WHERE id = ?1 AND parent_profile_id = ?2
+            )
+            ",
+            params![form.id, id],
+            |row| row.get(0),
+        )?;
+        if !form_exists {
+            bail!("forme transformée introuvable");
+        }
+        tx.execute(
             "
             UPDATE tts_profiles
             SET loadout = ?3
@@ -2199,9 +2223,6 @@ fn update_profile(conn: &Connection, id: i64, update: &ProfileUpdate) -> Result<
                 bounded_text(&form.loadout, "loadout de la forme", 500)?,
             ],
         )?;
-        if changed == 0 {
-            bail!("forme transformée introuvable");
-        }
         update_unit_and_loadout(
             &tx,
             form.id,
@@ -2475,7 +2496,7 @@ mod tests {
             ],
         )
         .unwrap();
-        conn.last_insert_rowid()
+        crate::schema_rework::echoed_id(conn).unwrap()
     }
 
     #[test]
@@ -2622,7 +2643,7 @@ mod tests {
     }
 
     #[test]
-    fn adds_a_sapper_profile_at_silhouette_four_or_more() {
+    fn adds_a_sapper_profile_at_silhouette_three_or_more() {
         let raw = r#"{
           "ObjectStates": [{
             "Nickname": "[007B25]Ariadna[-] N5",
@@ -2645,10 +2666,10 @@ mod tests {
         assert_eq!(sapper.nom_tts, "[007B25]ZOUAVE[-] Rifle (sapper)");
         assert_eq!(sapper.isc, "ZOUAVE");
         assert_eq!(sapper.loadout, "Rifle");
-        assert_eq!(sapper.silhouette_size.as_deref(), Some("4"));
-        assert_eq!(sapper.marker_name.as_deref(), Some("Silhouette 4"));
+        assert_eq!(sapper.silhouette_size.as_deref(), Some("3"));
+        assert_eq!(sapper.marker_name.as_deref(), Some("Silhouette 3"));
         assert_eq!(sapper.silhouette_type.as_deref(), Some("normale"));
-        assert!(sapper.description_tts.contains("[B]S[/B]: 4"));
+        assert!(sapper.description_tts.contains("[B]S[/B]: 3"));
         assert!(!sapper.description_tts.contains("[B]S[/B]: 2"));
     }
 
