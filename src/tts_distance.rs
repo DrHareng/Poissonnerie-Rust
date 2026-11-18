@@ -168,8 +168,9 @@ fn rewrite_parenthetical_distances(description: &str, unit: DistanceUnit) -> Str
             i += 1;
             continue;
         }
+        let skill = skill_name_before(&chars, i);
         let inner: String = chars[i + 1..j].iter().collect();
-        if let Some(rewritten) = rewrite_distance_extra(&inner, unit) {
+        if let Some(rewritten) = rewrite_distance_extra(&inner, unit, skill.as_deref()) {
             result.push('(');
             result.push_str(&rewritten);
             result.push(')');
@@ -181,13 +182,61 @@ fn rewrite_parenthetical_distances(description: &str, unit: DistanceUnit) -> Str
     result
 }
 
-fn rewrite_distance_extra(inner: &str, unit: DistanceUnit) -> Option<String> {
-    let trimmed = inner.trim();
-    if trimmed.is_empty() {
+fn skill_name_before(chars: &[char], open_paren_idx: usize) -> Option<String> {
+    let mut end = open_paren_idx;
+    while end > 0 && chars[end - 1].is_whitespace() {
+        end -= 1;
+    }
+    if end == 0 {
         return None;
     }
-    // Ne touche pas aux MOD sans unité (Dodge(+3), Mimetism(-3), +1B…).
-    if !has_distance_unit_marker(trimmed) {
+    let mut start = end;
+    while start > 0 {
+        let c = chars[start - 1];
+        if c.is_alphabetic() || c == '-' || c == '_' || c == ' ' || c == '\'' {
+            start -= 1;
+        } else {
+            break;
+        }
+    }
+    let name: String = chars[start..end].iter().collect();
+    let name = name.trim();
+    if name.is_empty() {
+        None
+    } else {
+        Some(name.to_string())
+    }
+}
+
+fn normalize_skill_name(name: &str) -> String {
+    name.to_ascii_lowercase()
+        .replace(['-', '_'], " ")
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+fn is_cm_distance_skill(name: &str) -> bool {
+    matches!(
+        normalize_skill_name(name).as_str(),
+        "dodge" | "super jump" | "jump"
+    )
+}
+
+/// Valeurs Dodge / Super-Jump / Jump sans unité qui sont des distances en cm.
+fn is_implicit_cm_distance(value: f64) -> bool {
+    [2.5, 5.0, 7.5, 10.0]
+        .iter()
+        .any(|expected| (value - expected).abs() < 1e-6)
+}
+
+fn rewrite_distance_extra(
+    inner: &str,
+    unit: DistanceUnit,
+    skill: Option<&str>,
+) -> Option<String> {
+    let trimmed = inner.trim();
+    if trimmed.is_empty() {
         return None;
     }
     let (sign, rest) = match trimmed.chars().next() {
@@ -196,11 +245,19 @@ fn rewrite_distance_extra(inner: &str, unit: DistanceUnit) -> Option<String> {
         _ => ("", trimmed),
     };
     let (number_part, kind) = split_trailing_unit(rest);
-    let kind = kind?;
     let value = parse_number(number_part)?;
     let centimetres = match kind {
-        UnitKind::Cm => value,
-        UnitKind::Inch => value * CM_PER_INCH,
+        Some(UnitKind::Cm) => value,
+        Some(UnitKind::Inch) => value * CM_PER_INCH,
+        None => {
+            // Dodge(+3), Mimetism(-3), Jump(PH=11)… : laisser tel quel.
+            // Dodge/Super-Jump/Jump avec 2.5/5/7.5/10 : distances en cm.
+            let skill = skill?;
+            if !is_cm_distance_skill(skill) || !is_implicit_cm_distance(value) {
+                return None;
+            }
+            value
+        }
     };
     Some(format!(
         "{}{}{}",
@@ -208,18 +265,6 @@ fn rewrite_distance_extra(inner: &str, unit: DistanceUnit) -> Option<String> {
         format_number(centimetres, unit),
         unit_suffix(unit)
     ))
-}
-
-fn has_distance_unit_marker(value: &str) -> bool {
-    let lower = value.to_ascii_lowercase();
-    value.contains('"')
-        || value.contains('″')
-        || value.contains("''")
-        || lower.contains("cm")
-        || lower.contains("inch")
-        || lower
-            .split_whitespace()
-            .any(|part| part == "in" || part.ends_with("in"))
 }
 
 fn parse_number(raw: &str) -> Option<f64> {
@@ -290,8 +335,49 @@ mod tests {
     }
 
     #[test]
+    fn converts_unlabelled_dodge_and_super_jump_cm_distances() {
+        assert_eq!(
+            apply_distance_unit("Dodge(+2.5)", DistanceUnit::Cm),
+            "Dodge(+2.5cm)"
+        );
+        assert_eq!(
+            apply_distance_unit("Dodge(+5)", DistanceUnit::Inch),
+            "Dodge(+2\")"
+        );
+        assert_eq!(
+            apply_distance_unit("Dodge(+7.5)", DistanceUnit::Inch),
+            "Dodge(+3\")"
+        );
+        assert_eq!(
+            apply_distance_unit("Dodge(+10)", DistanceUnit::Cm),
+            "Dodge(+10cm)"
+        );
+        assert_eq!(
+            apply_distance_unit("Super-Jump(7.5)", DistanceUnit::Cm),
+            "Super-Jump(7.5cm)"
+        );
+        assert_eq!(
+            apply_distance_unit("Super-Jump(+7.5)", DistanceUnit::Inch),
+            "Super-Jump(+3\")"
+        );
+        assert_eq!(
+            apply_distance_unit("Super Jump(5)", DistanceUnit::Inch),
+            "Super Jump(2\")"
+        );
+        assert_eq!(
+            apply_distance_unit("Jump(7.5)", DistanceUnit::Cm),
+            "Jump(7.5cm)"
+        );
+        assert_eq!(
+            apply_distance_unit("Jump(+7.5)", DistanceUnit::Inch),
+            "Jump(+3\")"
+        );
+    }
+
+    #[test]
     fn leaves_non_distance_mods_alone() {
-        let raw = "Dodge(+3) ● Mimetism(-3) ● BS Attack(+1B)";
+        let raw =
+            "Dodge(+3) ● Mimetism(-3) ● BS Attack(+1B) ● Dodge(+1SD) ● Super-Jump(Jet Propulsion) ● Jump(PH=11) ● Jump(+3)";
         assert_eq!(apply_distance_unit(raw, DistanceUnit::Cm), raw);
         assert_eq!(apply_distance_unit(raw, DistanceUnit::Inch), raw);
     }
