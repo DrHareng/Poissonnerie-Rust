@@ -1,7 +1,7 @@
 //! Conversion des distances (MOV, Dodge(+…), etc.) pour l'export TTS.
 //!
-//! Les valeurs Army sont en pouces (1″ = 2,5 cm). On n'écrit l'unité
-//! qu'à la génération du sac, selon le choix cm / ″.
+//! Les descriptions stockées sont en centimètres (1″ = 2,5 cm). On n'écrit
+//! l'unité qu'à la génération du sac, selon le choix cm / ″.
 
 /// Unité d'affichage pour les distances dans les descriptions TTS.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -73,18 +73,19 @@ fn rewrite_mov_value(raw: &str, unit: DistanceUnit) -> Option<String> {
     if parts.is_empty() || parts.iter().any(|part| part.is_empty()) {
         return None;
     }
-    let mut inches = Vec::with_capacity(parts.len());
+    let mut centimetres = Vec::with_capacity(parts.len());
     for part in parts {
         let (number_part, part_unit) = split_trailing_unit(part);
         let token_unit = part_unit.or(shared_unit);
         let value = parse_number(number_part)?;
-        let as_inches = match token_unit {
-            Some(UnitKind::Cm) => value / CM_PER_INCH,
-            Some(UnitKind::Inch) | None => value, // Army : pouces bruts
+        // Profils stockés en cm : valeur nue = cm.
+        let as_cm = match token_unit {
+            Some(UnitKind::Inch) => value * CM_PER_INCH,
+            Some(UnitKind::Cm) | None => value,
         };
-        inches.push(as_inches);
+        centimetres.push(as_cm);
     }
-    let formatted = inches
+    let formatted = centimetres
         .iter()
         .map(|value| format_number(*value, unit))
         .collect::<Vec<_>>()
@@ -197,14 +198,14 @@ fn rewrite_distance_extra(inner: &str, unit: DistanceUnit) -> Option<String> {
     let (number_part, kind) = split_trailing_unit(rest);
     let kind = kind?;
     let value = parse_number(number_part)?;
-    let inches = match kind {
-        UnitKind::Cm => value / CM_PER_INCH,
-        UnitKind::Inch => value,
+    let centimetres = match kind {
+        UnitKind::Cm => value,
+        UnitKind::Inch => value * CM_PER_INCH,
     };
     Some(format!(
         "{}{}{}",
         sign,
-        format_number(inches, unit),
+        format_number(centimetres, unit),
         unit_suffix(unit)
     ))
 }
@@ -229,10 +230,11 @@ fn parse_number(raw: &str) -> Option<f64> {
     normalized.parse().ok()
 }
 
-fn format_number(inches: f64, unit: DistanceUnit) -> String {
+/// `centimetres` : valeur canonique (stockage).
+fn format_number(centimetres: f64, unit: DistanceUnit) -> String {
     let value = match unit {
-        DistanceUnit::Inch => inches,
-        DistanceUnit::Cm => inches * CM_PER_INCH,
+        DistanceUnit::Cm => centimetres,
+        DistanceUnit::Inch => centimetres / CM_PER_INCH,
     };
     let rounded = (value * 100.0).round() / 100.0;
     if (rounded - rounded.round()).abs() < 1e-9 {
@@ -257,15 +259,15 @@ mod tests {
     use super::*;
 
     #[test]
-    fn formats_mov_to_inches_and_cm() {
-        let raw = "[b]LI[/b]\n[b]MOV[/b]: 4-4\n[B]S[/B]: 2\n";
-        assert_eq!(
-            apply_distance_unit(raw, DistanceUnit::Inch),
-            "[b]LI[/b]\n[b]MOV[/b]: 4-4\"\n[B]S[/B]: 2\n"
-        );
+    fn formats_mov_from_cm_storage() {
+        let raw = "[b]LI[/b]\n[b]MOV[/b]: 10-10\n[B]S[/B]: 2\n";
         assert_eq!(
             apply_distance_unit(raw, DistanceUnit::Cm),
             "[b]LI[/b]\n[b]MOV[/b]: 10-10cm\n[B]S[/B]: 2\n"
+        );
+        assert_eq!(
+            apply_distance_unit(raw, DistanceUnit::Inch),
+            "[b]LI[/b]\n[b]MOV[/b]: 4-4\"\n[B]S[/B]: 2\n"
         );
     }
 
