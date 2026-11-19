@@ -33,6 +33,8 @@ struct TraitDraft {
 struct FormDraft {
     state_index: i64,
     isc: String,
+    /// Suffixe FTO / FTO-2 pour le nom TTS uniquement (pas le loadout).
+    fto_suffix: Option<String>,
     loadout: String,
     nom_tts: String,
     description_tts: String,
@@ -54,6 +56,8 @@ struct ProfileDraft {
     faction_label: String,
     /// Nom d'unité TTS : `option.name` (NISSE), pas le titre long `profiles[0].name`.
     isc: String,
+    /// Suffixe FTO / FTO-2 pour le nom TTS uniquement (pas le loadout).
+    fto_suffix: Option<String>,
     loadout: String,
     nom_tts: String,
     description_tts: String,
@@ -307,6 +311,7 @@ fn parsed_to_draft(profile: crate::tts_profile::ParsedProfile, armies: &[ArmyRow
             FormDraft {
                 state_index: form.state_index,
                 isc,
+                fto_suffix: None,
                 loadout,
                 nom_tts: form.nom_tts,
                 description_tts: form.description_tts,
@@ -328,6 +333,7 @@ fn parsed_to_draft(profile: crate::tts_profile::ParsedProfile, armies: &[ArmyRow
         faction_slug: profile.faction_slug,
         faction_label: profile.faction_label,
         isc,
+        fto_suffix: None,
         loadout,
         nom_tts: profile.nom_tts,
         description_tts: profile.description_tts,
@@ -513,18 +519,72 @@ fn absorb_units(
 /// Retire un suffixe « FTO » / « FTO-2 » pour rattacher l'option fireteam au même nom d'unité.
 fn normalize_unit_name(name: &str) -> String {
     let trimmed = name.trim();
-    let lower = trimmed.to_ascii_lowercase();
-    if let Some(pos) = lower.rfind(" fto") {
-        let after = &lower[pos + " fto".len()..];
-        let is_fto_suffix = after.is_empty()
-            || (after.starts_with('-')
-                && !after[1..].is_empty()
-                && after[1..].bytes().all(|b| b.is_ascii_digit()));
-        if is_fto_suffix {
-            return trimmed[..pos].trim_end().to_string();
-        }
+    if let Some((base, _)) = split_fto_suffix(trimmed) {
+        return base.to_string();
     }
     trimmed.to_string()
+}
+
+/// Extrait le suffixe « FTO » / « FTO-2 » d'un nom d'option Army, s'il est présent.
+fn split_fto_suffix(name: &str) -> Option<(&str, &str)> {
+    let trimmed = name.trim();
+    let lower = trimmed.to_ascii_lowercase();
+    let pos = lower.rfind(" fto")?;
+    let after = &lower[pos + " fto".len()..];
+    let is_fto_suffix = after.is_empty()
+        || (after.starts_with('-')
+            && !after[1..].is_empty()
+            && after[1..].bytes().all(|b| b.is_ascii_digit()));
+    if !is_fto_suffix {
+        return None;
+    }
+    let mention = trimmed[pos + 1..].trim();
+    let base = trimmed[..pos].trim_end();
+    if mention.is_empty() || base.is_empty() {
+        None
+    } else {
+        Some((base, mention))
+    }
+}
+
+fn fto_mention_from_option_name(name: &str) -> Option<String> {
+    split_fto_suffix(name).map(|(_, mention)| mention.to_string())
+}
+
+/// Mentions d'option à afficher dans le loadout : skills/équips (Hacker, FO…).
+/// FTO va sur le nom TTS, pas ici.
+fn option_loadout_mentions(names: &Names, option: &Value) -> String {
+    let option_skills = merged_refs(option.get("skills"), None);
+    let option_equips = merged_refs(option.get("equip"), None);
+    [
+        labeled_list(names, &option_skills, true),
+        labeled_list(names, &option_equips, false),
+    ]
+    .into_iter()
+    .filter(|chunk| !chunk.is_empty())
+    .collect::<Vec<_>>()
+    .join(", ")
+}
+
+fn with_loadout_mentions(loadout: &str, mentions: &str) -> String {
+    let loadout = loadout.trim();
+    let mentions = mentions.trim();
+    if mentions.is_empty() {
+        return loadout.to_string();
+    }
+    if loadout.is_empty() {
+        format!("({mentions})")
+    } else {
+        format!("{loadout} ({mentions})")
+    }
+}
+
+/// Nom d'unité côté TTS : `AQUILA` + éventuel `FTO` / `FTO-2`.
+fn tts_unit_label(isc: &str, fto_suffix: Option<&str>) -> String {
+    match fto_suffix.map(str::trim).filter(|value| !value.is_empty()) {
+        Some(fto) => format!("{} {fto}", isc.trim()),
+        None => isc.trim().to_string(),
+    }
 }
 
 /// Options marquées `disabled` au niveau du groupe restent importables si une option
@@ -600,28 +660,31 @@ fn build_profile(
     let equips = merged_refs(base.get("equip"), option.get("equip"));
     let mut loadout = loadout_label(names, &weapons);
     if loadout.is_empty() {
-        loadout = option
-            .get("name")
-            .and_then(Value::as_str)
-            .unwrap_or("Profil")
-            .to_string();
+        loadout = normalize_unit_name(
+            option
+                .get("name")
+                .and_then(Value::as_str)
+                .unwrap_or("Profil"),
+        );
+        if loadout.is_empty() {
+            loadout = "Profil".to_string();
+        }
     }
-    if !used_loadouts.insert(loadout.clone()) {
-        let option_skills = merged_refs(option.get("skills"), None);
-        let option_equips = merged_refs(option.get("equip"), None);
-        let extra = [
-            labeled_list(names, &option_skills, true),
-            labeled_list(names, &option_equips, false),
-        ]
-        .into_iter()
-        .filter(|text| !text.is_empty())
-        .collect::<Vec<_>>()
-        .join(", ");
-        let distinguished = if extra.is_empty() {
-            format!("{loadout} #{option_id}")
-        } else {
-            format!("{loadout} ({extra})")
-        };
+    // Hacker / Forward Observer / Hacking Device… toujours dans le loadout.
+    // FTO reste hors loadout : il enrichit seulement le nom TTS.
+    let fto_suffix = option
+        .get("name")
+        .and_then(Value::as_str)
+        .and_then(fto_mention_from_option_name);
+    let mentions = option_loadout_mentions(names, option);
+    loadout = with_loadout_mentions(&loadout, &mentions);
+    // Clé d'unicité : loadout affiché + FTO (évite « #id » entre FTO et non-FTO).
+    let uniqueness_key = match fto_suffix.as_deref() {
+        Some(fto) => format!("{loadout}\u{1f}{fto}"),
+        None => loadout.clone(),
+    };
+    if !used_loadouts.insert(uniqueness_key) {
+        let distinguished = format!("{loadout} #{option_id}");
         loadout = if used_loadouts.insert(distinguished.clone()) {
             distinguished
         } else {
@@ -658,6 +721,7 @@ fn build_profile(
         faction_slug: Some(catalog.slug.clone()),
         faction_label: catalog.name.clone(),
         isc: isc.to_string(),
+        fto_suffix,
         loadout,
         nom_tts: String::new(),
         description_tts: description,
@@ -966,6 +1030,11 @@ fn form_from_profile(
             .unwrap_or("Profil")
             .to_string();
     }
+    loadout = with_loadout_mentions(&loadout, &option_loadout_mentions(names, option));
+    let fto_suffix = option
+        .get("name")
+        .and_then(Value::as_str)
+        .and_then(fto_mention_from_option_name);
     let size = profile
         .get("s")
         .and_then(Value::as_i64)
@@ -975,6 +1044,7 @@ fn form_from_profile(
     Some(FormDraft {
         state_index,
         isc,
+        fto_suffix,
         loadout,
         nom_tts: String::new(),
         description_tts: description_from_traits(&traits),
@@ -1347,6 +1417,7 @@ fn attach_sapper_forms(profiles: &mut [ProfileDraft]) {
         profile.forms.push(FormDraft {
             state_index: 1000,
             isc: profile.isc.clone(),
+            fto_suffix: profile.fto_suffix.clone(),
             loadout: profile.loadout.clone(),
             nom_tts: String::new(),
             description_tts: description,
@@ -1432,6 +1503,7 @@ fn attach_ai_motorcycle_forms(
             let form = FormDraft {
                 state_index: 2,
                 isc: motorcycle_dismount_isc(&profiles[mounted].isc, &dismounted.isc),
+                fto_suffix: dismounted.fto_suffix.clone(),
                 loadout: dismounted.loadout.clone(),
                 nom_tts: String::new(),
                 description_tts: dismounted.description_tts.clone(),
@@ -1685,6 +1757,7 @@ fn push_pilot(profiles: &mut [ProfileDraft], vehicle: usize, operator: usize) {
     let form = FormDraft {
         state_index: 900,
         isc: profiles[operator].isc.clone(),
+        fto_suffix: profiles[operator].fto_suffix.clone(),
         loadout: profiles[operator].loadout.clone(),
         nom_tts: String::new(),
         description_tts: profiles[operator].description_tts.clone(),
@@ -1755,7 +1828,8 @@ fn apply_meshes_and_colors(
                 }
             }
         }
-        profile.nom_tts = format!("[{color}]{}[-] {}", profile.isc, profile.loadout);
+        let tts_isc = tts_unit_label(&profile.isc, profile.fto_suffix.as_deref());
+        profile.nom_tts = format!("[{color}]{tts_isc}[-] {}", profile.loadout);
         for form in &mut profile.forms {
             if let Some(mesh) = find_mesh(meshes, &form.isc, &form.loadout) {
                 form.mesh_url = mesh.mesh_url.clone();
@@ -1785,7 +1859,8 @@ fn apply_meshes_and_colors(
             } else {
                 ""
             };
-            form.nom_tts = format!("[{color}]{}[-] {}{suffix}", form.isc, form.loadout);
+            let form_tts_isc = tts_unit_label(&form.isc, form.fto_suffix.as_deref());
+            form.nom_tts = format!("[{color}]{form_tts_isc}[-] {}{suffix}", form.loadout);
         }
     }
 }
@@ -1924,12 +1999,18 @@ fn strip_hidden_skills_from_nom_tts(nom_tts: &str) -> String {
     }
 }
 
-/// Clé de partage loadout TTS : unité + groupe + loadout (sans compétences cachées) + silhouette.
-fn tts_share_key(profile: &ProfileDraft) -> (i64, i64, String, String, String) {
+/// Clé de partage loadout TTS : unité + groupe + loadout (sans compétences cachées) + FTO + silhouette.
+fn tts_share_key(profile: &ProfileDraft) -> (i64, i64, String, String, String, String) {
     (
         profile.unit_id,
         profile.group_id,
         strip_hidden_skills_from_loadout(&profile.loadout).to_ascii_lowercase(),
+        profile
+            .fto_suffix
+            .as_deref()
+            .unwrap_or("")
+            .trim()
+            .to_ascii_lowercase(),
         profile
             .silhouette_size
             .as_deref()
@@ -2051,7 +2132,8 @@ fn store_profiles(
     }
 
     // Loadouts TTS partagés : Lt / CoC / Counterintelligence absents du texte TTS.
-    let mut shared_loadout_ids: HashMap<(i64, i64, String, String, String), i64> = HashMap::new();
+    let mut shared_loadout_ids: HashMap<(i64, i64, String, String, String, String), i64> =
+        HashMap::new();
 
     let mut forms = 0usize;
     let mut sectorials = 0usize;
@@ -3090,6 +3172,99 @@ mod tests {
         assert_eq!(profiles.len(), 3);
         assert!(profiles.iter().all(|profile| profile.isc == "AQUILA"));
         assert!(!profiles.iter().any(|profile| profile.isc.contains("FTO")));
+        let by_option: BTreeMap<i64, &ProfileDraft> =
+            profiles.iter().map(|profile| (profile.option_id, profile)).collect();
+        assert_eq!(by_option[&1].loadout, "Heavy Machine Gun");
+        assert_eq!(by_option[&1].fto_suffix, None);
+        assert_eq!(by_option[&2].loadout, "MULTI Rifle");
+        assert_eq!(by_option[&2].fto_suffix.as_deref(), Some("FTO"));
+        assert_eq!(by_option[&3].loadout, "Heavy Machine Gun, MULTI Rifle");
+        assert_eq!(by_option[&3].fto_suffix.as_deref(), Some("FTO-2"));
+        assert_eq!(
+            tts_unit_label("AQUILA", by_option[&2].fto_suffix.as_deref()),
+            "AQUILA FTO"
+        );
+        assert_eq!(
+            tts_unit_label("AQUILA", by_option[&3].fto_suffix.as_deref()),
+            "AQUILA FTO-2"
+        );
+    }
+
+    #[test]
+    fn option_specialist_mentions_always_appear_in_loadout() {
+        let metadata = serde_json::json!({
+            "skills": [
+                {"id": 10, "name": "Hacker"},
+                {"id": 11, "name": "Forward Observer"},
+                {"id": 12, "name": "Lieutenant"}
+            ],
+            "weapons": [
+                {"id": 33, "name": "Combi Rifle"},
+                {"id": 69, "name": "Pistol"},
+                {"id": 5, "name": "CC Weapon"}
+            ],
+            "equips": [
+                {"id": 20, "name": "Hacking Device"}
+            ]
+        });
+        let army = ArmyRow {
+            id: 101,
+            parent_id: 101,
+            name: "PanOceania".into(),
+            slug: "panoceania".into(),
+        };
+        let document = serde_json::json!({
+            "filters": { "extras": [], "chars": [], "type": [], "peripheral": [] },
+            "units": [{
+                "id": 60,
+                "name": "BOLTS",
+                "factions": [101],
+                "profileGroups": [{
+                    "id": 1,
+                    "profiles": [{
+                        "name": "BOLTS",
+                        "type": 1, "chars": [], "move": [4,2],
+                        "cc": 14, "bs": 13, "ph": 11, "wip": 12, "arm": 2, "bts": 6, "w": 1,
+                        "str": false, "s": 2, "skills": [], "equip": [], "weapons": []
+                    }],
+                    "options": [
+                        {
+                            "id": 1, "name": "BOLTS", "disabled": false,
+                            "weapons": [{"id": 33}, {"id": 69}, {"id": 5}],
+                            "skills": [], "equip": [], "includes": []
+                        },
+                        {
+                            "id": 2, "name": "BOLTS", "disabled": false,
+                            "weapons": [{"id": 33}, {"id": 69}, {"id": 5}],
+                            "skills": [{"id": 10}], "equip": [{"id": 20}], "includes": []
+                        },
+                        {
+                            "id": 3, "name": "BOLTS", "disabled": false,
+                            "weapons": [{"id": 33}, {"id": 69}, {"id": 5}],
+                            "skills": [{"id": 11}], "equip": [], "includes": []
+                        },
+                        {
+                            "id": 4, "name": "BOLTS", "disabled": false,
+                            "weapons": [{"id": 33}, {"id": 69}, {"id": 5}],
+                            "skills": [{"id": 12}], "equip": [], "includes": []
+                        }
+                    ]
+                }]
+            }]
+        });
+        let names = names_from_metadata(&metadata);
+        let armies = vec![army.clone()];
+        let mut drafts = BTreeMap::new();
+        absorb_units(&mut drafts, &names, &army, &armies, &document);
+        let profiles: Vec<_> = drafts.into_values().collect();
+        assert_eq!(profiles.len(), 4);
+        let by_option: BTreeMap<i64, &ProfileDraft> =
+            profiles.iter().map(|profile| (profile.option_id, profile)).collect();
+        assert_eq!(by_option[&1].loadout, "Combi Rifle");
+        assert_eq!(by_option[&2].loadout, "Combi Rifle (Hacker, Hacking Device)");
+        assert_eq!(by_option[&3].loadout, "Combi Rifle (Forward Observer)");
+        // Lieutenant reste dans le loadout profil ; strip TTS au store.
+        assert_eq!(by_option[&4].loadout, "Combi Rifle (Lieutenant)");
     }
 
     #[test]
@@ -3141,6 +3316,7 @@ mod tests {
             faction_slug: Some("ariadna".into()),
             faction_label: "Ariadna".into(),
             isc: "NISSE".into(),
+            fto_suffix: None,
             loadout: "Combi Rifle".into(),
             nom_tts: "[FFFFFF]NISSE[-] Combi Rifle".into(),
             description_tts: "Regular".into(),
