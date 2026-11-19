@@ -219,15 +219,18 @@ fn normalize_skill_name(name: &str) -> String {
 fn is_cm_distance_skill(name: &str) -> bool {
     matches!(
         normalize_skill_name(name).as_str(),
-        "dodge" | "super jump" | "jump"
+        "dodge" | "super jump" | "jump" | "forward deployment"
     )
 }
 
-/// Valeurs Dodge / Super-Jump / Jump sans unité qui sont des distances en cm.
-fn is_implicit_cm_distance(value: f64) -> bool {
-    [2.5, 5.0, 7.5, 10.0]
-        .iter()
-        .any(|expected| (value - expected).abs() < 1e-6)
+/// Valeurs sans unité qui sont des distances en cm, selon la compétence.
+fn is_implicit_cm_distance(skill: &str, value: f64) -> bool {
+    let expected = match normalize_skill_name(skill).as_str() {
+        "dodge" | "super jump" | "jump" => &[2.5, 5.0, 7.5, 10.0][..],
+        "forward deployment" => &[10.0, 20.0][..],
+        _ => return false,
+    };
+    expected.iter().any(|v| (value - v).abs() < 1e-6)
 }
 
 fn rewrite_distance_extra(
@@ -251,9 +254,9 @@ fn rewrite_distance_extra(
         Some(UnitKind::Inch) => value * CM_PER_INCH,
         None => {
             // Dodge(+3), Mimetism(-3), Jump(PH=11)… : laisser tel quel.
-            // Dodge/Super-Jump/Jump avec 2.5/5/7.5/10 : distances en cm.
+            // Distances implicites en cm selon la compétence.
             let skill = skill?;
-            if !is_cm_distance_skill(skill) || !is_implicit_cm_distance(value) {
+            if !is_cm_distance_skill(skill) || !is_implicit_cm_distance(skill, value) {
                 return None;
             }
             value
@@ -371,6 +374,18 @@ mod tests {
         assert_eq!(
             apply_distance_unit("Jump(+7.5)", DistanceUnit::Inch),
             "Jump(+3\")"
+        );
+        assert_eq!(
+            apply_distance_unit("Forward Deployment(+10)", DistanceUnit::Cm),
+            "Forward Deployment(+10cm)"
+        );
+        assert_eq!(
+            apply_distance_unit("Forward Deployment(+20)", DistanceUnit::Inch),
+            "Forward Deployment(+8\")"
+        );
+        assert_eq!(
+            apply_distance_unit("Forward Deployment(20)", DistanceUnit::Cm),
+            "Forward Deployment(20cm)"
         );
     }
 
