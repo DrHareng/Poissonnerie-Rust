@@ -1282,27 +1282,16 @@ impl TtsProfileStore {
 
     pub fn list_labels(&self) -> Result<Vec<TtsProfileLabel>> {
         let conn = self.conn.lock().unwrap();
+        // Même source que l'admin unité : unit_loadouts, pas p.loadout.
         let mut labels: BTreeMap<i64, TtsProfileLabel> = BTreeMap::new();
-        let mut stmt = conn.prepare(
-            "
-            SELECT p.tts_loadout_id, u.nom, p.loadout
-            FROM tts_profiles p
-            JOIN tts_units u ON u.id = p.unit_id
-            JOIN tts_loadouts l ON l.id = p.tts_loadout_id
-            ORDER BY (p.parent_profile_id IS NOT NULL),
-                u.nom COLLATE NOCASE, p.loadout COLLATE NOCASE, p.id
-            ",
-        )?;
-        let profile_rows = stmt.query_map([], |row| {
-            Ok(TtsProfileLabel {
-                tts_loadout_id: row.get(0)?,
-                isc: row.get(1)?,
-                loadout: row.get(2)?,
-            })
-        })?;
-        for row in profile_rows {
-            let label = row?;
-            labels.entry(label.tts_loadout_id).or_insert(label);
+        for (unit_id, nom) in crate::unit_admin::all_units_with_profiles(&conn)? {
+            for loadout in crate::unit_admin::loadouts_for_unit(&conn, unit_id)? {
+                labels.entry(loadout.id).or_insert(TtsProfileLabel {
+                    tts_loadout_id: loadout.id,
+                    isc: nom.clone(),
+                    loadout: loadout.nom,
+                });
+            }
         }
         let mut rows: Vec<_> = labels.into_values().collect();
         rows.sort_by(|left, right| {
@@ -1703,36 +1692,19 @@ fn apply_loadout_differences(mut rows: Vec<(TtsProfileLoadout, String)>) -> Vec<
 }
 
 fn figurine_labels_for_army(conn: &Connection, army_id: i64) -> Result<Vec<TtsFigurineLabel>> {
+    // Même liste que l'onglet Loadout admin de l'unité (pas p.loadout des profils).
     let mut labels: BTreeMap<i64, TtsFigurineLabel> = BTreeMap::new();
-    let mut stmt = conn.prepare(
-        "
-        SELECT p.tts_loadout_id, u.nom, p.loadout, l.marker_name, l.silhouette_size, l.silhouette_type
-        FROM tts_profiles p
-        JOIN tts_units u ON u.id = p.unit_id
-        JOIN tts_loadouts l ON l.id = p.tts_loadout_id
-        LEFT JOIN tts_profiles par ON par.id = p.parent_profile_id
-        WHERE COALESCE(par.army_id, p.army_id) = ?1
-           OR EXISTS (
-                SELECT 1 FROM tts_profile_sectorials s
-                WHERE s.profile_id = COALESCE(p.parent_profile_id, p.id) AND s.army_id = ?1
-           )
-        ORDER BY (p.parent_profile_id IS NOT NULL),
-            u.nom COLLATE NOCASE, p.loadout COLLATE NOCASE, p.id
-        ",
-    )?;
-    let profile_rows = stmt.query_map(params![army_id], |row| {
-        Ok(TtsFigurineLabel {
-            tts_loadout_id: row.get(0)?,
-            isc: row.get(1)?,
-            loadout: row.get(2)?,
-            marker_name: row.get(3)?,
-            silhouette_size: row.get(4)?,
-            silhouette_type: row.get(5)?,
-        })
-    })?;
-    for row in profile_rows {
-        let label = row?;
-        labels.entry(label.tts_loadout_id).or_insert(label);
+    for (unit_id, nom) in crate::unit_admin::unit_ids_for_army(conn, army_id)? {
+        for loadout in crate::unit_admin::loadouts_for_unit(conn, unit_id)? {
+            labels.entry(loadout.id).or_insert(TtsFigurineLabel {
+                tts_loadout_id: loadout.id,
+                isc: nom.clone(),
+                loadout: loadout.nom,
+                marker_name: loadout.marker_name,
+                silhouette_size: loadout.silhouette_size,
+                silhouette_type: loadout.silhouette_type,
+            });
+        }
     }
     let mut rows: Vec<_> = labels.into_values().collect();
     rows.sort_by(|left, right| {

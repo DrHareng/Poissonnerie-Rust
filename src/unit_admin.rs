@@ -110,6 +110,96 @@ pub fn figurine_loadout_label(nom: &str) -> String {
     strip_tts_markup(nom).trim().to_string()
 }
 
+/// Loadouts d'une unité (même ensemble que l'onglet Loadout admin).
+pub fn loadouts_for_unit(conn: &Connection, unit_id: i64) -> Result<Vec<LoadoutChoice>> {
+    let mut loadout_stmt = conn.prepare(
+        "
+        SELECT l.id, l.nom, l.silhouette_size, l.silhouette_type, l.marker_name,
+               (SELECT COUNT(*) FROM unit_profiles p WHERE p.loadout_id = l.id),
+               (SELECT COUNT(*) FROM tts_figurine_rows g WHERE g.loadout_id = l.id)
+        FROM unit_loadouts l
+        WHERE l.id IN (
+            SELECT p.loadout_id FROM unit_profiles p WHERE p.unit_id = ?1
+            UNION
+            SELECT map.loadout_id
+            FROM unit_loadout_tts map
+            WHERE map.tts_id IN (
+                SELECT p.tts_id FROM unit_profiles p WHERE p.unit_id = ?1
+            )
+            UNION
+            SELECT g.loadout_id
+            FROM tts_figurine_rows g
+            WHERE g.loadout_id IN (
+                SELECT p.loadout_id FROM unit_profiles p WHERE p.unit_id = ?1
+                UNION
+                SELECT map.loadout_id
+                FROM unit_loadout_tts map
+                WHERE map.tts_id IN (
+                    SELECT p.tts_id FROM unit_profiles p WHERE p.unit_id = ?1
+                )
+            )
+        )
+        ORDER BY l.nom COLLATE NOCASE, l.id
+        ",
+    )?;
+    let loadouts = loadout_stmt
+        .query_map(params![unit_id], |row| {
+            let nom: String = row.get(1)?;
+            Ok(LoadoutChoice {
+                id: row.get(0)?,
+                nom: figurine_loadout_label(&nom),
+                silhouette_size: row.get(2)?,
+                silhouette_type: row.get(3)?,
+                marker_name: row.get(4)?,
+                profile_count: row.get(5)?,
+                figurine_count: row.get(6)?,
+            })
+        })?
+        .collect::<std::result::Result<Vec<_>, _>>()
+        .context("lecture des loadouts")?;
+    Ok(loadouts)
+}
+
+/// Unités présentes dans une sectorielle (profils catalogue ou liés).
+pub fn unit_ids_for_army(conn: &Connection, army_id: i64) -> Result<Vec<(i64, String)>> {
+    let mut stmt = conn.prepare(
+        "
+        SELECT DISTINCT u.id, u.nom
+        FROM units u
+        JOIN unit_profiles p ON p.unit_id = u.id
+        LEFT JOIN unit_profiles par ON par.id = p.parent_profile_id
+        WHERE COALESCE(par.army_id, p.army_id) = ?1
+           OR EXISTS (
+                SELECT 1 FROM unit_profile_sectorials s
+                WHERE s.profile_id = COALESCE(p.parent_profile_id, p.id) AND s.army_id = ?1
+           )
+        ORDER BY u.nom COLLATE NOCASE, u.id
+        ",
+    )?;
+    let units = stmt
+        .query_map(params![army_id], |row| Ok((row.get(0)?, row.get(1)?)))?
+        .collect::<std::result::Result<Vec<_>, _>>()
+        .context("lecture des unités de la sectorielle")?;
+    Ok(units)
+}
+
+/// Toutes les unités ayant au moins un loadout / profil.
+pub fn all_units_with_profiles(conn: &Connection) -> Result<Vec<(i64, String)>> {
+    let mut stmt = conn.prepare(
+        "
+        SELECT DISTINCT u.id, u.nom
+        FROM units u
+        JOIN unit_profiles p ON p.unit_id = u.id
+        ORDER BY u.nom COLLATE NOCASE, u.id
+        ",
+    )?;
+    let units = stmt
+        .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?
+        .collect::<std::result::Result<Vec<_>, _>>()
+        .context("lecture des unités")?;
+    Ok(units)
+}
+
 pub fn clean_figurine_loadout_names(conn: &Connection) -> Result<()> {
     if !table_exists(conn, "unit_loadouts")? {
         return Ok(());
@@ -313,53 +403,7 @@ pub fn unit_detail(conn: &Connection, unit_id: i64) -> Result<AdminUnitDetail> {
         .collect::<std::result::Result<Vec<_>, _>>()
         .context("lecture des profils TTS")?;
 
-    // Loadouts liés : utilisés par les profils, graines des TTS liés, ou encore
-    // référencés par des figurines autour de ces loadouts.
-    let mut loadout_stmt = conn.prepare(
-        "
-        SELECT l.id, l.nom, l.silhouette_size, l.silhouette_type, l.marker_name,
-               (SELECT COUNT(*) FROM unit_profiles p WHERE p.loadout_id = l.id),
-               (SELECT COUNT(*) FROM tts_figurine_rows g WHERE g.loadout_id = l.id)
-        FROM unit_loadouts l
-        WHERE l.id IN (
-            SELECT p.loadout_id FROM unit_profiles p WHERE p.unit_id = ?1
-            UNION
-            SELECT map.loadout_id
-            FROM unit_loadout_tts map
-            WHERE map.tts_id IN (
-                SELECT p.tts_id FROM unit_profiles p WHERE p.unit_id = ?1
-            )
-            UNION
-            SELECT g.loadout_id
-            FROM tts_figurine_rows g
-            WHERE g.loadout_id IN (
-                SELECT p.loadout_id FROM unit_profiles p WHERE p.unit_id = ?1
-                UNION
-                SELECT map.loadout_id
-                FROM unit_loadout_tts map
-                WHERE map.tts_id IN (
-                    SELECT p.tts_id FROM unit_profiles p WHERE p.unit_id = ?1
-                )
-            )
-        )
-        ORDER BY l.nom COLLATE NOCASE, l.id
-        ",
-    )?;
-    let loadouts = loadout_stmt
-        .query_map(params![unit_id], |row| {
-            let nom: String = row.get(1)?;
-            Ok(LoadoutChoice {
-                id: row.get(0)?,
-                nom: figurine_loadout_label(&nom),
-                silhouette_size: row.get(2)?,
-                silhouette_type: row.get(3)?,
-                marker_name: row.get(4)?,
-                profile_count: row.get(5)?,
-                figurine_count: row.get(6)?,
-            })
-        })?
-        .collect::<std::result::Result<Vec<_>, _>>()
-        .context("lecture des loadouts")?;
+    let loadouts = loadouts_for_unit(conn, unit_id)?;
 
     let mut figurines_stmt = conn.prepare(
         "

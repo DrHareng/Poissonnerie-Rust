@@ -648,18 +648,25 @@ watch(
     // Ne pas effacer le loadout tant que les libellés ne sont pas chargés
     // (ex. bascule sans sectorielle → catalogue global).
     if (labels.value.length === 0) return
-    const options = loadoutPickerOptions.value
-    if (options.length === 1) {
-      const only = options[0].value
+    const forNom = labels.value.filter((label) => label.nom.trim().toLowerCase() === key)
+    if (forNom.length === 0) return
+
+    // Réaligner le libellé sur le loadout admin lié (même liste que l’unité).
+    const byId =
+      draft.value.tts_loadout_id != null
+        ? forNom.find((label) => label.tts_loadout_id === draft.value.tts_loadout_id)
+        : undefined
+    if (byId) {
+      if (draft.value.loadout !== byId.loadout) draft.value.loadout = byId.loadout
+      return
+    }
+
+    if (forNom.length === 1) {
+      const only = forNom[0].loadout
       if (draft.value.loadout !== only) draft.value.loadout = only
       return
     }
-    const allowed = new Set(
-      labels.value
-        .filter((label) => label.nom.trim().toLowerCase() === key)
-        .map((label) => label.loadout.trim().toLowerCase()),
-    )
-    if (allowed.size === 0) return
+    const allowed = new Set(forNom.map((label) => label.loadout.trim().toLowerCase()))
     if (draft.value.loadout && !allowed.has(draft.value.loadout.trim().toLowerCase())) {
       draft.value.loadout = ''
     }
