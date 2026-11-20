@@ -766,13 +766,23 @@ impl Leaderboard {
     }
 
     pub fn delete_match(&mut self, id: u64) -> Result<MatchRecord> {
+        self.delete_match_with_options(id, false)
+    }
+
+    /// `allow_tournament_orphan` : autorise la suppression d'une partie qui a un
+    /// `tournament_id` mais n'est plus rattachée à un match de tournoi (doublon FK).
+    pub fn delete_match_with_options(
+        &mut self,
+        id: u64,
+        allow_tournament_orphan: bool,
+    ) -> Result<MatchRecord> {
         let index = self
             .matches
             .iter()
             .position(|record| record.id == id)
             .ok_or_else(|| anyhow::anyhow!("match introuvable"))?;
 
-        if self.matches[index].tournament_id.is_some() {
+        if self.matches[index].tournament_id.is_some() && !allow_tournament_orphan {
             bail!("impossible de supprimer un match lié à un tournoi");
         }
 

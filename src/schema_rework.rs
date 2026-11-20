@@ -860,11 +860,12 @@ END;
 CREATE TRIGGER tournament_matches_update
 INSTEAD OF UPDATE ON tournament_matches
 BEGIN
-    DELETE FROM matches
-    WHERE NEW.elo_match_id IS NOT NULL
-      AND id = (SELECT match_id FROM tournament_match_rows WHERE id = OLD.id)
-      AND id != NEW.elo_match_id
-      AND status = 'to_be_played';
+    -- Garder l'ancien match_id pour nettoyer le placeholder to_be_played
+    -- seulement après avoir basculé la FK (sinon FOREIGN KEY constraint).
+    INSERT OR REPLACE INTO schema_id_hold (k, v) VALUES (
+        'tm_match_old',
+        (SELECT match_id FROM tournament_match_rows WHERE id = OLD.id)
+    );
 
     INSERT OR REPLACE INTO schema_id_hold (k, v) VALUES (
         'tm_match',
@@ -972,6 +973,18 @@ BEGIN
         confirmed_at = NEW.confirmed_at,
         played_at = NEW.played_at
     WHERE id = OLD.id;
+
+    -- Placeholder to_be_played : supprimer seulement une fois détaché de la FK.
+    DELETE FROM matches
+    WHERE id = (SELECT v FROM schema_id_hold WHERE k = 'tm_match_old')
+      AND status = 'to_be_played'
+      AND (
+        (SELECT v FROM schema_id_hold WHERE k = 'tm_match') IS NULL
+        OR id != (SELECT v FROM schema_id_hold WHERE k = 'tm_match')
+      )
+      AND NOT EXISTS (
+        SELECT 1 FROM tournament_match_rows WHERE match_id = matches.id
+      );
 END;
 "#;
 

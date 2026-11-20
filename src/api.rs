@@ -2643,9 +2643,13 @@ async fn delete_match(
 ) -> Result<StatusCode, ApiError> {
     require_admin(&state, &session).await?;
 
+    let linked = state
+        .tournaments
+        .is_elo_match_linked(id)
+        .map_err(|error| ApiError::bad_request(error.to_string()))?;
     let mut board = state.board.lock().unwrap();
     board
-        .delete_match(id)
+        .delete_match_with_options(id, !linked)
         .map_err(|error| ApiError::bad_request(error.to_string()))?;
     board
         .save(&state.db_path)

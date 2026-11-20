@@ -5000,12 +5000,92 @@ impl TournamentStore {
         }
     }
 
+    /// True si une ligne de tournoi pointe encore vers ce match (vue ou placeholder).
+    pub fn is_elo_match_linked(&self, elo_match_id: u64) -> Result<bool> {
+        let conn = self.conn.lock().unwrap();
+        let linked: bool = conn.query_row(
+            "
+            SELECT EXISTS(
+                SELECT 1 FROM tournament_match_rows WHERE match_id = ?1
+            )
+            ",
+            params![elo_match_id as i64],
+            |row| row.get(0),
+        )?;
+        Ok(linked)
+    }
+
     pub fn set_elo_match_id(&self, match_id: i64, elo_match_id: Option<u64>) -> Result<()> {
         let conn = self.conn.lock().unwrap();
         conn.execute(
             "UPDATE tournament_matches SET elo_match_id = ?1 WHERE id = ?2",
             params![elo_match_id.map(|id| id as i64), match_id],
         )?;
+        Ok(())
+    }
+
+    /// `match_id` réel de `tournament_match_rows` (y compris placeholder `to_be_played`,
+    /// masqué par la vue `elo_match_id`).
+    pub fn linked_match_row(&self, tournament_match_id: i64) -> Result<Option<(u64, String)>> {
+        let conn = self.conn.lock().unwrap();
+        conn.query_row(
+            "
+            SELECT t.match_id, COALESCE(m.status, '')
+            FROM tournament_match_rows t
+            LEFT JOIN matches m ON m.id = t.match_id
+            WHERE t.id = ?1 AND t.match_id IS NOT NULL
+            ",
+            params![tournament_match_id],
+            |row| {
+                let id: i64 = row.get(0)?;
+                let status: String = row.get(1)?;
+                Ok((id as u64, status))
+            },
+        )
+        .optional()
+        .context("lecture du match lié")
+    }
+
+    /// Passe un placeholder `to_be_played` en `in_progress` (même id, pas de doublon).
+    pub fn promote_to_be_played_match(
+        &self,
+        match_id: u64,
+        player1_army_id: u32,
+        player2_army_id: u32,
+        created_by: &str,
+        tournament_phase: Option<&str>,
+        scenario_id: Option<i64>,
+        scenario_other: Option<&str>,
+    ) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+        let updated = conn.execute(
+            "
+            UPDATE matches SET
+                status = 'in_progress',
+                player1_army_id = ?2,
+                player2_army_id = ?3,
+                created_by = ?4,
+                tournament_phase = COALESCE(?5, tournament_phase),
+                scenario_id = COALESCE(?6, scenario_id),
+                scenario_other = COALESCE(?7, scenario_other),
+                outcome = '',
+                partie_step = 'joueurs',
+                recorded_at = CAST(strftime('%s','now') AS INTEGER)
+            WHERE id = ?1 AND status = 'to_be_played'
+            ",
+            params![
+                match_id as i64,
+                player1_army_id,
+                player2_army_id,
+                created_by,
+                tournament_phase,
+                scenario_id,
+                scenario_other,
+            ],
+        )?;
+        if updated == 0 {
+            bail!("match placeholder introuvable ou déjà démarré");
+        }
         Ok(())
     }
 
@@ -5961,6 +6041,90 @@ mod tests {
         assert_eq!(pools_final.structure, TournamentStructure::PoolsFinal);
         assert_eq!(pools_final.pool_count, 2);
         assert_eq!(pools_final.qualified_per_pool, 3);
+
+        let _ = fs::remove_file(db_path);
+    }
+
+    #[test]
+    fn set_elo_match_id_replaces_to_be_played_without_fk_error() {
+        let suffix = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let db_path = std::env::temp_dir().join(format!("poissonnerie-fk-tm-{suffix}.db"));
+        let _ = fs::remove_file(&db_path);
+        let store = TournamentStore::open(&db_path).unwrap();
+        let tournament = store
+            .create(&CreateTournamentRequest {
+                name: "FK test".into(),
+                bracket_format: "round_of_16".into(),
+            })
+            .unwrap();
+
+        {
+            let conn = store.conn.lock().unwrap();
+            conn.execute(
+                "
+                INSERT INTO tournament_matches (
+                    tournament_id, phase, status, player1, player2
+                ) VALUES (?1, 'pool', 'scheduled', 'Alice', 'Bob')
+                ",
+                params![tournament.id],
+            )
+            .unwrap();
+        }
+        let tm_id = {
+            let conn = store.conn.lock().unwrap();
+            conn.query_row(
+                "SELECT id FROM tournament_match_rows WHERE tournament_id = ?1",
+                params![tournament.id],
+                |row| row.get::<_, i64>(0),
+            )
+            .unwrap()
+        };
+        let placeholder = store.linked_match_row(tm_id).unwrap().unwrap();
+        assert_eq!(placeholder.1, "to_be_played");
+
+        let live_id = {
+            let conn = store.conn.lock().unwrap();
+            conn.execute(
+                "
+                INSERT INTO matches (
+                    player1, player2, outcome,
+                    player1_old, player1_new, player2_old, player2_new,
+                    player1_objectives, player1_survivors, player2_objectives, player2_survivors,
+                    status, counts_for_elo, recorded_at, tournament_id, tournament_phase
+                ) VALUES (
+                    'Alice', 'Bob', '',
+                    1000, 1000, 1000, 1000,
+                    0, 0, 0, 0,
+                    'in_progress', 0, 0, ?1, 'pool'
+                )
+                ",
+                params![tournament.id],
+            )
+            .unwrap();
+            conn.last_insert_rowid() as u64
+        };
+
+        store
+            .set_elo_match_id(tm_id, Some(live_id))
+            .expect("remplacer to_be_played ne doit pas violer la FK");
+
+        let linked = store.linked_match_row(tm_id).unwrap().unwrap();
+        assert_eq!(linked.0, live_id);
+        assert_eq!(linked.1, "in_progress");
+
+        let placeholder_left: i64 = {
+            let conn = store.conn.lock().unwrap();
+            conn.query_row(
+                "SELECT COUNT(*) FROM matches WHERE id = ?1",
+                params![placeholder.0 as i64],
+                |row| row.get(0),
+            )
+            .unwrap()
+        };
+        assert_eq!(placeholder_left, 0);
 
         let _ = fs::remove_file(db_path);
     }

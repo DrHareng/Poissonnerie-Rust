@@ -1683,11 +1683,16 @@ async fn start_tournament_partie(
         return Err(ApiError::bad_request("match déjà confirmé"));
     }
 
-    // Reprendre une partie déjà liée.
-    if let Some(elo_id) = tm.elo_match_id {
-        let board = state.board.lock().unwrap();
-        if let Some(existing) = board.get_match(elo_id) {
-            if existing.status == crate::match_record::MatchStatus::InProgress {
+    // Reprendre / promouvoir le match réellement lié (y compris placeholder to_be_played
+    // masqué par la vue elo_match_id).
+    let linked_row = state
+        .tournaments
+        .linked_match_row(id)
+        .map_err(|error| ApiError::bad_request(error.to_string()))?;
+    if let Some((elo_id, status)) = linked_row.as_ref() {
+        if status == "in_progress" {
+            let board = state.board.lock().unwrap();
+            if let Some(existing) = board.get_match(*elo_id) {
                 let resolver =
                     crate::display_name::PlayerDisplayResolver::new(&board, state.users.as_ref());
                 return Ok((
@@ -1793,6 +1798,38 @@ async fn start_tournament_partie(
     let pool_name = tm
         .pool_id
         .and_then(|pool_id| state.tournaments.pool_name(pool_id).ok().flatten());
+
+    // Préférer promouvoir le placeholder to_be_played déjà lié (évite un doublon + FK).
+    if let Some((elo_id, status)) = linked_row {
+        if status == "to_be_played" {
+            state
+                .tournaments
+                .promote_to_be_played_match(
+                    elo_id,
+                    army1,
+                    army2,
+                    &created_by,
+                    Some(tm.phase.as_str()),
+                    tm.scenario_id,
+                    tm.scenario_other.as_deref(),
+                )
+                .map_err(|error| ApiError::bad_request(error.to_string()))?;
+            let mut board = state.board.lock().unwrap();
+            *board = crate::store::Leaderboard::load(&state.db_path)
+                .map_err(|error| ApiError::bad_request(error.to_string()))?;
+            board.set_match_tournament_context(elo_id, tournament_name, pool_name);
+            board
+                .save(&state.db_path)
+                .map_err(|error| ApiError::bad_request(error.to_string()))?;
+            let record = board
+                .get_match(elo_id)
+                .cloned()
+                .ok_or_else(|| ApiError::bad_request("partie démarrée introuvable"))?;
+            let resolver =
+                crate::display_name::PlayerDisplayResolver::new(&board, state.users.as_ref());
+            return Ok((StatusCode::CREATED, Json(resolver.enrich_match(record))));
+        }
+    }
 
     let record = {
         let mut board = state.board.lock().unwrap();
