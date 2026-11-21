@@ -876,6 +876,8 @@ BEGIN
         END
     );
 
+    -- Ne pas recréer un placeholder si on détache explicitement un elo_match_id
+    -- actif (ex. save Leaderboard) : ça cassait la FK au DELETE du in_progress.
     INSERT INTO matches (
         player1, player2, outcome,
         player1_old, player1_new, player2_old, player2_new,
@@ -899,12 +901,14 @@ BEGIN
         NEW.player1_army_list_code, NEW.player2_army_list_code,
         NEW.player1_army_list_id, NEW.player2_army_list_id
     WHERE (SELECT v FROM schema_id_hold WHERE k = 'tm_match') IS NULL
+      AND NOT (OLD.elo_match_id IS NOT NULL AND NEW.elo_match_id IS NULL)
       AND NEW.player1 IS NOT NULL AND trim(NEW.player1) != ''
       AND NEW.player2 IS NOT NULL AND trim(NEW.player2) != '';
 
     UPDATE schema_id_hold SET v = last_insert_rowid()
     WHERE k = 'tm_match'
       AND v IS NULL
+      AND NOT (OLD.elo_match_id IS NOT NULL AND NEW.elo_match_id IS NULL)
       AND NEW.player1 IS NOT NULL AND trim(NEW.player1) != ''
       AND NEW.player2 IS NOT NULL AND trim(NEW.player2) != '';
 

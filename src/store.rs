@@ -222,14 +222,16 @@ impl Leaderboard {
             .transaction()
             .context("impossible de démarrer la transaction")?;
 
-        // `tournament_matches.elo_match_id` référence `matches(id)`.
-        // Le save réécrit toute la table matches : il faut détacher puis rattacher.
+        // `tournament_match_rows.match_id` → `matches(id)`.
+        // Le save réécrit les parties non-placeholder : détacher/rattacher
+        // **directement** sur la table (pas la vue) pour éviter le trigger qui
+        // recrée un to_be_played quand on met elo_match_id à NULL.
         let elo_links: Vec<(i64, i64)> = {
             let exists: bool = tx
                 .query_row(
                     "
                     SELECT 1 FROM sqlite_master
-                    WHERE type = 'table' AND name = 'tournament_matches'
+                    WHERE type = 'table' AND name = 'tournament_match_rows'
                     ",
                     [],
                     |_| Ok(true),
@@ -240,8 +242,10 @@ impl Leaderboard {
             } else {
                 let mut stmt = tx.prepare(
                     "
-                    SELECT id, elo_match_id FROM tournament_matches
-                    WHERE elo_match_id IS NOT NULL
+                    SELECT t.id, t.match_id
+                    FROM tournament_match_rows t
+                    JOIN matches m ON m.id = t.match_id
+                    WHERE COALESCE(m.status, '') != 'to_be_played'
                     ",
                 )?;
                 let rows =
@@ -251,10 +255,16 @@ impl Leaderboard {
                     links.push(row?);
                 }
                 drop(stmt);
-                tx.execute(
-                    "UPDATE tournament_matches SET elo_match_id = NULL WHERE elo_match_id IS NOT NULL",
-                    [],
-                )?;
+                for (tournament_match_id, match_id) in &links {
+                    tx.execute(
+                        "
+                        UPDATE tournament_match_rows
+                        SET match_id = NULL
+                        WHERE id = ?1 AND match_id = ?2
+                        ",
+                        params![tournament_match_id, match_id],
+                    )?;
+                }
                 links
             }
         };
@@ -419,7 +429,11 @@ impl Leaderboard {
                 .unwrap_or(false);
             if still_exists {
                 tx.execute(
-                    "UPDATE tournament_matches SET elo_match_id = ?1 WHERE id = ?2",
+                    "
+                    UPDATE tournament_match_rows
+                    SET match_id = ?1
+                    WHERE id = ?2
+                    ",
                     params![elo_match_id, tournament_match_id],
                 )?;
             }
@@ -3729,5 +3743,84 @@ mod tests {
             .apply_offline_partie_snapshot(record.id, InProgressMatchUpdate::default())
             .unwrap_err();
         assert!(error.to_string().contains("uniquement en ligne"));
+    }
+
+    #[test]
+    fn save_keeps_tournament_in_progress_link_across_progress_updates() {
+        use crate::tournament_store::{CreateTournamentRequest, TournamentStore};
+
+        let path = temp_db_path();
+        let _ = fs::remove_file(&path);
+
+        let mut board = Leaderboard::default();
+        board.add_player("Alice").unwrap();
+        board.add_player("Bob").unwrap();
+        board.save(&path).unwrap();
+
+        let tournaments = TournamentStore::open(&path).unwrap();
+        let tournament = tournaments
+            .create(&CreateTournamentRequest {
+                name: "Save FK".into(),
+                bracket_format: "round_of_16".into(),
+            })
+            .unwrap();
+        {
+            let conn = Connection::open(&path).unwrap();
+            conn.execute(
+                "
+                INSERT INTO tournament_matches (
+                    tournament_id, phase, status, player1, player2
+                ) VALUES (?1, 'pool', 'scheduled', 'Alice', 'Bob')
+                ",
+                params![tournament.id],
+            )
+            .unwrap();
+        }
+        let tm_id = {
+            let conn = Connection::open(&path).unwrap();
+            conn.query_row(
+                "SELECT id FROM tournament_match_rows WHERE tournament_id = ?1",
+                params![tournament.id],
+                |row| row.get::<_, i64>(0),
+            )
+            .unwrap()
+        };
+        let placeholder = tournaments.linked_match_row(tm_id).unwrap().unwrap();
+        assert_eq!(placeholder.1, "to_be_played");
+
+        tournaments
+            .promote_to_be_played_match(
+                placeholder.0,
+                101,
+                201,
+                "Alice",
+                Some("pool"),
+                None,
+                None,
+            )
+            .unwrap();
+
+        board = Leaderboard::load(&path).unwrap();
+        assert!(board.get_match(placeholder.0).is_some());
+
+        for step in ["scenario", "secondaires", "lieutenant", "resultat"] {
+            board
+                .update_in_progress_match(
+                    placeholder.0,
+                    InProgressMatchUpdate {
+                        partie_step: Some(step.into()),
+                        ..Default::default()
+                    },
+                )
+                .unwrap();
+            board
+                .save(&path)
+                .unwrap_or_else(|error| panic!("save échoue à l'étape {step}: {error}"));
+            let linked = tournaments.linked_match_row(tm_id).unwrap().unwrap();
+            assert_eq!(linked.0, placeholder.0);
+            assert_eq!(linked.1, "in_progress");
+        }
+
+        let _ = fs::remove_file(path);
     }
 }
