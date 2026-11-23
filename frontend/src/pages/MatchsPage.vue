@@ -27,7 +27,7 @@ import { PARTIE_STEP_LABELS, type PartieStep } from '@/composables/usePartieFlow
 import { jeuTabs } from '@/lib/pageTitleTabs'
 import { isListableArmy } from '@/lib/army'
 import { formatMatchRecordedDate } from '@/lib/tournamentMatchDisplay'
-import { partieResumeParam } from '@/lib/partieOffline'
+import { partieResumeParam, removeLocalPartiesForServerId } from '@/lib/partieOffline'
 import { canResumePartie } from '@/lib/matchParticipant'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
@@ -318,6 +318,7 @@ async function onDeleteInProgress(id: number) {
   deletingId.value = id
   try {
     await deleteMatch(id)
+    removeLocalPartiesForServerId(id)
     toast.success('Partie supprimée')
     await Promise.all([refreshInProgress(), refreshMatches()])
   } catch (error) {

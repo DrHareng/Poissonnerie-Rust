@@ -6,6 +6,7 @@ import {
   listLocalParties,
   localPartieToMatchRecord,
   partieResumeParam,
+  removeLocalPartie,
 } from '@/lib/partieOffline'
 
 const allMatches = ref<MatchRecord[]>([])
@@ -29,7 +30,10 @@ function matchesForPlayer(
   )
 }
 
-function mergeLocalDrafts(server: MatchRecord[]): MatchRecord[] {
+function mergeLocalDrafts(
+  server: MatchRecord[],
+  options: { pruneMissingServerIds?: boolean } = {},
+): MatchRecord[] {
   const serverUuids = new Set(
     server
       .map((match) => match.client_uuid?.toLowerCase())
@@ -38,6 +42,12 @@ function mergeLocalDrafts(server: MatchRecord[]): MatchRecord[] {
   const locals = listLocalParties()
     .filter((draft) => {
       if (draft.server_id && server.some((match) => match.id === draft.server_id)) {
+        return false
+      }
+      // Brouillon encore lié à un id serveur absent de la liste en cours :
+      // la partie a été supprimée / terminée — ne pas la resynchroniser.
+      if (options.pruneMissingServerIds && draft.server_id && draft.server_id > 0) {
+        removeLocalPartie(draft.client_uuid)
         return false
       }
       return !serverUuids.has(draft.client_uuid.toLowerCase())
@@ -58,8 +68,9 @@ export async function refreshMyInProgressMatches(): Promise<void> {
     loading.value = true
     try {
       const server = await fetchMyInProgressMatches()
-      allMatches.value = mergeLocalDrafts(server)
+      allMatches.value = mergeLocalDrafts(server, { pruneMissingServerIds: true })
     } catch {
+      // Hors ligne / erreur API : conserver les brouillons sans les purger.
       allMatches.value = mergeLocalDrafts([])
     } finally {
       loading.value = false

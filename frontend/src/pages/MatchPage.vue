@@ -34,6 +34,7 @@ import { secondaryImageSrc } from '@/lib/secondaryImages'
 import { choiceLabel } from '@/lib/lieutenantRoll'
 import { casualMatchContextLabel, matchCountsForElo } from '@/lib/matchElo'
 import { canResumePartie } from '@/lib/matchParticipant'
+import { removeLocalPartiesForServerId } from '@/lib/partieOffline'
 import { formatMatchRecordedDate } from '@/lib/tournamentMatchDisplay'
 import { tournamentPhaseDisplay } from '@/lib/tournamentPhase'
 import { jeuTabs } from '@/lib/pageTitleTabs'
@@ -381,7 +382,9 @@ async function onDelete() {
 
   deleting.value = true
   try {
-    await deleteMatch(match.value.id)
+    const deletedId = match.value.id
+    await deleteMatch(deletedId)
+    removeLocalPartiesForServerId(deletedId)
     toast.success('Match supprimé')
     router.push('/matchs')
   } catch (error) {

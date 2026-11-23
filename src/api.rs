@@ -2643,17 +2643,52 @@ async fn delete_match(
 ) -> Result<StatusCode, ApiError> {
     require_admin(&state, &session).await?;
 
-    let linked = state
+    let linked_tm = state
         .tournaments
-        .is_elo_match_linked(id)
+        .find_match_by_elo_match_id(id)
         .map_err(|error| ApiError::bad_request(error.to_string()))?;
-    let mut board = state.board.lock().unwrap();
-    board
-        .delete_match_with_options(id, !linked)
-        .map_err(|error| ApiError::bad_request(error.to_string()))?;
-    board
-        .save(&state.db_path)
-        .map_err(|error| ApiError::bad_request(error.to_string()))?;
+
+    let restore = linked_tm.as_ref().and_then(|tm| {
+        if tm.status != crate::tournament::TournamentMatchStatus::Scheduled {
+            return None;
+        }
+        let player1 = tm.player1.clone()?;
+        let player2 = tm.player2.clone()?;
+        Some((
+            tm.id,
+            player1,
+            player2,
+            tm.tournament_id,
+            tm.phase.as_str().to_string(),
+        ))
+    });
+
+    {
+        let mut board = state.board.lock().unwrap();
+        // Admin : autoriser la suppression même si liée à un tournoi (on restaure
+        // ensuite un placeholder scheduled si besoin).
+        board
+            .delete_match_with_options(id, true)
+            .map_err(|error| ApiError::bad_request(error.to_string()))?;
+        board
+            .save(&state.db_path)
+            .map_err(|error| ApiError::bad_request(error.to_string()))?;
+    }
+
+    if let Some((tm_id, player1, player2, tournament_id, phase)) = restore {
+        state
+            .tournaments
+            .restore_to_be_played_after_partie_delete(
+                tm_id,
+                &player1,
+                &player2,
+                tournament_id,
+                &phase,
+            )
+            .map_err(|error| ApiError::bad_request(error.to_string()))?;
+    } else if let Some(tm) = linked_tm {
+        let _ = state.tournaments.set_elo_match_id(tm.id, None);
+    }
 
     Ok(StatusCode::NO_CONTENT)
 }

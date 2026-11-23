@@ -53,6 +53,7 @@ import {
   loadPartieCatalog,
   newClientUuid,
   removeLocalPartie,
+  removeLocalPartiesForServerId,
   savePartieCatalog,
   upsertLocalPartie,
   type LocalPartieDraft,
@@ -892,7 +893,10 @@ async function deletePartie() {
 
   deleting.value = true
   try {
-    await deleteMatch(matchId.value)
+    const deletedId = matchId.value
+    await deleteMatch(deletedId)
+    removeLocalPartiesForServerId(deletedId)
+    if (clientUuid.value) removeLocalPartie(clientUuid.value)
     toast.success('Partie supprimée')
     reset()
     router.push('/matchs')

@@ -142,6 +142,12 @@ export function removeLocalPartie(clientUuid: string) {
   writeOutbox(readOutbox().filter((item) => item.client_uuid.toLowerCase() !== uuid))
 }
 
+/** Après suppression serveur : retire les brouillons liés à cet id. */
+export function removeLocalPartiesForServerId(serverId: number) {
+  if (!Number.isFinite(serverId) || serverId <= 0) return
+  writeOutbox(readOutbox().filter((item) => item.server_id !== serverId))
+}
+
 export function savePartieCatalog(catalog: Omit<PartieCatalogCache, 'saved_at'>) {
   const payload: PartieCatalogCache = { ...catalog, saved_at: Date.now() }
   localStorage.setItem(CATALOG_KEY, JSON.stringify(payload))
@@ -233,29 +239,40 @@ function draftToSyncPayload(draft: LocalPartieDraft) {
 }
 
 export async function flushOneLocalPartie(draft: LocalPartieDraft): Promise<MatchRecord> {
-  if (draft.server_id && draft.server_id > 0 && !draft.client_uuid) {
+  // Si on a déjà un id serveur, pousser le progrès dessus — ne pas recréer via /sync
+  // (sinon une suppression admin + brouillon local recrée une nouvelle partie).
+  if (draft.server_id && draft.server_id > 0) {
     const isCustom = draft.scenario?.mode === 'other'
-    await updateMatchProgress(draft.server_id, {
-      ...(isCustom
-        ? {
-            scenario_other: draft.scenario?.other,
-            scenario_url: draft.scenario?.url,
-          }
-        : draft.scenario?.id != null
-          ? { scenario_id: draft.scenario.id }
-          : {}),
-      player1_secondary_slugs: draft.player1_secondary_slugs,
-      player2_secondary_slugs: draft.player2_secondary_slugs,
-      secondary_pool_slugs: draft.secondary_pool_slugs.length
-        ? draft.secondary_pool_slugs
-        : undefined,
-      player1_chosen_secondary: draft.player1_chosen_secondary,
-      player2_chosen_secondary: draft.player2_chosen_secondary,
-      lieutenant_winner: draft.lieutenant?.winner,
-      lieutenant_winner_choice: draft.lieutenant?.winnerChoice,
-      lieutenant_other_choice: draft.lieutenant?.otherChoice,
-      partie_step: draft.partie_step,
-    })
+    try {
+      await updateMatchProgress(draft.server_id, {
+        ...(isCustom
+          ? {
+              scenario_other: draft.scenario?.other,
+              scenario_url: draft.scenario?.url,
+            }
+          : draft.scenario?.id != null
+            ? { scenario_id: draft.scenario.id }
+            : {}),
+        player1_secondary_slugs: draft.player1_secondary_slugs,
+        player2_secondary_slugs: draft.player2_secondary_slugs,
+        secondary_pool_slugs: draft.secondary_pool_slugs.length
+          ? draft.secondary_pool_slugs
+          : undefined,
+        player1_chosen_secondary: draft.player1_chosen_secondary,
+        player2_chosen_secondary: draft.player2_chosen_secondary,
+        lieutenant_winner: draft.lieutenant?.winner,
+        lieutenant_winner_choice: draft.lieutenant?.winnerChoice,
+        lieutenant_other_choice: draft.lieutenant?.otherChoice,
+        partie_step: draft.partie_step,
+      })
+    } catch (error) {
+      const message = error instanceof Error ? error.message.toLowerCase() : ''
+      if (message.includes('introuvable') || message.includes('not found')) {
+        removeLocalPartie(draft.client_uuid)
+        throw new Error('Partie serveur introuvable — brouillon local retiré')
+      }
+      throw error
+    }
     if (!draft.complete) {
       return { id: draft.server_id } as MatchRecord
     }

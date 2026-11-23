@@ -5046,6 +5046,75 @@ impl TournamentStore {
         .context("lecture du match lié")
     }
 
+    /// Après suppression d'une partie liée : détache et recrée un placeholder
+    /// `to_be_played` si le match tournoi est encore `scheduled`.
+    pub fn restore_to_be_played_after_partie_delete(
+        &self,
+        tournament_match_id: i64,
+        player1: &str,
+        player2: &str,
+        tournament_id: i64,
+        phase: &str,
+    ) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+        let status: String = conn
+            .query_row(
+                "SELECT status FROM tournament_match_rows WHERE id = ?1",
+                params![tournament_match_id],
+                |row| row.get(0),
+            )
+            .context("match tournoi introuvable")?;
+        if status != "scheduled" {
+            conn.execute(
+                "
+                UPDATE tournament_match_rows
+                SET match_id = NULL
+                WHERE id = ?1
+                ",
+                params![tournament_match_id],
+            )?;
+            return Ok(());
+        }
+
+        conn.execute(
+            "
+            UPDATE tournament_match_rows
+            SET match_id = NULL
+            WHERE id = ?1
+            ",
+            params![tournament_match_id],
+        )?;
+
+        conn.execute(
+            "
+            INSERT INTO matches (
+                player1, player2, outcome,
+                player1_old, player1_new, player2_old, player2_new,
+                player1_objectives, player1_survivors, player2_objectives, player2_survivors,
+                tournament_id, tournament_phase,
+                status, counts_for_elo, recorded_at
+            ) VALUES (
+                ?1, ?2, '',
+                0, 0, 0, 0,
+                0, 0, 0, 0,
+                ?3, ?4,
+                'to_be_played', 0, 0
+            )
+            ",
+            params![player1, player2, tournament_id, phase],
+        )?;
+        let new_id = conn.last_insert_rowid();
+        conn.execute(
+            "
+            UPDATE tournament_match_rows
+            SET match_id = ?1
+            WHERE id = ?2
+            ",
+            params![new_id, tournament_match_id],
+        )?;
+        Ok(())
+    }
+
     /// Passe un placeholder `to_be_played` en `in_progress` (même id, pas de doublon).
     pub fn promote_to_be_played_match(
         &self,
@@ -6121,6 +6190,77 @@ mod tests {
                 .unwrap();
             assert_eq!(status, "completed");
         }
+
+        let _ = fs::remove_file(db_path);
+    }
+
+    #[test]
+    fn restore_to_be_played_after_partie_delete_recreates_placeholder() {
+        let suffix = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let db_path = std::env::temp_dir().join(format!("poissonnerie-restore-tb-{suffix}.db"));
+        let _ = fs::remove_file(&db_path);
+        let store = TournamentStore::open(&db_path).unwrap();
+        let tournament = store
+            .create(&CreateTournamentRequest {
+                name: "Restore placeholder".into(),
+                bracket_format: "round_of_16".into(),
+            })
+            .unwrap();
+        {
+            let conn = store.conn.lock().unwrap();
+            conn.execute(
+                "
+                INSERT INTO tournament_matches (
+                    tournament_id, phase, status, player1, player2
+                ) VALUES (?1, 'pool', 'scheduled', 'Alice', 'Bob')
+                ",
+                params![tournament.id],
+            )
+            .unwrap();
+        }
+        let tm_id = {
+            let conn = store.conn.lock().unwrap();
+            conn.query_row(
+                "SELECT id FROM tournament_match_rows WHERE tournament_id = ?1",
+                params![tournament.id],
+                |row| row.get::<_, i64>(0),
+            )
+            .unwrap()
+        };
+        let placeholder = store.linked_match_row(tm_id).unwrap().unwrap();
+        store
+            .promote_to_be_played_match(
+                placeholder.0,
+                101,
+                201,
+                "Alice",
+                Some("pool"),
+                None,
+                None,
+            )
+            .unwrap();
+
+        {
+            let conn = store.conn.lock().unwrap();
+            conn.execute(
+                "UPDATE tournament_match_rows SET match_id = NULL WHERE id = ?1",
+                params![tm_id],
+            )
+            .unwrap();
+            conn.execute("DELETE FROM matches WHERE id = ?1", params![placeholder.0 as i64])
+                .unwrap();
+        }
+
+        store
+            .restore_to_be_played_after_partie_delete(tm_id, "Alice", "Bob", tournament.id, "pool")
+            .unwrap();
+
+        let restored = store.linked_match_row(tm_id).unwrap().unwrap();
+        assert_eq!(restored.1, "to_be_played");
+        assert!(restored.0 > 0);
 
         let _ = fs::remove_file(db_path);
     }
