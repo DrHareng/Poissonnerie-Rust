@@ -932,7 +932,17 @@ BEGIN
         player1_army_list_id = NEW.player1_army_list_id,
         player2_army_list_id = NEW.player2_army_list_id,
         tournament_id = NEW.tournament_id,
-        tournament_phase = NEW.phase
+        tournament_phase = NEW.phase,
+        -- Clôturer la partie liée dès qu'un résultat tournoi est saisi / confirmé.
+        status = CASE
+            WHEN NEW.status IN ('submitted', 'confirmed') THEN 'completed'
+            ELSE status
+        END,
+        recorded_at = CASE
+            WHEN NEW.status IN ('submitted', 'confirmed')
+                THEN COALESCE(NEW.played_at, NEW.submitted_at, recorded_at)
+            ELSE recorded_at
+        END
     WHERE id = (SELECT v FROM schema_id_hold WHERE k = 'tm_match');
 
     DELETE FROM matches

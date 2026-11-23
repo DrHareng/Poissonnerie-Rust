@@ -6046,6 +6046,86 @@ mod tests {
     }
 
     #[test]
+    fn submit_result_via_view_closes_linked_in_progress_match() {
+        let suffix = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let db_path = std::env::temp_dir().join(format!("poissonnerie-close-tm-{suffix}.db"));
+        let _ = fs::remove_file(&db_path);
+        let store = TournamentStore::open(&db_path).unwrap();
+        let tournament = store
+            .create(&CreateTournamentRequest {
+                name: "Close via trigger".into(),
+                bracket_format: "round_of_16".into(),
+            })
+            .unwrap();
+
+        {
+            let conn = store.conn.lock().unwrap();
+            conn.execute(
+                "
+                INSERT INTO tournament_matches (
+                    tournament_id, phase, status, player1, player2
+                ) VALUES (?1, 'pool', 'scheduled', 'Alice', 'Bob')
+                ",
+                params![tournament.id],
+            )
+            .unwrap();
+        }
+        let tm_id = {
+            let conn = store.conn.lock().unwrap();
+            conn.query_row(
+                "SELECT id FROM tournament_match_rows WHERE tournament_id = ?1",
+                params![tournament.id],
+                |row| row.get::<_, i64>(0),
+            )
+            .unwrap()
+        };
+        let placeholder = store.linked_match_row(tm_id).unwrap().unwrap();
+        store
+            .promote_to_be_played_match(
+                placeholder.0,
+                101,
+                201,
+                "Alice",
+                Some("pool"),
+                None,
+                None,
+            )
+            .unwrap();
+
+        {
+            let conn = store.conn.lock().unwrap();
+            conn.execute(
+                "
+                UPDATE tournament_matches
+                SET status = 'submitted',
+                    outcome = 'player1_win',
+                    player1_objectives = 4,
+                    player2_objectives = 1,
+                    player1_survivors = 100,
+                    player2_survivors = 50,
+                    submitted_at = 1
+                WHERE id = ?1
+                ",
+                params![tm_id],
+            )
+            .unwrap();
+            let status: String = conn
+                .query_row(
+                    "SELECT status FROM matches WHERE id = ?1",
+                    params![placeholder.0 as i64],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            assert_eq!(status, "completed");
+        }
+
+        let _ = fs::remove_file(db_path);
+    }
+
+    #[test]
     fn set_elo_match_id_replaces_to_be_played_without_fk_error() {
         let suffix = SystemTime::now()
             .duration_since(UNIX_EPOCH)

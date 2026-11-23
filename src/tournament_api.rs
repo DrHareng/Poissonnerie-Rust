@@ -1572,6 +1572,8 @@ async fn submit_tournament_match(
         )
         .map_err(|error| ApiError::bad_request(error.to_string()))?;
 
+    close_linked_in_progress_partie(&state, &tm)?;
+
     if tm.status == TournamentMatchStatus::Confirmed {
         if tm.is_forfeit {
             // standings updated in store
@@ -1613,6 +1615,8 @@ async fn confirm_tournament_match(
             state.k_factor,
         )
         .map_err(|error| ApiError::bad_request(error.to_string()))?;
+
+    close_linked_in_progress_partie(&state, &tm)?;
 
     if !tm.is_forfeit && tm.phase != crate::tournament::TournamentPhase::Pool {
         maybe_apply_bracket_match(&state, &tm)?;
@@ -1946,17 +1950,9 @@ async fn submit_tournament_from_partie(
         )
         .map_err(|error| ApiError::bad_request(error.to_string()))?;
 
-    // Clôturer la partie liée sans ELO (appliqué à la confirmation / finalisation poules).
+    // Propager listes d'armée puis clôturer la partie liée (sans ELO tant que
+    // confirmation / finalisation poules n'ont pas appliqué le delta).
     {
-        let outcome = tm
-            .outcome
-            .ok_or_else(|| ApiError::bad_request("résultat manquant"))?;
-        let scores = MatchScores {
-            player1_objectives: tm.player1_objectives,
-            player1_survivors: tm.player1_survivors,
-            player2_objectives: tm.player2_objectives,
-            player2_survivors: tm.player2_survivors,
-        };
         let mut board = state.board.lock().unwrap();
         if let Some(code) = tm.player1_army_list_code.as_deref() {
             if let Ok(list) = state.army_lists.get_or_create(code) {
@@ -1981,12 +1977,10 @@ async fn submit_tournament_from_partie(
             }
         }
         board
-            .complete_match(elo_id, outcome, state.k_factor, scores)
-            .map_err(|error| ApiError::bad_request(error.to_string()))?;
-        board
             .save(&state.db_path)
             .map_err(|error| ApiError::bad_request(error.to_string()))?;
     }
+    close_linked_in_progress_partie(&state, &tm)?;
 
     if tm.status == TournamentMatchStatus::Confirmed
         && !tm.is_forfeit
@@ -2238,6 +2232,49 @@ async fn get_player_tournaments(
         .player_tournament_results(&name)
         .map(Json)
         .map_err(|error| ApiError::bad_request(error.to_string()))
+}
+
+/// Clôture la partie `in_progress` liée quand le match tournoi a déjà un résultat.
+fn close_linked_in_progress_partie(
+    state: &AppState,
+    tm: &crate::tournament::TournamentMatch,
+) -> Result<(), ApiError> {
+    let elo_id = match tm.elo_match_id.or_else(|| {
+        state
+            .tournaments
+            .linked_match_row(tm.id)
+            .ok()
+            .flatten()
+            .map(|(id, _)| id)
+    }) {
+        Some(id) => id,
+        None => return Ok(()),
+    };
+
+    let Some(outcome) = tm.outcome else {
+        return Ok(());
+    };
+    let scores = MatchScores {
+        player1_objectives: tm.player1_objectives,
+        player1_survivors: tm.player1_survivors,
+        player2_objectives: tm.player2_objectives,
+        player2_survivors: tm.player2_survivors,
+    };
+
+    let mut board = state.board.lock().unwrap();
+    let Some(record) = board.get_match(elo_id) else {
+        return Ok(());
+    };
+    if record.status != crate::match_record::MatchStatus::InProgress {
+        return Ok(());
+    }
+    board
+        .complete_match(elo_id, outcome, state.k_factor, scores)
+        .map_err(|error| ApiError::bad_request(error.to_string()))?;
+    board
+        .save(&state.db_path)
+        .map_err(|error| ApiError::bad_request(error.to_string()))?;
+    Ok(())
 }
 
 fn apply_tournament_match_to_board(

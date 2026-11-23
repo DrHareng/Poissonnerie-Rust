@@ -1,6 +1,6 @@
 use std::collections::{HashMap, HashSet};
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use anyhow::{bail, Context, Result};
 use rusqlite::{params, Connection, OptionalExtension};
@@ -20,6 +20,13 @@ pub struct Leaderboard {
     pub players: HashMap<String, Player>,
     #[serde(default)]
     pub matches: Vec<MatchRecord>,
+    /// Plus grand `matches.id` connu (y compris `to_be_played` en base).
+    /// Évite les collisions UNIQUE quand le board ignore les placeholders.
+    #[serde(skip)]
+    highest_match_id: u64,
+    /// Chemin SQLite pour resynchroniser `highest_match_id` avant allocation.
+    #[serde(skip)]
+    db_path: Option<PathBuf>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -122,16 +129,22 @@ impl Leaderboard {
                     .with_context(|| format!("impossible de créer {}", parent.display()))?;
             }
             if Path::new(LEGACY_JSON_PATH).exists() {
-                let board = Self::load_from_json(Path::new(LEGACY_JSON_PATH))?;
+                let mut board = Self::load_from_json(Path::new(LEGACY_JSON_PATH))?;
+                board.bind_db_path(db_path);
                 board.save(db_path)?;
                 return Ok(board);
             }
-            return Ok(Self::default());
+            return Ok(Self {
+                db_path: Some(db_path.to_path_buf()),
+                ..Self::default()
+            });
         }
 
         let conn = Connection::open(db_path)
             .with_context(|| format!("impossible d'ouvrir {}", db_path.display()))?;
         migrate(&conn)?;
+        purge_orphan_tournament_in_progress(&conn)?;
+        close_finished_tournament_in_progress(&conn)?;
 
         let mut players = HashMap::new();
         {
@@ -200,12 +213,19 @@ impl Leaderboard {
         attach_match_reports(&conn, &mut matches)?;
 
         if players.is_empty() && matches.is_empty() && Path::new(LEGACY_JSON_PATH).exists() {
-            let board = Self::load_from_json(Path::new(LEGACY_JSON_PATH))?;
+            let mut board = Self::load_from_json(Path::new(LEGACY_JSON_PATH))?;
+            board.bind_db_path(db_path);
             board.save(db_path)?;
             return Ok(board);
         }
 
-        Ok(Self { players, matches })
+        let highest_match_id = max_match_id_in_db(&conn)?;
+        Ok(Self {
+            players,
+            matches,
+            highest_match_id,
+            db_path: Some(db_path.to_path_buf()),
+        })
     }
 
     pub fn save(&self, db_path: &Path) -> Result<()> {
@@ -226,6 +246,7 @@ impl Leaderboard {
         // Le save réécrit les parties non-placeholder : détacher/rattacher
         // **directement** sur la table (pas la vue) pour éviter le trigger qui
         // recrée un to_be_played quand on met elo_match_id à NULL.
+        let mut finished_tournament_match_ids: HashSet<i64> = HashSet::new();
         let elo_links: Vec<(i64, i64)> = {
             let exists: bool = tx
                 .query_row(
@@ -240,6 +261,19 @@ impl Leaderboard {
             if !exists {
                 Vec::new()
             } else {
+                {
+                    let mut stmt = tx.prepare(
+                        "
+                        SELECT match_id FROM tournament_match_rows
+                        WHERE match_id IS NOT NULL
+                          AND status IN ('submitted', 'confirmed')
+                        ",
+                    )?;
+                    let rows = stmt.query_map([], |row| row.get::<_, i64>(0))?;
+                    for row in rows {
+                        finished_tournament_match_ids.insert(row?);
+                    }
+                }
                 let mut stmt = tx.prepare(
                     "
                     SELECT t.id, t.match_id
@@ -274,6 +308,70 @@ impl Leaderboard {
             "DELETE FROM matches WHERE COALESCE(status, '') != 'to_be_played'",
             [],
         )?;
+
+        // Si un placeholder `to_be_played` occupe un id que le board va réécrire
+        // (ancien bug d'allocation), le retirer pour éviter UNIQUE(matches.id),
+        // tout en préservant le lien tournoi pour le rattacher après INSERT.
+        let mut placeholder_links: Vec<(i64, i64)> = Vec::new();
+        {
+            let board_ids: Vec<i64> = self.matches.iter().map(|record| record.id as i64).collect();
+            if !board_ids.is_empty() {
+                let exists: bool = tx
+                    .query_row(
+                        "
+                        SELECT 1 FROM sqlite_master
+                        WHERE type = 'table' AND name = 'tournament_match_rows'
+                        ",
+                        [],
+                        |_| Ok(true),
+                    )
+                    .unwrap_or(false);
+                if exists {
+                    let placeholders = board_ids
+                        .iter()
+                        .map(|id| id.to_string())
+                        .collect::<Vec<_>>()
+                        .join(",");
+                    let sql = format!(
+                        "
+                        SELECT t.id, t.match_id
+                        FROM tournament_match_rows t
+                        JOIN matches m ON m.id = t.match_id
+                        WHERE COALESCE(m.status, '') = 'to_be_played'
+                          AND t.match_id IN ({placeholders})
+                        "
+                    );
+                    let mut stmt = tx.prepare(&sql)?;
+                    let rows = stmt.query_map([], |row| {
+                        Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)?))
+                    })?;
+                    for row in rows {
+                        placeholder_links.push(row?);
+                    }
+                    drop(stmt);
+                    for (tournament_match_id, match_id) in &placeholder_links {
+                        tx.execute(
+                            "
+                            UPDATE tournament_match_rows
+                            SET match_id = NULL
+                            WHERE id = ?1 AND match_id = ?2
+                            ",
+                            params![tournament_match_id, match_id],
+                        )?;
+                    }
+                }
+                for id in &board_ids {
+                    tx.execute(
+                        "
+                        DELETE FROM matches
+                        WHERE id = ?1 AND COALESCE(status, '') = 'to_be_played'
+                        ",
+                        params![id],
+                    )?;
+                }
+            }
+        }
+
         let players_have_id: bool = tx
             .query_row(
                 "SELECT 1 FROM pragma_table_info('players') WHERE name = 'id'",
@@ -345,6 +443,11 @@ impl Leaderboard {
         }
 
         for record in &self.matches {
+            let status = if finished_tournament_match_ids.contains(&(record.id as i64)) {
+                MatchStatus::Completed.as_str()
+            } else {
+                record.status.as_str()
+            };
             tx.execute(
                 "
                 INSERT INTO matches (
@@ -388,7 +491,7 @@ impl Leaderboard {
                     record.scenario_other,
                     record.tournament_id,
                     record.tournament_phase,
-                    record.status.as_str(),
+                    status,
                     encode_slug_list(record.player1_secondary_slugs.as_deref()),
                     encode_slug_list(record.player2_secondary_slugs.as_deref()),
                     record.player1_chosen_secondary,
@@ -419,7 +522,9 @@ impl Leaderboard {
             }
         }
 
-        for (tournament_match_id, elo_match_id) in elo_links {
+        let mut reattach = elo_links;
+        reattach.extend(placeholder_links);
+        for (tournament_match_id, elo_match_id) in reattach {
             let still_exists: bool = tx
                 .query_row(
                     "SELECT 1 FROM matches WHERE id = ?1",
@@ -447,9 +552,46 @@ impl Leaderboard {
     fn load_from_json(path: &Path) -> Result<Self> {
         let content = fs::read_to_string(path)
             .with_context(|| format!("impossible de lire {}", path.display()))?;
-        let board: Self = serde_json::from_str(&content)
+        let mut board: Self = serde_json::from_str(&content)
             .with_context(|| format!("fichier JSON invalide : {}", path.display()))?;
+        board.resync_highest_from_matches();
         Ok(board)
+    }
+
+    fn bind_db_path(&mut self, db_path: &Path) {
+        self.db_path = Some(db_path.to_path_buf());
+        self.resync_highest_from_matches();
+    }
+
+    fn resync_highest_from_matches(&mut self) {
+        let memory_max = self.matches.iter().map(|record| record.id).max().unwrap_or(0);
+        self.highest_match_id = self.highest_match_id.max(memory_max);
+    }
+
+    /// Relit `MAX(matches.id)` en base (placeholders inclus) avant d'allouer un id.
+    pub fn sync_highest_match_id(&mut self) -> Result<()> {
+        let Some(db_path) = self.db_path.clone() else {
+            self.resync_highest_from_matches();
+            return Ok(());
+        };
+        if !db_path.exists() {
+            self.resync_highest_from_matches();
+            return Ok(());
+        }
+        let conn = Connection::open(&db_path)
+            .with_context(|| format!("impossible d'ouvrir {}", db_path.display()))?;
+        migrate(&conn)?;
+        let db_max = max_match_id_in_db(&conn)?;
+        self.highest_match_id = self.highest_match_id.max(db_max);
+        self.resync_highest_from_matches();
+        Ok(())
+    }
+
+    fn allocate_match_id(&mut self) -> Result<u64> {
+        self.sync_highest_match_id()?;
+        let next = self.highest_match_id + 1;
+        self.highest_match_id = next;
+        Ok(next)
     }
 
     pub fn add_player(&mut self, name: &str) -> Result<()> {
@@ -715,13 +857,7 @@ impl Leaderboard {
         player1_army_list_id: Option<i64>,
         player2_army_list_id: Option<i64>,
     ) -> Result<MatchRecord> {
-        let next_id = self
-            .matches
-            .iter()
-            .map(|record| record.id)
-            .max()
-            .unwrap_or(0)
-            + 1;
+        let next_id = self.allocate_match_id()?;
 
         let mut record = MatchRecord::from_update(
             next_id,
@@ -962,13 +1098,7 @@ impl Leaderboard {
         };
 
         let rating1 = self.players.get(&key1).unwrap().rating;
-        let next_id = self
-            .matches
-            .iter()
-            .map(|record| record.id)
-            .max()
-            .unwrap_or(0)
-            + 1;
+        let next_id = self.allocate_match_id()?;
 
         let has_scenario = scenario_id.is_some();
         let record = MatchRecord {
@@ -2849,6 +2979,95 @@ pub fn recompute_elo_from_matches(
     Ok(players)
 }
 
+fn max_match_id_in_db(conn: &Connection) -> Result<u64> {
+    let max_id: i64 = conn
+        .query_row("SELECT COALESCE(MAX(id), 0) FROM matches", [], |row| {
+            row.get(0)
+        })
+        .unwrap_or(0);
+    Ok(max_id.max(0) as u64)
+}
+
+fn has_tournament_match_rows(conn: &Connection) -> bool {
+    conn.query_row(
+        "
+        SELECT 1 FROM sqlite_master
+        WHERE type = 'table' AND name = 'tournament_match_rows'
+        ",
+        [],
+        |_| Ok(true),
+    )
+    .unwrap_or(false)
+}
+
+/// Supprime les `in_progress` rattachés à un tournoi mais plus liés à aucune
+/// ligne `tournament_match_rows` (doublons créés avant les correctifs FK).
+fn purge_orphan_tournament_in_progress(conn: &Connection) -> Result<()> {
+    if !has_tournament_match_rows(conn) {
+        return Ok(());
+    }
+
+    conn.execute(
+        "
+        DELETE FROM match_reports
+        WHERE match_id IN (
+            SELECT m.id
+            FROM matches m
+            WHERE COALESCE(m.status, '') = 'in_progress'
+              AND m.tournament_id IS NOT NULL
+              AND NOT EXISTS (
+                  SELECT 1 FROM tournament_match_rows t
+                  WHERE t.match_id = m.id
+              )
+        )
+        ",
+        [],
+    )?;
+    conn.execute(
+        "
+        DELETE FROM matches
+        WHERE COALESCE(status, '') = 'in_progress'
+          AND tournament_id IS NOT NULL
+          AND NOT EXISTS (
+              SELECT 1 FROM tournament_match_rows t
+              WHERE t.match_id = matches.id
+          )
+        ",
+        [],
+    )?;
+    Ok(())
+}
+
+/// Passe en `completed` les parties encore `in_progress` alors que le match de
+/// tournoi lié a déjà un résultat (`submitted` / `confirmed`).
+fn close_finished_tournament_in_progress(conn: &Connection) -> Result<()> {
+    if !has_tournament_match_rows(conn) {
+        return Ok(());
+    }
+
+    conn.execute(
+        "
+        UPDATE matches
+        SET status = 'completed',
+            partie_step = COALESCE(partie_step, 'resultat'),
+            recorded_at = CASE
+                WHEN recorded_at IS NULL OR recorded_at = 0
+                    THEN CAST(strftime('%s', 'now') AS INTEGER)
+                ELSE recorded_at
+            END
+        WHERE COALESCE(status, '') = 'in_progress'
+          AND id IN (
+              SELECT t.match_id
+              FROM tournament_match_rows t
+              WHERE t.match_id IS NOT NULL
+                AND t.status IN ('submitted', 'confirmed')
+          )
+        ",
+        [],
+    )?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -3749,7 +3968,14 @@ mod tests {
     fn save_keeps_tournament_in_progress_link_across_progress_updates() {
         use crate::tournament_store::{CreateTournamentRequest, TournamentStore};
 
-        let path = temp_db_path();
+        let path = std::env::temp_dir().join(format!(
+            "poissonnerie-save-fk-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
         let _ = fs::remove_file(&path);
 
         let mut board = Leaderboard::default();
@@ -3820,6 +4046,341 @@ mod tests {
             assert_eq!(linked.0, placeholder.0);
             assert_eq!(linked.1, "in_progress");
         }
+
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn allocate_match_id_skips_to_be_played_placeholders() {
+        use crate::tournament_store::{CreateTournamentRequest, TournamentStore};
+
+        let path = std::env::temp_dir().join(format!(
+            "poissonnerie-next-id-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let _ = fs::remove_file(&path);
+
+        let mut board = Leaderboard::default();
+        board.bind_db_path(&path);
+        board.add_player("Alice").unwrap();
+        board.add_player("Bob").unwrap();
+        board.save(&path).unwrap();
+
+        let tournaments = TournamentStore::open(&path).unwrap();
+        let tournament = tournaments
+            .create(&CreateTournamentRequest {
+                name: "Next id".into(),
+                bracket_format: "round_of_16".into(),
+            })
+            .unwrap();
+        {
+            let conn = Connection::open(&path).unwrap();
+            conn.execute(
+                "
+                INSERT INTO tournament_matches (
+                    tournament_id, phase, status, player1, player2
+                ) VALUES (?1, 'pool', 'scheduled', 'Alice', 'Bob')
+                ",
+                params![tournament.id],
+            )
+            .unwrap();
+        }
+        let placeholder_id = {
+            let conn = Connection::open(&path).unwrap();
+            conn.query_row(
+                "SELECT match_id FROM tournament_match_rows WHERE tournament_id = ?1",
+                params![tournament.id],
+                |row| row.get::<_, i64>(0),
+            )
+            .unwrap() as u64
+        };
+        assert!(placeholder_id > 0);
+
+        board = Leaderboard::load(&path).unwrap();
+        assert!(board.get_match(placeholder_id).is_none());
+
+        let started = board
+            .start_match("Alice", "Bob", 101, 201, "Alice", Vec::new(), Vec::new(), false)
+            .unwrap();
+        assert!(
+            started.id > placeholder_id,
+            "next_id={} doit dépasser le placeholder {}",
+            started.id,
+            placeholder_id
+        );
+        board.save(&path).unwrap();
+
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn load_closes_in_progress_when_tournament_result_already_submitted() {
+        use crate::tournament_store::{CreateTournamentRequest, TournamentStore};
+
+        let path = std::env::temp_dir().join(format!(
+            "poissonnerie-close-finished-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let _ = fs::remove_file(&path);
+
+        let mut board = Leaderboard::default();
+        board.bind_db_path(&path);
+        board.add_player("Alice").unwrap();
+        board.add_player("Bob").unwrap();
+        board.save(&path).unwrap();
+
+        let tournaments = TournamentStore::open(&path).unwrap();
+        let tournament = tournaments
+            .create(&CreateTournamentRequest {
+                name: "Close finished".into(),
+                bracket_format: "round_of_16".into(),
+            })
+            .unwrap();
+        {
+            let conn = Connection::open(&path).unwrap();
+            conn.execute(
+                "
+                INSERT INTO tournament_matches (
+                    tournament_id, phase, status, player1, player2
+                ) VALUES (?1, 'pool', 'scheduled', 'Alice', 'Bob')
+                ",
+                params![tournament.id],
+            )
+            .unwrap();
+        }
+        let tm_id = {
+            let conn = Connection::open(&path).unwrap();
+            conn.query_row(
+                "SELECT id FROM tournament_match_rows WHERE tournament_id = ?1",
+                params![tournament.id],
+                |row| row.get::<_, i64>(0),
+            )
+            .unwrap()
+        };
+        let placeholder = tournaments.linked_match_row(tm_id).unwrap().unwrap();
+        tournaments
+            .promote_to_be_played_match(
+                placeholder.0,
+                101,
+                201,
+                "Alice",
+                Some("pool"),
+                None,
+                None,
+            )
+            .unwrap();
+
+        {
+            let conn = Connection::open(&path).unwrap();
+            // Simule un résultat tournoi déjà saisi alors que la partie reste in_progress.
+            conn.execute(
+                "
+                UPDATE tournament_match_rows
+                SET status = 'submitted', submitted_at = 1
+                WHERE id = ?1
+                ",
+                params![tm_id],
+            )
+            .unwrap();
+            conn.execute(
+                "
+                UPDATE matches
+                SET status = 'in_progress',
+                    outcome = 'player1_win',
+                    player1_objectives = 3,
+                    player2_objectives = 1
+                WHERE id = ?1
+                ",
+                params![placeholder.0 as i64],
+            )
+            .unwrap();
+        }
+
+        board = Leaderboard::load(&path).unwrap();
+        let record = board.get_match(placeholder.0).expect("partie liée");
+        assert_eq!(record.status, MatchStatus::Completed);
+        assert!(board.in_progress_matches().is_empty());
+
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn save_replaces_colliding_to_be_played_placeholder() {
+        use crate::tournament_store::{CreateTournamentRequest, TournamentStore};
+
+        let path = std::env::temp_dir().join(format!(
+            "poissonnerie-unique-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let _ = fs::remove_file(&path);
+
+        let mut board = Leaderboard::default();
+        board.bind_db_path(&path);
+        board.add_player("Alice").unwrap();
+        board.add_player("Bob").unwrap();
+        board.save(&path).unwrap();
+
+        let tournaments = TournamentStore::open(&path).unwrap();
+        let tournament = tournaments
+            .create(&CreateTournamentRequest {
+                name: "Unique".into(),
+                bracket_format: "round_of_16".into(),
+            })
+            .unwrap();
+        {
+            let conn = Connection::open(&path).unwrap();
+            conn.execute(
+                "
+                INSERT INTO tournament_matches (
+                    tournament_id, phase, status, player1, player2
+                ) VALUES (?1, 'pool', 'scheduled', 'Alice', 'Bob')
+                ",
+                params![tournament.id],
+            )
+            .unwrap();
+        }
+        let placeholder_id = {
+            let conn = Connection::open(&path).unwrap();
+            conn.query_row(
+                "SELECT match_id FROM tournament_match_rows WHERE tournament_id = ?1",
+                params![tournament.id],
+                |row| row.get::<_, i64>(0),
+            )
+            .unwrap() as u64
+        };
+
+        // Simule l'ancien bug : une partie en mémoire réutilise l'id du placeholder.
+        board = Leaderboard::load(&path).unwrap();
+        let started = board
+            .start_match("Alice", "Bob", 101, 201, "Alice", Vec::new(), Vec::new(), false)
+            .unwrap();
+        // Force collision explicite.
+        if let Some(record) = board.matches.iter_mut().find(|m| m.id == started.id) {
+            record.id = placeholder_id;
+        }
+        board.highest_match_id = board.highest_match_id.max(placeholder_id);
+
+        board
+            .save(&path)
+            .unwrap_or_else(|error| panic!("save ne doit plus échouer en UNIQUE: {error}"));
+
+        let status: String = {
+            let conn = Connection::open(&path).unwrap();
+            conn.query_row(
+                "SELECT status FROM matches WHERE id = ?1",
+                params![placeholder_id as i64],
+                |row| row.get(0),
+            )
+            .unwrap()
+        };
+        assert_eq!(status, "in_progress");
+
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn load_purges_orphan_tournament_in_progress() {
+        use crate::tournament_store::{CreateTournamentRequest, TournamentStore};
+
+        let path = std::env::temp_dir().join(format!(
+            "poissonnerie-orphans-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let _ = fs::remove_file(&path);
+
+        let mut board = Leaderboard::default();
+        board.bind_db_path(&path);
+        board.add_player("Alice").unwrap();
+        board.add_player("Bob").unwrap();
+        board.save(&path).unwrap();
+
+        let tournaments = TournamentStore::open(&path).unwrap();
+        let tournament = tournaments
+            .create(&CreateTournamentRequest {
+                name: "Orphans".into(),
+                bracket_format: "round_of_16".into(),
+            })
+            .unwrap();
+        {
+            let conn = Connection::open(&path).unwrap();
+            conn.execute(
+                "
+                INSERT INTO tournament_matches (
+                    tournament_id, phase, status, player1, player2
+                ) VALUES (?1, 'pool', 'scheduled', 'Alice', 'Bob')
+                ",
+                params![tournament.id],
+            )
+            .unwrap();
+        }
+        let tm_id = {
+            let conn = Connection::open(&path).unwrap();
+            conn.query_row(
+                "SELECT id FROM tournament_match_rows WHERE tournament_id = ?1",
+                params![tournament.id],
+                |row| row.get::<_, i64>(0),
+            )
+            .unwrap()
+        };
+        let placeholder = tournaments.linked_match_row(tm_id).unwrap().unwrap();
+        tournaments
+            .promote_to_be_played_match(
+                placeholder.0,
+                101,
+                201,
+                "Alice",
+                Some("pool"),
+                None,
+                None,
+            )
+            .unwrap();
+
+        let orphan_id = {
+            let conn = Connection::open(&path).unwrap();
+            conn.execute(
+                "
+                INSERT INTO matches (
+                    player1, player2, outcome,
+                    player1_old, player1_new, player2_old, player2_new,
+                    tournament_id, tournament_phase, status, counts_for_elo, recorded_at
+                ) VALUES (
+                    'Alice', 'Bob', '',
+                    0, 0, 0, 0,
+                    ?1, 'pool', 'in_progress', 0, 0
+                )
+                ",
+                params![tournament.id],
+            )
+            .unwrap();
+            conn.last_insert_rowid() as u64
+        };
+
+        board = Leaderboard::load(&path).unwrap();
+        assert!(
+            board.get_match(orphan_id).is_none(),
+            "l'orphelin in_progress doit être purgé au load"
+        );
+        assert!(
+            board.get_match(placeholder.0).is_some(),
+            "la partie liée au tournoi doit rester"
+        );
+        assert_eq!(board.in_progress_matches().len(), 1);
 
         let _ = fs::remove_file(path);
     }
