@@ -945,7 +945,13 @@ mod tests {
     #[test]
     fn silhouette_config_covers_sizes_camo_and_imp() {
         let config = silhouette_config();
-        assert_eq!(config.sizes.len(), 7);
+        assert_eq!(config.sizes.len(), 8);
+        assert!(config.sizes.contains_key("8"));
+        assert_ne!(
+            config.sizes["2"].mesh_url,
+            config.sizes["2"].collider_url,
+            "silhouettes use a flat collider so they sink when flipped"
+        );
         assert!(config.camouflage.contains_key("camo-0"));
         assert!(config.camouflage.contains_key("camo-3"));
         assert!(config.camouflage.contains_key("camo-6"));
